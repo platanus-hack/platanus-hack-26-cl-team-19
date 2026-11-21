@@ -8,6 +8,13 @@ Recursos que se arman desde el ``deployment`` del modelo:
 * ``db_pool``: conexiones, ``pool por worker × workers × réplicas`` (tope: conexiones de la DB).
   Esperar más que el timeout del pool es un error.
 * ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo.
+* ``queue:<nombre>``: workers de cada cola (``deployment.queues``). Encolar es casi instantáneo
+  para la request; el trabajo espera un worker libre y usa la CPU de la DB si hace consultas
+  (con su propia conexión, no la del pool de la API). Si la cola está en su largo máximo, encolar
+  falla y la request termina con error ``queue_full``.
+
+La caché con ``on_miss`` sigue lo validado en JAJ-44: GET; si acierta, sigue sin hacer los pasos
+de ``on_miss``; si falla, los hace (ej. la consulta) y luego SET. Sin ``on_miss`` es solo una espera.
 
 Cada request sigue los pasos de su endpoint en orden. Toma una conexión en la primera consulta y
 la retiene hasta el final (una sesión por request, como el template de FastAPI). Con vCPU
@@ -27,14 +34,27 @@ from itertools import accumulate
 from typing import Any
 
 from app.engine.kernel import Resource, Sim
-from app.engine.metrics import ERROR_POOL_TIMEOUT, Recorder, latency_stats
+from app.engine.metrics import ERROR_POOL_TIMEOUT, ERROR_QUEUE_FULL, Recorder, latency_stats
 from app.models.architecture import (
     RESOURCE_API_CPU,
+    RESOURCE_BACKGROUND,
+    RESOURCE_CACHE,
     RESOURCE_DB_CONNECTION,
     ArchitectureModel,
     Endpoint,
+    QueueDeployment,
+    Step,
+    walk_steps,
 )
-from app.models.run import Bottleneck, EndpointStats, ResourceStats, Run, SecondSample
+from app.models.run import (
+    Bottleneck,
+    CacheStats,
+    EndpointStats,
+    QueueStats,
+    ResourceStats,
+    Run,
+    SecondSample,
+)
 
 RESOURCE_LABELS = {
     "api_cpu": "CPU de la API",
@@ -45,6 +65,25 @@ RESOURCE_LABELS = {
 SATURATION_WARNING = 0.9  # JAJ-44: sobre esto, latencia y errores se muestran como piso
 BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
+QUEUE_PREFIX = "queue:"
+
+
+def resource_label(name: str) -> str:
+    if name.startswith(QUEUE_PREFIX):
+        return f"workers de la cola {name[len(QUEUE_PREFIX):]}"
+    return RESOURCE_LABELS.get(name, name)
+
+
+class _QueueCounters:
+    __slots__ = ("config", "resource", "enqueued", "rejected", "processed", "latencies_ms")
+
+    def __init__(self, config: QueueDeployment, resource: Resource) -> None:
+        self.config = config
+        self.resource = resource
+        self.enqueued = 0
+        self.rejected = 0
+        self.processed = 0
+        self.latencies_ms: list[float] = []
 
 
 def simulate(
@@ -56,14 +95,18 @@ def simulate(
     rps: float | None = None,
     arrivals: str = "poisson",
     client_timeout_s: float | None = 30.0,
+    cache_hit_ratio: float | None = None,
 ) -> Run:
     """Simula ``duration_s`` segundos de tráfico y devuelve el ``Run``.
 
     ``rps`` reemplaza la tasa del escenario. ``arrivals``: ``poisson`` (usuarios reales) o
     ``uniform`` (como k6 con tasa constante, útil para comparar con mediciones).
+    ``cache_hit_ratio`` reemplaza la tasa de aciertos de todas las cachés con ``on_miss``.
     """
     if arrivals not in ARRIVALS:
         raise ValueError(f"arrivals debe ser uno de {ARRIVALS}")
+    if cache_hit_ratio is not None and not 0.0 <= cache_hit_ratio <= 1.0:
+        raise ValueError("cache_hit_ratio debe estar entre 0 y 1")
     rate = rps if rps is not None else model.scenario(scenario).rps
     if rate <= 0 or duration_s <= 0:
         raise ValueError("rps y duration_s deben ser mayores que 0")
@@ -82,7 +125,16 @@ def simulate(
         )
         pool_capacity = model.db.max_connections
     pool = Resource(sim, "db_pool", pool_capacity)
-    resources = [api_cpu, threads, pool, db_cpu]
+    queues = {
+        name: _QueueCounters(q, Resource(sim, QUEUE_PREFIX + name, q.workers))
+        for name, q in model.queues.items()
+    }
+    resources = [api_cpu, threads, pool, db_cpu, *(q.resource for q in queues.values())]
+    if cache_hit_ratio is not None and not any(
+        s.on_miss is not None for e in model.endpoints for s in walk_steps(e.steps)
+    ):
+        warnings.append("Se pidió una tasa de aciertos de caché, pero ningún endpoint tiene caché con on_miss.")
+    cache = [0, 0]  # aciertos, fallos
     rec = Recorder(duration_s, model.endpoints, resources)
     in_flight: dict[int, tuple[Endpoint, float]] = {}
     api_latency_s = model.api.latency_ms / 1000
@@ -93,6 +145,58 @@ def simulate(
         yield ms * scale / 1000
         res.release()
 
+    def run_steps(steps: tuple[Step, ...], conn: list[bool] | None) -> Generator[Any, Any, str | None]:
+        """Recorre los pasos y devuelve el error, si hubo. ``conn``: [tiene conexión] de la request;
+        ``None`` en un trabajo de una cola (usa su propia conexión y su propia CPU)."""
+        for step in steps:
+            res, ms = step.resource, step.time_ms
+            for _ in range(step.repeat):
+                if res == RESOURCE_DB_CONNECTION:
+                    if conn is not None and not conn[0]:
+                        if not (yield pool.acquire(pool_timeout_s)):
+                            return ERROR_POOL_TIMEOUT
+                        conn[0] = True
+                    if ms > 0:
+                        yield from hold(db_cpu, db_scale, ms)
+                elif res == RESOURCE_API_CPU and conn is not None:
+                    if ms > 0:
+                        yield from hold(api_cpu, api_scale, ms)
+                elif res == RESOURCE_CACHE and step.on_miss is not None:
+                    if ms > 0:
+                        yield ms / 1000  # GET
+                    hit = step.hit_ratio if cache_hit_ratio is None else cache_hit_ratio
+                    if sim.rng.random() < hit:
+                        cache[0] += 1
+                        continue
+                    cache[1] += 1
+                    error = yield from run_steps(step.on_miss, conn)
+                    if error:
+                        return error
+                    if ms > 0:
+                        yield ms / 1000  # SET
+                else:  # caché sin on_miss, servicio externo, encolar, CPU del worker: espera
+                    if ms > 0:
+                        yield ms / 1000
+                    if res == RESOURCE_BACKGROUND and step.queue is not None and not enqueue(step.queue):
+                        return ERROR_QUEUE_FULL
+        return None
+
+    def enqueue(name: str) -> bool:
+        q = queues[name]
+        if q.config.max_length is not None and q.resource.waiting >= q.config.max_length:
+            q.rejected += 1
+            return False
+        q.enqueued += 1
+        sim.start(job(q, sim.now))
+        return True
+
+    def job(q: _QueueCounters, t0: float) -> Generator[Any, Any, None]:
+        yield q.resource.acquire()
+        yield from run_steps(q.config.job_steps, None)
+        q.resource.release()
+        q.processed += 1
+        q.latencies_ms.append((sim.now - t0) * 1000)
+
     def request(ep: Endpoint, rid: int) -> Generator[Any, Any, None]:
         t0 = sim.now
         in_flight[rid] = (ep, t0)
@@ -102,25 +206,9 @@ def simulate(
             yield threads.acquire()
         if ep.base_cpu_ms > 0:
             yield from hold(api_cpu, api_scale, ep.base_cpu_ms)
-        has_connection, error = False, None
-        for step in ep.steps:
-            for _ in range(step.repeat):
-                if step.resource == RESOURCE_DB_CONNECTION:
-                    if not has_connection:
-                        if not (yield pool.acquire(pool_timeout_s)):
-                            error = ERROR_POOL_TIMEOUT
-                            break
-                        has_connection = True
-                    if step.time_ms > 0:
-                        yield from hold(db_cpu, db_scale, step.time_ms)
-                elif step.resource == RESOURCE_API_CPU:
-                    if step.time_ms > 0:
-                        yield from hold(api_cpu, api_scale, step.time_ms)
-                elif step.time_ms > 0:  # caché, servicio externo, encolar: espera sin recurso compartido
-                    yield step.time_ms / 1000
-            if error:
-                break
-        if has_connection:
+        conn = [False]
+        error = yield from run_steps(ep.steps, conn)
+        if conn[0]:
             pool.release()
         if not ep.is_async:
             threads.release()
@@ -157,8 +245,25 @@ def simulate(
         else:
             still_running += 1
 
+    hits, misses = cache
+    cache_stats = CacheStats(hits, misses, round(hits / (hits + misses), 4) if hits + misses else None)
+    queue_stats = [
+        QueueStats(
+            name=name,
+            workers=q.config.workers,
+            max_length=q.config.max_length,
+            enqueued=q.enqueued,
+            rejected=q.rejected,
+            processed=q.processed,
+            max_backlog=q.resource.max_waiting,
+            final_backlog=q.resource.waiting,
+            job_latency=latency_stats(q.latencies_ms),
+        )
+        for name, q in queues.items()
+    ]
     return _build_run(model, scenario if rps is None else f"{scenario} ({rate:g} req/s)", rate, seed,
-                      duration_s, arrivals, rec, resources, still_running, warnings, wall_start)
+                      duration_s, arrivals, rec, resources, still_running, warnings, wall_start,
+                      cache_stats, queue_stats)
 
 
 def _cores(sim: Sim, name: str, vcpu: float) -> tuple[Resource, float]:
@@ -171,11 +276,12 @@ def _cores(sim: Sim, name: str, vcpu: float) -> tuple[Resource, float]:
 
 def _build_run(model: ArchitectureModel, scenario: str, rate: float, seed: int, duration_s: float,
                arrivals: str, rec: Recorder, resources: list[Resource], still_running: int,
-               warnings: list[str], wall_start: float) -> Run:
+               warnings: list[str], wall_start: float, cache: CacheStats,
+               queues: list[QueueStats]) -> Run:
     resource_stats = [
         ResourceStats(
             name=r.name,
-            label=RESOURCE_LABELS.get(r.name, r.name),
+            label=resource_label(r.name),
             capacity=r.capacity,
             utilization=round(r.busy_time() / (r.capacity * duration_s), 4),
             max_queue=r.max_waiting,
@@ -222,6 +328,8 @@ def _build_run(model: ArchitectureModel, scenario: str, rate: float, seed: int, 
             )
             for ep_id, c in rec.by_endpoint.items()
         ],
+        cache=cache,
+        queues=queues,
         bottleneck=_bottleneck(resource_stats),
         warnings=warnings,
         series=[

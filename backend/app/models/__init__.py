@@ -5,20 +5,33 @@ from app.models.architecture import (
     ArchitectureModel,
     DbDeployment,
     Endpoint,
+    QueueDeployment,
     Scenario,
     Step,
     load_model,
 )
-from app.models.run import Bottleneck, EndpointStats, LatencyStats, ResourceStats, Run, SecondSample
+from app.models.run import (
+    Bottleneck,
+    CacheStats,
+    EndpointStats,
+    LatencyStats,
+    QueueStats,
+    ResourceStats,
+    Run,
+    SecondSample,
+)
 
 __all__ = [
     "ApiDeployment",
     "ArchitectureModel",
     "Bottleneck",
+    "CacheStats",
     "DbDeployment",
     "Endpoint",
     "EndpointStats",
     "LatencyStats",
+    "QueueDeployment",
+    "QueueStats",
     "ResourceStats",
     "Run",
     "Scenario",

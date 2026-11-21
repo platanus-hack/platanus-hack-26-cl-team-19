@@ -25,12 +25,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arrivals", choices=ARRIVALS, default="poisson")
     ap.add_argument("--client-timeout", type=float, default=30.0, help="segundos; 0 = sin timeout")
+    ap.add_argument("--cache-hit", type=float, default=None,
+                    help="tasa de aciertos (0 a 1) para todas las cachés con on_miss")
     ap.add_argument("--out", type=Path, default=None, help="guarda el Run completo en JSON")
     a = ap.parse_args(argv)
 
     model = load_model(a.model)
     run = simulate(model, a.scenario, seed=a.seed, duration_s=a.duration, rps=a.rps,
-                   arrivals=a.arrivals, client_timeout_s=a.client_timeout or None)
+                   arrivals=a.arrivals, client_timeout_s=a.client_timeout or None,
+                   cache_hit_ratio=a.cache_hit)
 
     lat = run.latency
     fmt = lambda v: "-" if v is None else f"{v:.1f} ms"  # noqa: E731
@@ -43,6 +46,11 @@ def main(argv: list[str] | None = None) -> int:
     for r in run.resources:
         print(f"{r.label:<21} {r.capacity:>9} {r.utilization:>6.0%} {r.max_queue:>9} {r.final_queue:>11} "
               f"{r.timeouts:>9} {r.mean_wait_ms:>10.1f} ms")
+    if run.cache.hits + run.cache.misses:
+        print(f"\ncaché: {run.cache.hits} aciertos, {run.cache.misses} fallos ({run.cache.hit_rate:.0%})")
+    for q in run.queues:
+        print(f"cola {q.name}: {q.enqueued} encolados, {q.processed} procesados, {q.rejected} rechazados, "
+              f"{q.final_backlog} esperando al final | trabajo p95 {fmt(q.job_latency.p95_ms)}")
     print(f"\ncuello de botella: {run.bottleneck.message}")
     for w in run.warnings:
         print(f"! {w}")
