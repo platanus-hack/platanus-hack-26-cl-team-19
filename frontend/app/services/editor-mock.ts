@@ -116,9 +116,16 @@ function mockCosts(model: ArchitectureModel): CostEstimate {
       { id: "db", label: "Base de datos", usd_month: assumed(25, "US$/mes") },
     ],
     unpriced: [],
+    missing: [],
     warnings: [],
   };
 }
+
+const demoFailureMissing = [
+  "traffic.requests_per_session",
+  "business.conversion",
+  "business.ticket_usd",
+];
 
 type DemoProject = Omit<Project, "versions"> & { versions: VersionDetail[] };
 
@@ -218,6 +225,16 @@ export function createMockEditorApi(
     },
     run: async (id, number, scenario) =>
       mockRun(getVersion(id, number).model, scenario),
+    results: async (id, number, scenario) => {
+      const { model } = getVersion(id, number);
+      return {
+        run: mockRun(model, scenario),
+        cost: mockCosts(model),
+        failure: null,
+        failure_missing: demoFailureMissing,
+        summary: null,
+      };
+    },
     getCosts: async (id, number) => mockCosts(getVersion(id, number).model),
     compare: async (id, base, target, scenario) => {
       const a = getVersion(id, base).model;
@@ -229,6 +246,8 @@ export function createMockEditorApi(
         a: a.deployment.api.replicas.value,
         b: b.deployment.api.replicas.value,
       };
+      const costA = mockCosts(a);
+      const costB = mockCosts(b);
       return {
         delta: {
           p95_ms: { a: before.p95, b: after.p95 },
@@ -240,8 +259,13 @@ export function createMockEditorApi(
           model_changes: replicas.a === replicas.b ? [] : [replicas],
           model_changes_truncated: false,
         },
-        cost_a: mockCosts(a),
-        cost_b: mockCosts(b),
+        cost_a: costA,
+        cost_b: costB,
+        cost_delta: { a: costA.total.value, b: costB.total.value, missing: [] },
+        failure_a: null,
+        failure_b: null,
+        failure_missing_a: demoFailureMissing,
+        failure_missing_b: demoFailureMissing,
         summary: null,
       };
     },

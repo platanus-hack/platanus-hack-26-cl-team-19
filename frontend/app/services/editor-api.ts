@@ -116,6 +116,19 @@ export interface CostEstimate {
   lines: { id: string; label: string; usd_month: ModelNumber }[];
   unpriced: string[];
   warnings: string[];
+  missing: string[];
+}
+
+export interface FailureCost {
+  message: string;
+}
+
+export interface VersionResults {
+  run: Run;
+  cost: CostEstimate;
+  failure: FailureCost | null;
+  failure_missing: string[];
+  summary: string | null;
 }
 
 interface MetricDelta {
@@ -133,6 +146,11 @@ export interface Comparison {
   };
   cost_a: CostEstimate;
   cost_b: CostEstimate;
+  cost_delta: { a: number; b: number; missing: string[] };
+  failure_a: FailureCost | null;
+  failure_b: FailureCost | null;
+  failure_missing_a?: string[];
+  failure_missing_b?: string[];
   summary: string | null;
 }
 
@@ -223,6 +241,11 @@ export function createEditorApi(
       }),
     run: (id: string, version: number, scenario: string) =>
       post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
+    results: (id: string, version: number, scenario: string) =>
+      post<VersionResults>(
+        `${versionPath(id, version)}/results`,
+        editorRunParams(scenario),
+      ),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),
     compare: (id: string, base: number, target: number, scenario: string) =>
