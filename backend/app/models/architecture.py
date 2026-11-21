@@ -9,7 +9,11 @@
 * ``queues``: colas con workers asíncronos (opcional, ``deployment.queues``).
 
 Cada número del JSON viene como ``{"value", "unit", "label", "source", "date"}``; aquí se usa
-``value``. La procedencia sigue en el JSON original para mostrarla en la app.
+``value``. La procedencia sigue en el JSON original para mostrarla en la app. También se acepta el
+número solo (``"replicas": 2``), en todos lados; quien lea el JSON original usa ``value()``.
+
+``load_model`` es el único lugar donde se valida el modelo (JAJ-101): forma y rangos, con el campo en
+el mensaje. Lo que pasa por aquí ya no hace fallar al motor, al costo ni a las rutas con un 500.
 
 Campos opcionales que el motor entiende y que build_model.py (JAJ-45) todavía no genera:
 
@@ -157,56 +161,92 @@ class ArchitectureModel:
         return self.scenarios[name]
 
 
+SCHEMA = "branchpoint.model/v1"
+
+
 def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
-    """Lee un modelo ``branchpoint.model/v1`` desde un archivo o un dict ya cargado."""
+    """Lee un modelo ``branchpoint.model/v1`` desde un archivo o un dict ya cargado.
+
+    Es el único lugar donde se valida el modelo (JAJ-101): la forma (objetos, listas, números) y los
+    rangos (réplicas ≥ 1, tiempos ≥ 0…). Lo que no calza da ``ValueError`` con el campo en el mensaje
+    (``deployment.api.replicas debe ser al menos 1 (es 0)``), y un campo obligatorio que falta da
+    ``KeyError`` con su ruta. La API responde ambos como 422 ``invalid_model``.
+
+    Los números se aceptan con procedencia (``{"value": 2, "label": …}``) o escalares (``2``), en
+    todos lados: quien lea el JSON original debe usar ``value()``. Un texto (``"2"``) no es un número.
+    """
     raw = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
+    _obj(raw, "el modelo")
     schema = raw.get("schema", "")
-    if not schema.startswith("branchpoint.model/v1"):
-        raise ValueError(f"Esquema no soportado: '{schema}' (se espera branchpoint.model/v1)")
+    if schema != SCHEMA:
+        raise ValueError(f"Esquema no soportado: '{schema}' (se espera {SCHEMA})")
     warnings: list[str] = []
 
-    dep = raw["deployment"]
-    api_raw, db_raw = dep["api"], dep["db"]
+    dep = _obj(_need(raw, "deployment"), "deployment")
+    api_raw = _obj(_need(dep, "api", "deployment."), "deployment.api")
+    db_raw = _obj(_need(dep, "db", "deployment."), "deployment.db")
+    w = "deployment.api"
+    _need(api_raw, "replicas", f"{w}.")
+    _need(api_raw, "workers", f"{w}.")
+    _need(api_raw, "vcpu", f"{w}.")
+    _number(api_raw.get("memory_gb"), f"{w}.memory_gb", gt=0)  # solo la lee el costo (JAJ-72)
     api = ApiDeployment(
-        replicas=int(value(api_raw["replicas"], 1)),
-        vcpu=float(value(api_raw["vcpu"], 1)),
-        workers=int(value(api_raw["workers"], 1)),
-        threads_per_worker=int(value(api_raw.get("threads_per_worker"), 40)),
-        latency_ms=float(value(api_raw.get("latency_ms"), 0.0)),
-        core_factor=_core_factor(api_raw, "deployment.api"),
+        replicas=_number(api_raw["replicas"], f"{w}.replicas", default=1, integer=True, minimum=1),
+        vcpu=float(_number(api_raw["vcpu"], f"{w}.vcpu", default=1, gt=0)),
+        workers=_number(api_raw["workers"], f"{w}.workers", default=1, integer=True, minimum=1),
+        threads_per_worker=_number(
+            api_raw.get("threads_per_worker"), f"{w}.threads_per_worker", default=40, integer=True, minimum=1
+        ),
+        latency_ms=float(_number(api_raw.get("latency_ms"), f"{w}.latency_ms", default=0.0, minimum=0)),
+        core_factor=_core_factor(api_raw, w),
         processor=_processor(api_raw),
     )
-    pool = db_raw.get("pool_per_worker", {})
+    w = "deployment.db"
+    _need(db_raw, "vcpu", f"{w}.")
+    pool = _obj(db_raw.get("pool_per_worker", {}), f"{w}.pool_per_worker")
+    pool_size = _number(pool.get("pool_size"), f"{w}.pool_per_worker.pool_size", default=5, integer=True, minimum=0)
+    overflow = _number(
+        pool.get("max_overflow"), f"{w}.pool_per_worker.max_overflow", default=0, integer=True, minimum=0
+    )
+    if pool_size + overflow < 1:
+        raise ValueError(f"{w}.pool_per_worker: pool_size + max_overflow debe ser al menos 1 (es 0)")
+    credits = _obj(db_raw.get("cpu_credits", {}), f"{w}.cpu_credits")
+    pooler = _obj(db_raw["pooler"], f"{w}.pooler") if "pooler" in db_raw else None
     db = DbDeployment(
-        vcpu=float(value(db_raw["vcpu"], 1)),
-        max_connections=_opt_int(value(db_raw.get("max_connections"))),
-        pool_per_worker=int(value(pool.get("pool_size"), 5)) + int(value(pool.get("max_overflow"), 0)),
-        pool_timeout_s=_opt_float(value(pool.get("pool_timeout_s"))),
-        core_factor=_core_factor(db_raw, "deployment.db"),
+        vcpu=float(_number(db_raw["vcpu"], f"{w}.vcpu", default=1, gt=0)),
+        # 0 conexiones no es "sin límite": sin límite es no declararlo (o null)
+        max_connections=_number(db_raw.get("max_connections"), f"{w}.max_connections", integer=True, minimum=1),
+        pool_per_worker=pool_size + overflow,
+        pool_timeout_s=_opt_float(_number(pool.get("pool_timeout_s"), f"{w}.pool_per_worker.pool_timeout_s", gt=0)),
+        core_factor=_core_factor(db_raw, w),
         processor=_processor(db_raw),
         plan=db_raw.get("plan"),
-        sustained_vcpu=_opt_float(value(db_raw.get("cpu_credits", {}).get("sustained_vcpu"))),
-        pooler_connections=_opt_int(value(db_raw["pooler"].get("client_connections"))) if "pooler" in db_raw else None,
+        sustained_vcpu=_opt_float(_number(credits.get("sustained_vcpu"), f"{w}.cpu_credits.sustained_vcpu")),
+        pooler_connections=None
+        if pooler is None
+        else _number(pooler.get("client_connections"), f"{w}.pooler.client_connections", integer=True, minimum=1),
     )
     if db.sustained_vcpu is not None and not 0 < db.sustained_vcpu <= db.vcpu:
         raise ValueError(
             f"deployment.db.cpu_credits.sustained_vcpu debe estar entre 0 y los vCPU ({db.vcpu}); es {db.sustained_vcpu}"
         )
-    if "pooler" in db_raw and db.pooler_connections is None:
+    if pooler is not None and db.pooler_connections is None:
         raise ValueError("deployment.db.pooler necesita client_connections (conexiones de clientes que acepta)")
 
-    queues = {
-        name: QueueDeployment(
+    queues = {}
+    for name, q in _obj(dep.get("queues", {}), "deployment.queues").items():
+        w = f"deployment.queues.{name}"
+        _obj(q, w)
+        queues[name] = QueueDeployment(
             name=name,
-            workers=int(value(q.get("workers"), 1)),
-            max_length=_opt_int(value(q.get("max_length"))),
-            job_steps=tuple(_load_step(s, f"cola {name}", warnings) for s in q.get("job_steps", [])),
+            workers=_number(q.get("workers"), f"{w}.workers", default=1, integer=True, minimum=1),
+            # un largo máximo de 0 rechaza todo aunque haya workers libres: sin límite es null
+            max_length=_number(q.get("max_length"), f"{w}.max_length", integer=True, minimum=1),
+            job_steps=tuple(
+                _load_step(s, f"cola {name}", warnings, f"{w}.job_steps[{i}]")
+                for i, s in enumerate(_list(q.get("job_steps", []), f"{w}.job_steps"))
+            ),
         )
-        for name, q in dep.get("queues", {}).items()
-    }
-    for q in queues.values():
-        if q.workers < 1:
-            raise ValueError(f"cola {q.name}: workers debe ser al menos 1")
     # una cola que no existe se trata como en un endpoint: solo se simula el encolar (antes, KeyError
     # al simular). Sin inferir la única cola: haría que un trabajo se encole a sí mismo.
     queues = {
@@ -219,7 +259,10 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
     for q in queues.values():
         _check_steps_per_request(q.job_steps, f"cola {q.name}")
 
-    endpoints = tuple(_load_endpoint(e, queues, warnings) for e in raw["endpoints"])
+    endpoints = tuple(
+        _load_endpoint(_obj(e, f"endpoints[{i}]"), queues, warnings, f"endpoints[{i}]")
+        for i, e in enumerate(_list(_need(raw, "endpoints"), "endpoints"))
+    )
     for e in endpoints:
         _check_steps_per_request(e.steps, e.id)
     total = sum(e.weight for e in endpoints)
@@ -227,13 +270,18 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         raise ValueError("Los pesos de los endpoints suman 0: no hay tráfico que simular")
     endpoints = tuple(Endpoint(e.id, e.weight / total, e.is_async, e.base_cpu_ms, e.steps) for e in endpoints)
 
-    scenarios = {
-        name: Scenario(name, float(value(sc["rps"])))
-        for name, sc in raw.get("traffic", {}).get("scenarios", {}).items()
-        if value(sc.get("rps")) is not None
-    }
+    traffic = _obj(raw.get("traffic", {}), "traffic")
+    _check_traffic_and_business(traffic, _obj(raw.get("business", {}), "business"))
+    scenarios = {}
+    for name, sc in _obj(traffic.get("scenarios", {}), "traffic.scenarios").items():
+        w = f"traffic.scenarios.{name}"
+        _obj(sc, w)  # {"rps": 5}, no 5: el escenario también puede traer multiplier y descripción
+        _number(sc.get("multiplier"), f"{w}.multiplier", gt=0)  # la lee el escenario del proyecto (JAJ-76)
+        rps = _number(sc.get("rps"), f"{w}.rps", gt=0)
+        if rps is not None:
+            scenarios[name] = Scenario(name, float(rps))
     return ArchitectureModel(
-        name=raw.get("repo", {}).get("path", "modelo"),
+        name=_obj(raw.get("repo", {}), "repo").get("path", "modelo"),
         api=api,
         db=db,
         endpoints=endpoints,
@@ -243,16 +291,22 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
     )
 
 
-def _load_step(s: dict[str, Any], where: str, warnings: list[str]) -> Step:
-    t = value(s.get("time"))
+def _load_step(s: Any, where: str, warnings: list[str], path: str) -> Step:
+    """Un paso. ``where`` nombra al endpoint o la cola en los avisos; ``path`` es la ruta del paso en el
+    JSON (``endpoints[0].steps[2]``) para los errores."""
+    _obj(s, path)
+    t = _number(s.get("time"), f"{path}.time", minimum=0)
     if t is None:
         warnings.append(f"{where}: el paso '{s.get('kind')}' en {s.get('at')} no tiene tiempo; se usa 0 ms")
         t = 0.0
     resource = s.get("resource")
     hit_ratio, on_miss = None, None
     if resource == RESOURCE_CACHE and "on_miss" in s:
-        on_miss = tuple(_load_step(m, where, warnings) for m in s["on_miss"])
-        hit_ratio = _opt_float(value(s.get("hit_ratio")))
+        on_miss = tuple(
+            _load_step(m, where, warnings, f"{path}.on_miss[{i}]")
+            for i, m in enumerate(_list(s["on_miss"], f"{path}.on_miss"))
+        )
+        hit_ratio = _opt_float(_number(s.get("hit_ratio"), f"{path}.hit_ratio"))
         if hit_ratio is None:
             warnings.append(
                 f"{where}: la caché en {s.get('at')} no tiene tasa de aciertos; se simula con 0 % "
@@ -265,7 +319,8 @@ def _load_step(s: dict[str, Any], where: str, warnings: list[str]) -> Step:
         kind=s.get("kind", "?"),
         resource=resource,
         time_ms=float(t),
-        repeat=max(1, int(value(s.get("repeat"), 1))),
+        # repeat 0 se lee como 1, como antes: el paso está en el código, así que se hace al menos una vez
+        repeat=max(1, _number(s.get("repeat"), f"{path}.repeat", default=1, integer=True, minimum=0)),
         shape=s.get("shape"),
         at=s.get("at"),
         hit_ratio=hit_ratio,
@@ -346,38 +401,121 @@ def _check_queue_cycles(queues: dict[str, QueueDeployment]) -> None:
         visit(name, [])
 
 
-def _load_endpoint(e: dict[str, Any], queues: dict[str, QueueDeployment], warnings: list[str]) -> Endpoint:
-    steps = [_resolve_queue(_load_step(s, e["id"], warnings), queues, e["id"], warnings) for s in e.get("steps", [])]
+def _load_endpoint(e: dict[str, Any], queues: dict[str, QueueDeployment], warnings: list[str], path: str) -> Endpoint:
+    eid = _need(e, "id", f"{path}.")
+    if not isinstance(eid, str) or not eid.strip():
+        raise ValueError(f"{path}.id debe ser un texto, como 'GET /items/' (es {eid!r})")
+    steps = [
+        _resolve_queue(_load_step(s, eid, warnings, f"{path}.steps[{i}]"), queues, eid, warnings)
+        for i, s in enumerate(_list(e.get("steps", []), f"{path}.steps"))
+    ]
     # api_cpu_ms del modelo incluye los pasos de CPU (ej. hash); la CPU base es el resto.
     # Solo cuentan los pasos que siempre se hacen (no los de on_miss).
     cpu_steps = sum(s.time_ms * s.repeat for s in steps if s.resource == RESOURCE_API_CPU)
-    base_cpu = max(0.0, float(value(e.get("api_cpu_ms"), 0.0)) - cpu_steps)
+    api_cpu = _number(e.get("api_cpu_ms"), f"{path}.api_cpu_ms", default=0.0, minimum=0)
+    base_cpu = max(0.0, float(api_cpu) - cpu_steps)
     return Endpoint(
-        id=e["id"],
-        weight=float(value(e.get("weight"), 0.0)),
+        id=eid,
+        weight=float(_number(e.get("weight"), f"{path}.weight", default=0.0, minimum=0)),
         is_async=bool(e.get("async", False)),
         base_cpu_ms=base_cpu,
         steps=tuple(steps),
     )
 
 
+def _check_traffic_and_business(traffic: dict[str, Any], business: dict[str, Any]) -> None:
+    """Los datos de tráfico y negocio que el motor no usa pero sí el costo (JAJ-72), el costo de fallar
+    (JAJ-74) y los escenarios del proyecto (JAJ-76). Son opcionales; si vienen, deben ser números en
+    rango, para que esas rutas no fallen con un 500 (JAJ-101)."""
+    _number(traffic.get("peak_rps"), "traffic.peak_rps", gt=0)
+    _number(traffic.get("mau"), "traffic.mau", minimum=0)
+    _number(traffic.get("requests_per_session"), "traffic.requests_per_session", gt=0)
+    profile = _obj(traffic.get("profile", {}), "traffic.profile")
+    _number(profile.get("sessions_per_month"), "traffic.profile.sessions_per_month", minimum=0)
+    _number(profile.get("requests_per_session"), "traffic.profile.requests_per_session", minimum=0)
+    conversion = _number(business.get("conversion"), "business.conversion", minimum=0)
+    if conversion is not None and conversion > 1:
+        raise ValueError(f"business.conversion es una fracción, entre 0 y 1 (es {conversion:g})")
+    _number(business.get("ticket_usd"), "business.ticket_usd", minimum=0)
+
+
 def _core_factor(raw: dict[str, Any], where: str) -> float:
     """``cpu_core_factor`` del modelo (JAJ-47). Sin él, los tiempos se usan tal cual (factor 1)."""
-    factor = _opt_float(value(raw.get("cpu_core_factor")))
-    if factor is None:
-        return 1.0
-    if factor <= 0:
-        raise ValueError(f"{where}.cpu_core_factor debe ser mayor que 0 (es {factor})")
-    return factor
+    factor = _opt_float(_number(raw.get("cpu_core_factor"), f"{where}.cpu_core_factor", gt=0))
+    return 1.0 if factor is None else factor
+
+
+# ---------- validación (JAJ-101) ----------
+
+
+def _kind(x: Any) -> str:
+    """Cómo se ve un valor del JSON, para los mensajes: 'una lista', 'un texto ('2')'…"""
+    if x is None:
+        return "null"
+    if isinstance(x, bool):
+        return f"{str(x).lower()}"
+    if isinstance(x, str):
+        return f"un texto ({x!r})"
+    if isinstance(x, list):
+        return "una lista"
+    if isinstance(x, dict):
+        return "un objeto"
+    return repr(x)
+
+
+def _need(d: dict[str, Any], key: str, prefix: str = "") -> Any:
+    """``d[key]``, o ``KeyError`` con la ruta completa (``deployment.api.replicas``) si falta."""
+    if key not in d:
+        raise KeyError(f"{prefix}{key}")
+    return d[key]
+
+
+def _obj(x: Any, where: str) -> dict[str, Any]:
+    if not isinstance(x, dict):
+        raise ValueError(f"{where} debe ser un objeto ({{…}}), no {_kind(x)}")
+    return x
+
+
+def _list(x: Any, where: str) -> list[Any]:
+    if not isinstance(x, list):
+        raise ValueError(f"{where} debe ser una lista ([…]), no {_kind(x)}")
+    return x
+
+
+def _number(
+    x: Any,
+    where: str,
+    *,
+    default: Any = None,
+    integer: bool = False,
+    minimum: float | None = None,
+    gt: float | None = None,
+) -> Any:
+    """Lee un número del modelo, con procedencia o escalar, y valida su rango.
+
+    ``None`` (o ``default``) si no viene. Un NaN se lee como ausente, como antes. ``ValueError`` con el
+    campo si no es un número (un texto, una lista, ``true``), si ``integer`` y tiene decimales, o si
+    queda fuera de rango: ``minimum`` es ≥ y ``gt`` es >."""
+    v = value(x, default)
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return None if v is None else default
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or math.isinf(v):
+        raise ValueError(f"{where} debe ser un número, no {_kind(v)}")
+    if integer:
+        if v != int(v):
+            raise ValueError(f"{where} debe ser un entero (es {v:g})")
+        v = int(v)
+    if minimum is not None and v < minimum:
+        rule = "no puede ser negativo" if minimum == 0 else f"debe ser al menos {minimum:g}"
+        raise ValueError(f"{where} {rule} (es {v:g})")
+    if gt is not None and v <= gt:
+        raise ValueError(f"{where} debe ser mayor que {gt:g} (es {v:g})")
+    return v
 
 
 def _processor(raw: dict[str, Any]) -> str | None:
     f = raw.get("cpu_core_factor")
     return f.get("processor") if isinstance(f, dict) else None
-
-
-def _opt_int(x: Any) -> int | None:
-    return None if x is None else int(x)
 
 
 def _opt_float(x: Any) -> float | None:

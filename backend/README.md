@@ -353,12 +353,20 @@ Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "mes
 
 | `code` | Cuándo |
 | -- | -- |
-| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, o pasa un límite del servicio (ver "Límites de trabajo" abajo). |
+| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, un valor tiene la forma o el rango equivocado (ver "Validación del modelo" abajo), o pasa un límite del servicio (ver "Límites de trabajo"). |
 | `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
 | `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo), o la simulación pasó el presupuesto de eventos (trae `max_events`). |
 | `invalid_operations` | Una operación de `/ops` no se puede aplicar. El `message` dice cuál y qué valores sí existen. No guarda nada. |
 | `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
+| `internal_error` | 500: un error inesperado del backend. El `message` no trae el detalle; el traceback queda en el log (JAJ-101). |
+
+- **Validación del modelo (JAJ-101).** `load_model` es el único lugar donde se valida un modelo, y todas las rutas que reciben uno pasan por ahí (`POST /projects`, `POST /runs`, `POST /projects/{id}/versions`, `POST /costs`, `POST /graph`, las `/ops`). Un modelo que pasa ya no hace fallar al motor, al costo ni a los escenarios con un 500.
+  - **Forma:** `deployment`, `deployment.api`, `deployment.db`, `traffic`, cada escenario, cada endpoint y cada paso son objetos; `endpoints` y `steps` son listas; el `id` de un endpoint es un texto.
+  - **Números:** con procedencia (`{"value": 2, …}`) o solos (`2`), en todos lados; quien lea el JSON original usa `value()`. Un texto (`"2"`) o `true` no son números.
+  - **Rangos:** réplicas, workers e hilos, enteros ≥ 1; vCPU > 0; tiempos, pesos, `api_cpu_ms` y `latency_ms` ≥ 0; `max_connections` y `max_length` ≥ 1, o `null` para "sin límite" (0 ya no significa "sin límite" ni "rechaza todo"); `pool_size + max_overflow` ≥ 1; las req/s y el multiplicador de un escenario > 0; `business.conversion` entre 0 y 1.
+  - **`schema`:** exactamente `branchpoint.model/v1`. Antes pasaba con un sufijo (`v1.1`) y Postgres lo rechazaba con un 500.
+  - El mensaje nombra el campo con su ruta: `deployment.api.replicas debe ser al menos 1 (es 0)`, `endpoints[0].steps[2].time no puede ser negativo (es -5)`.
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from app.models.architecture import value
+
 Origin = Literal["repo", "manual", "agente"]
 
 
@@ -82,7 +84,7 @@ class ProjectScenario:
         multiplicador y el modelo no trae ``traffic.peak_rps``."""
         if self.rps is not None:
             return self.rps
-        peak = ((model.get("traffic") or {}).get("peak_rps") or {}).get("value")
+        peak = value((model.get("traffic") or {}).get("peak_rps"))  # con procedencia o escalar (JAJ-101)
         if not peak or peak <= 0:
             raise ValueError(
                 f"El escenario '{self.name}' es ×{self.multiplier:g} el pico, pero el modelo no tiene "
@@ -153,8 +155,7 @@ def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
     """
     scenarios = []
     for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
-        multiplier = (sc.get("multiplier") or {}).get("value")
-        rps = (sc.get("rps") or {}).get("value")
+        multiplier, rps = value(sc.get("multiplier")), value(sc.get("rps"))  # con procedencia o escalar
         if multiplier is not None and multiplier > 0:
             scenarios.append(ProjectScenario(name, float(multiplier), None))
         elif rps is not None and rps > 0:

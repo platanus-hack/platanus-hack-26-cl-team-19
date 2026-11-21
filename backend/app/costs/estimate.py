@@ -101,7 +101,7 @@ def _traffic(raw: dict[str, Any]) -> tuple[float | None, float | None, str | Non
     mau, profile = t.get("mau"), t.get("profile")
     if not isinstance(mau, dict) or not isinstance(profile, dict):
         return None, None, None
-    sessions, per_session = profile.get("sessions_per_month"), profile.get("requests_per_session")
+    sessions, per_session = value(profile.get("sessions_per_month")), value(profile.get("requests_per_session"))
     if not sessions or not per_session or not value(mau):
         return value(mau), None, _label(mau)
     return value(mau), value(mau) * sessions * per_session, _weakest(_label(mau), _label(profile))
