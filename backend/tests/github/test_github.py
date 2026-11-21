@@ -55,7 +55,7 @@ class FakeGitHub(GitHubApp):
 
     def __init__(self) -> None:
         super().__init__(GitHubAppConfig("1", "branchpoint-test", "Iv1.test", SECRET, "sin-key"))
-        self.user_installations = {42: "alice-gh"}  # lo que ve el usuario dueño del code "ok"
+        self.user_installations_seen = {42: "alice-gh"}  # lo que ve el usuario dueño del code "ok"
         self.repos = {42: [Repo(7, "acme/tienda", True, "main", 42)]}
         self.tarballs = {"acme/tienda": tarball({"app/main.py": FASTAPI_APP})}
         self.fetched: list[tuple[int, str, str]] = []
@@ -63,12 +63,10 @@ class FakeGitHub(GitHubApp):
     def installation_token(self, installation_id: int, repo_name: str | None = None) -> str:
         return TOKEN
 
-    def verify_user_installation(self, code: str, installation_id: int) -> str:
+    def user_installations(self, code: str) -> dict[int, str]:
         if code != "ok":
             raise GitHubError(401, "GitHub rechazó la autorización (el código venció o ya se usó). Vuelve a conectar.")
-        if installation_id not in self.user_installations:
-            raise GitHubError(403, "Esa instalación de la GitHub App no es de tu cuenta de GitHub.")
-        return self.user_installations[installation_id]
+        return dict(self.user_installations_seen)
 
     def list_repos(self, installation_id: int) -> list[Repo]:
         if installation_id not in self.repos:
@@ -158,6 +156,28 @@ def test_callback_rejects_an_installation_of_someone_else(client):
     r = client.get("/github/callback", params={"installation_id": 99, "code": "ok", "state": state})
     assert "no es de tu cuenta" in redirect_params(r)["message"]
     assert client.get("/github/installations").json() == []
+
+
+def test_authorize_saves_every_installation_the_user_sees(client, github):
+    """Ya tenía la app instalada: OAuth sin instalar vuelve sin installation_id y se guardan todas."""
+    github.user_installations_seen = {42: "alice-gh", 43: "acme"}
+    url = client.get("/github/authorize-url").json()["url"]
+    assert url.startswith("https://github.com/login/oauth/authorize?client_id=Iv1.test&state=")
+    state = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["state"][0]
+    r = client.get("/github/callback", params={"code": "ok", "state": state})
+    assert redirect_params(r)["github"] == "ok"
+    assert {i["installation_id"] for i in client.get("/github/installations").json()} == {42, 43}
+
+
+def test_authorize_without_the_app_installed(client, github):
+    github.user_installations_seen = {}
+    r = client.get("/github/callback", params={"code": "ok", "state": sign_state(SECRET, None)})
+    assert "No encontramos la GitHub App instalada" in redirect_params(r)["message"]
+
+
+def test_callback_with_an_expired_code(client):
+    r = client.get("/github/callback", params={"code": "viejo", "state": sign_state(SECRET, None)})
+    assert "venció o ya se usó" in redirect_params(r)["message"]
 
 
 def test_callback_when_the_user_cancels(client):

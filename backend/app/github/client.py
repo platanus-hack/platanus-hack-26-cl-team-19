@@ -84,6 +84,13 @@ class GitHubApp:
             {"state": state}
         )
 
+    def authorize_url(self, state: str) -> str:
+        """OAuth de la app sin instalar: para quien ya la tenía instalada (GitHub no redirige al cambiar
+        una instalación existente). Vuelve a la misma Callback URL con ``code`` y sin ``installation_id``."""
+        return "https://github.com/login/oauth/authorize?" + urllib.parse.urlencode(
+            {"client_id": self.config.client_id, "state": state}
+        )
+
     def _app_jwt(self) -> str:
         now = int(time.time())
         # iat 60 s atrás por desfase de reloj; GitHub acepta como máximo 10 minutos de vida
@@ -101,9 +108,9 @@ class GitHubApp:
         )
         return data["token"]
 
-    def verify_user_installation(self, code: str, installation_id: int) -> str:
-        """Canjea el ``code`` del callback y confirma que el usuario ve la instalación. Devuelve la cuenta
-        donde quedó instalada. ``GitHubError`` si el code no sirve o la instalación no es suya."""
+    def user_installations(self, code: str) -> dict[int, str]:
+        """Canjea el ``code`` del callback y devuelve las instalaciones de esta app que ve ese usuario de
+        GitHub (id → cuenta donde está instalada). ``GitHubError`` si el code no sirve."""
         req = urllib.request.Request(
             "https://github.com/login/oauth/access_token",
             data=urllib.parse.urlencode(
@@ -119,16 +126,15 @@ class GitHubApp:
         user_token = granted.get("access_token")
         if not user_token:
             raise GitHubError(401, "GitHub rechazó la autorización (el código venció o ya se usó). Vuelve a conectar.")
+        found: dict[int, str] = {}
         page = 1
         while True:  # un usuario puede ver varias instalaciones (su cuenta y sus orgs)
             data = self._request("GET", f"/user/installations?per_page=100&page={page}", user_token, what="user")
-            for inst in data.get("installations", []):
-                if inst.get("id") == installation_id:
-                    return inst.get("account", {}).get("login") or ""
-            if len(data.get("installations", [])) < 100:
-                break
+            batch = data.get("installations", [])
+            found |= {inst["id"]: (inst.get("account") or {}).get("login") or "" for inst in batch}
+            if len(batch) < 100:
+                return found
             page += 1
-        raise GitHubError(403, "Esa instalación de la GitHub App no es de tu cuenta de GitHub.")
 
     # ---------- repos ----------
 

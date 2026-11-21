@@ -3,7 +3,8 @@
 Flujo (el diseño está en ``spikes/jaj-53-acceso-github/README.md``):
 
 1. ``GET /github/install-url`` (con sesión): la URL para instalar la app, con un ``state`` firmado
-   que dice quién la pidió.
+   que dice quién la pidió. Si ya estaba instalada, GitHub no redirige al cambiarla: para eso está
+   ``GET /github/authorize-url`` (OAuth sin instalar), que vuelve al mismo callback sin ``installation_id``.
 2. El usuario instala la app en GitHub y elige los repos. GitHub vuelve a ``GET /github/callback``
    con ``code``, ``installation_id`` y ``state``. La API valida el state, confirma con el ``code`` que
    la instalación es de ese usuario de GitHub, la guarda y redirige al frontend
@@ -110,6 +111,13 @@ def install_url(github: GitHubApp = Depends(get_github), user: User | None = Dep
     return InstallUrl(url=github.install_url(sign_state(github.config.client_secret, owner_of(user))))
 
 
+@router.get("/authorize-url", response_model=InstallUrl)
+def authorize_url(github: GitHubApp = Depends(get_github), user: User | None = Depends(current_user)) -> InstallUrl:
+    """Para quien ya tenía la app instalada: GitHub no redirige al cambiar una instalación existente,
+    así que se autoriza con OAuth y el callback guarda las instalaciones que ve el usuario."""
+    return InstallUrl(url=github.authorize_url(sign_state(github.config.client_secret, owner_of(user))))
+
+
 @router.get("/callback", include_in_schema=False)
 def callback(
     request: Request,
@@ -130,17 +138,25 @@ def callback(
         owner = verify_state(github.config.client_secret, state)
     except (InvalidState, ValueError) as e:
         return fail(str(e) if isinstance(e, InvalidState) else "El enlace de conexión no es válido.")
-    if installation_id is None or not code:
+    if not code:
         # p. ej. setup_action=request: un admin de la org tiene que aprobar la instalación
         if setup_action == "request":
             return fail("La instalación quedó pendiente: un admin de la organización tiene que aprobarla.")
         return fail("La instalación se canceló o no terminó. Puedes volver a intentarlo.")
     try:
-        account = github.verify_user_installation(code, installation_id)
+        visible = github.user_installations(code)
     except GitHubError as e:
         return fail(e.message)
-    request.app.state.store.save_installation(installation_id, owner, account)
-    return RedirectResponse(_frontend({"github": "ok", "account": account}), status_code=302)
+    if installation_id is not None:  # volvió de instalar: solo esa, y tiene que ser del usuario
+        if installation_id not in visible:
+            return fail("Esa instalación de la GitHub App no es de tu cuenta de GitHub.")
+        visible = {installation_id: visible[installation_id]}
+    elif not visible:  # volvió de /authorize-url y no tiene la app en ninguna cuenta
+        return fail("No encontramos la GitHub App instalada en tu cuenta. Instálala con «Conectar con GitHub».")
+    store = request.app.state.store
+    for inst_id, account in visible.items():
+        store.save_installation(inst_id, owner, account)
+    return RedirectResponse(_frontend({"github": "ok", "account": ", ".join(visible.values())}), status_code=302)
 
 
 @router.get("/installations", response_model=list[InstallationOut])

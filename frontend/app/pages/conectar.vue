@@ -1,6 +1,10 @@
 <script setup lang="ts">
 // Conectar un repo de GitHub y analizarlo como v1 (JAJ-57). Es la versión mínima: la pantalla del
 // onboarding (JAJ-79) usa los mismos endpoints. GitHub vuelve aquí con ?github=ok|error&message=...
+// solo al instalar la app por primera vez: al cambiar los repos de una instalación existente no
+// redirige (sin Setup URL no hay "Redirect on update"), así que eso se abre en otra pestaña y la
+// lista se refresca al volver.
+import { useEventListener } from "@vueuse/core";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +45,8 @@ const branch = ref("");
 const ingestion = shallowRef<Ingestion | null>(null);
 const loading = ref(true);
 const connecting = ref(false);
+const installHref = ref(""); // para "Agregar otro repo": un <a> abre la pestaña sin bloqueo de popups
+const awaitingGithub = ref(false);
 const starting = ref(false); // el POST revisa el acceso en GitHub antes de responder (~1 s)
 const error = ref("");
 
@@ -70,13 +76,16 @@ function messageOf(e: unknown): string {
   );
 }
 
-async function loadRepos() {
+async function loadRepos(quiet = false) {
   if (!api) return;
-  loading.value = true;
+  if (!quiet) loading.value = true;
   error.value = "";
   try {
     repos.value = await api.repos();
-    if (!repo.value && repos.value[0]) repo.value = repos.value[0].full_name;
+    if (!repos.value.some((item) => item.full_name === repo.value))
+      repo.value = repos.value[0]?.full_name ?? "";
+    if (repos.value.length && !installHref.value)
+      installHref.value = (await api.installUrl()).url;
   } catch (e) {
     error.value = messageOf(e);
   } finally {
@@ -84,16 +93,25 @@ async function loadRepos() {
   }
 }
 
-async function connect() {
+async function connect(alreadyInstalled = false) {
   if (!api) return;
   connecting.value = true;
   try {
-    window.location.href = (await api.installUrl()).url;
+    const { url } = alreadyInstalled
+      ? await api.authorizeUrl()
+      : await api.installUrl();
+    window.location.href = url;
   } catch (e) {
     error.value = messageOf(e);
     connecting.value = false;
   }
 }
+
+// al volver de la pestaña de GitHub, la lista refleja los repos que se agregaron o quitaron
+useEventListener(document, "visibilitychange", () => {
+  if (document.visibilityState === "visible" && awaitingGithub.value)
+    loadRepos(true);
+});
 
 watch(repo, async (fullName) => {
   branches.value = [];
@@ -131,7 +149,7 @@ async function analyze() {
   }
 }
 
-onMounted(loadRepos);
+onMounted(() => loadRepos());
 </script>
 
 <template>
@@ -242,12 +260,46 @@ onMounted(loadRepos);
           Analizar
         </Button>
         <Button
-          :variant="repos.length ? 'outline' : 'default'"
-          :disabled="connecting || running"
-          @click="connect"
+          v-if="repos.length && installHref"
+          variant="outline"
+          :disabled="running"
+          as-child
         >
-          {{ repos.length ? "Agregar otro repo" : "Conectar con GitHub" }}
+          <a
+            :href="installHref"
+            target="_blank"
+            rel="noopener"
+            @click="awaitingGithub = true"
+            >Agregar otro repo</a
+          >
         </Button>
+        <Button
+          v-else-if="!repos.length"
+          :disabled="connecting || running"
+          @click="connect()"
+        >
+          Conectar con GitHub
+        </Button>
+        <Button
+          v-if="!repos.length"
+          variant="outline"
+          :disabled="connecting || running"
+          @click="connect(true)"
+        >
+          Ya instalé la app
+        </Button>
+        <Button
+          v-if="awaitingGithub"
+          variant="ghost"
+          :disabled="loading"
+          @click="loadRepos(true)"
+        >
+          Actualizar lista
+        </Button>
+        <p v-if="awaitingGithub" class="w-full text-xs text-muted-foreground">
+          Guarda los cambios en la pestaña de GitHub y vuelve aquí: la lista de
+          repos se actualiza sola.
+        </p>
       </CardFooter>
     </Card>
     <NuxtLink to="/" class="text-sm text-muted-foreground underline">
