@@ -89,6 +89,10 @@ Son campos opcionales del modelo. `build_model.py` (JAJ-45) todavía no los gene
 - Si la cola está en su `max_length`, encolar falla y la request termina con error `queue_full`. Sin `max_length`, la cola crece sin límite.
 - El `Run` trae `cache` (aciertos y fallos) y `queues` (encolados, procesados, rechazados, cola al final y latencia de los trabajos).
 
+La ingesta genera `on_miss` cuando encuentra un `get` de caché, una rama que consulta la DB solo si falla y un `set` o `setex` de la misma clave. Para Celery sigue la función de `.delay()` o `.apply_async()` si la cola es explícita y tiene un solo perfil de trabajo. Lee la concurrencia de workers dedicados declarados en Compose o Kubernetes.
+
+Los datos que falten quedan como preguntas en `deployment.iac.missing`. Al construir el modelo, `--answers` admite `overrides.cache_hit_ratio` como mapa de `archivo:línea` a fracción y `deployment.queues` como mapa de nombre de cola a `workers` y `max_length`. Un `max_length` explícito de `null` indica una cola sin límite.
+
 ### De laptop a nube (JAJ-48)
 
 Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) se midieron en 1 núcleo del laptop de calibración (JAJ-46). Un vCPU de la nube es más lento, así que el motor los ajusta con dos campos del modelo, que genera `build_model.py` desde JAJ-47:
