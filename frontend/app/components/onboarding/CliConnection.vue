@@ -17,8 +17,9 @@ const props = withDefaults(
     endpoint: string;
     token?: string;
     checking?: boolean;
+    checkError?: string;
   }>(),
-  { token: "", checking: false },
+  { token: "", checking: false, checkError: "" },
 );
 
 const selected = defineModel<boolean>("selected", { default: false });
@@ -48,7 +49,7 @@ const switchId = computed(() => `cli-${props.provider.id}`);
           <Badge v-else-if="selected && state === 'pending'" variant="outline"
             >Esperando conexión</Badge
           >
-          <Badge v-else-if="!provider.verified" variant="secondary"
+          <Badge v-if="!provider.verified" variant="secondary"
             >Sin verificar</Badge
           >
         </label>
@@ -100,6 +101,9 @@ const switchId = computed(() => `cli-${props.provider.id}`);
             <Copy v-else aria-hidden="true" />
           </Button>
         </div>
+        <p v-if="provider.commandNote" class="text-xs text-muted-foreground">
+          {{ provider.commandNote }}
+        </p>
         <div>
           <Button
             variant="outline"
@@ -111,6 +115,9 @@ const switchId = computed(() => `cli-${props.provider.id}`);
             Revisar conexión
           </Button>
         </div>
+        <p v-if="checkError" class="text-xs text-destructive" role="alert">
+          {{ checkError }}
+        </p>
       </template>
 
       <p v-else class="text-xs text-muted-foreground">

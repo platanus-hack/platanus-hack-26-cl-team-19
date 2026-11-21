@@ -66,13 +66,16 @@ const { copy, copied } = useClipboard({ copiedDuring: 1500 });
         cambios sobre este proyecto.
       </p>
       <CliConnectionList :connections="connections" />
+      <p v-if="!connections.simulated" class="text-xs text-muted-foreground">
+        Vista previa: la conexión con la CLI todavía no funciona.
+      </p>
     </div>
 
     <template v-else>
       <div
         role="log"
         aria-live="polite"
-        aria-label="Actividad del agente"
+        aria-label="Simulaciones de prueba"
         class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
       >
         <template v-if="activity.length">
@@ -97,7 +100,7 @@ const { copy, copied } = useClipboard({ copiedDuring: 1500 });
         <div v-else class="mt-auto flex flex-col gap-3">
           <p class="text-sm text-muted-foreground">
             Pídele a {{ names }} que trabaje sobre este proyecto desde tu
-            terminal. Lo que haga con Branchpoint aparece aquí.
+            terminal. Las versiones que proponga aparecen en Versiones.
           </p>
           <div
             class="flex items-start gap-2 rounded-md border border-border bg-muted/50 py-2 ps-3 pe-1"
@@ -135,7 +138,7 @@ const { copy, copied } = useClipboard({ copiedDuring: 1500 });
           :disabled="testing"
           @click="emit('test')"
         >
-          Probar conexión
+          Simulación de prueba
         </Button>
       </footer>
     </template>

@@ -1,16 +1,25 @@
-// Estado de las CLIs que el usuario elige conectar al MCP de Branchpoint (JAJ-81). Por ahora es
-// un adaptador simulado: el token y la verificación son falsos hasta que el backend exponga el
-// endpoint MCP y el emparejamiento por token (JAJ-67). Cuando exista, generate() pide el token y
-// check() consulta si ya llegó el primer tools/list. Lo elegido y lo conectado se guarda en el
-// navegador por usuario, para que el onboarding, Configuración y el editor vean lo mismo; el token
-// no se guarda porque solo se muestra una vez.
+// Estado de las CLIs que el usuario elige conectar al MCP de Branchpoint (JAJ-81).
+//
+// Todavía no hay emparejamiento real: falta el token de Branchpoint y el endpoint MCP del backend
+// (JAJ-67). Por eso:
+// * en el modo demo (sin apiBase), generate() inventa un token y check() simula la verificación;
+// * con backend, check() no puede verificar y la CLI queda en «Esperando conexión», sin marcarla
+//   como conectada.
+// Lo elegido se guarda en el navegador por usuario (cli-storage.ts), para que el onboarding,
+// Configuración y el editor vean lo mismo.
 import {
   cliProviders,
   type CliConnectionState,
   type CliProviderId,
 } from "@/components/onboarding/cli-providers";
-
-type PerProvider<T> = Record<CliProviderId, T>;
+import {
+  cliStorageKey,
+  connectedProviders,
+  parseSaved,
+  restoreEntry,
+  serializeConnections,
+  type PerProvider,
+} from "@/components/onboarding/cli-storage";
 
 function perProvider<T>(value: T): PerProvider<T> {
   return Object.fromEntries(
@@ -23,59 +32,58 @@ function fakeToken() {
   return `bp_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-type SavedEntry = { selected: boolean; state: CliConnectionState };
-
-function readSaved(key: string): Partial<PerProvider<SavedEntry>> {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
 export function useCliConnections() {
-  const endpoint = `${useRuntimeConfig().public.apiBase.trim() || "https://api.branchpoint.dev"}/mcp`;
+  const apiBase = useRuntimeConfig().public.apiBase.trim();
+  const simulated = !apiBase;
+  const endpoint = `${apiBase || "https://<api-de-branchpoint>"}/mcp`;
   // parte sin ninguna elegida para que la elección sea explícita
   const selected = reactive(perProvider(false));
   const states = reactive(perProvider<CliConnectionState>("missing"));
   const tokens = reactive(perProvider(""));
   const checking = reactive(perProvider(false));
-  const connected = computed(() =>
-    cliProviders.filter(
-      (provider) => selected[provider.id] && states[provider.id] === "verified",
-    ),
+  const checkErrors = reactive(perProvider(""));
+  const connected = computed(() => connectedProviders(selected, states));
+
+  // El watcher se registra en el setup (se detiene al desmontar) y no guarda hasta conocer la clave.
+  // Si el usuario cambia algo antes de que se resuelva la sesión, lo suyo gana sobre lo guardado.
+  let storageKey = "";
+  let touched = false;
+  watch(
+    [selected, states],
+    () => {
+      if (!storageKey) {
+        touched = true;
+        return;
+      }
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify(serializeConnections(selected, states, simulated)),
+      );
+    },
+    { deep: true },
   );
 
   const auth = useSupabaseAuth();
-  let storageKey = "";
   onMounted(async () => {
     const user = await auth.getSessionUser();
-    storageKey = `branchpoint:cli:${user?.id ?? "demo"}`;
-    const saved = readSaved(storageKey);
-    for (const provider of cliProviders) {
-      const entry = saved[provider.id];
-      if (!entry) continue;
-      selected[provider.id] = entry.selected;
-      // sin el token, un emparejamiento a medias vuelve a empezar
-      states[provider.id] = entry.state === "verified" ? "verified" : "missing";
+    const key = cliStorageKey(user?.id);
+    if (!touched) {
+      const saved = parseSaved(localStorage.getItem(key));
+      for (const provider of cliProviders) {
+        const entry = saved[provider.id];
+        if (!entry) continue;
+        const restored = restoreEntry(entry, simulated);
+        selected[provider.id] = restored.selected;
+        states[provider.id] = restored.state;
+      }
     }
-    watch([selected, states], save, { deep: true });
+    storageKey = key;
   });
 
-  function save() {
-    if (!storageKey) return;
-    const entries = Object.fromEntries(
-      cliProviders.map((provider) => [
-        provider.id,
-        { selected: selected[provider.id], state: states[provider.id] },
-      ]),
-    );
-    localStorage.setItem(storageKey, JSON.stringify(entries));
-  }
-
   function setState(id: CliProviderId, state: CliConnectionState) {
+    checkErrors[id] = "";
     if (state === "missing") tokens[id] = "";
-    else if (!tokens[id]) tokens[id] = fakeToken();
+    else if (!tokens[id] && simulated) tokens[id] = fakeToken();
     states[id] = state;
   }
 
@@ -85,9 +93,13 @@ export function useCliConnections() {
 
   function check(id: CliProviderId) {
     checking[id] = true;
+    checkErrors[id] = "";
     setTimeout(() => {
       checking[id] = false;
-      states[id] = "verified";
+      if (simulated) states[id] = "verified";
+      else
+        checkErrors[id] =
+          "Todavía no podemos verificar la conexión: falta el servidor MCP de Branchpoint.";
     }, 900);
   }
 
@@ -96,11 +108,13 @@ export function useCliConnections() {
   }
 
   return {
+    simulated,
     endpoint,
     selected,
     states,
     tokens,
     checking,
+    checkErrors,
     connected,
     setState,
     generate,

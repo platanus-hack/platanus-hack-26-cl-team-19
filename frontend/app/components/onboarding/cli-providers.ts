@@ -16,6 +16,8 @@ export interface CliProvider {
   verified: boolean;
   connectCommand: (endpoint: string, token: string) => string;
   checkCommand: string;
+  /** Aclaración que acompaña al comando, si hace falta. */
+  commandNote?: string;
 }
 
 export const cliProviders: CliProvider[] = [
@@ -40,5 +42,7 @@ export const cliProviders: CliProvider[] = [
     connectCommand: (endpoint, token) =>
       `export BRANCHPOINT_TOKEN=${token}\ncodex mcp add branchpoint --url ${endpoint} \\\n  --bearer-token-env-var BRANCHPOINT_TOKEN`,
     checkCommand: "codex mcp list",
+    commandNote:
+      "El export solo dura en esa terminal: agrégalo a tu ~/.zshrc o ~/.bashrc para que Codex lo tenga en las próximas sesiones.",
   },
 ];

@@ -211,43 +211,43 @@ function updateTool(
   );
 }
 
-async function testConnection() {
-  const provider = cli.connected.value[0];
-  if (!provider || testing.value) return;
+// Simulación local para ver cómo se ve una corrida en el panel. No la pide la CLI: en modo MCP la
+// conversación ocurre en la terminal y al editor solo llegan las versiones que proponga (ADR 0001).
+async function testSimulation() {
+  if (testing.value) return;
   testing.value = true;
-  if (!scenario.value) scenario.value = scenarios.value[0]?.id ?? "";
-  const stamp = Date.now();
-  activity.value = [
-    ...activity.value,
-    {
-      id: `${stamp}-simulate`,
-      role: "tool",
-      name: "simulate",
-      input: `scenario="${scenario.value}"`,
-      status: "running",
-    },
-  ];
-  await simulate();
-  const result = run.value;
-  const p95 = result?.series.at(-1)?.latency.p95_ms;
-  updateTool(`${stamp}-simulate`, {
-    status: "done",
-    output: result
-      ? `p95 ${p95 === null || p95 === undefined ? "sin dato" : `${Math.round(p95)} ms`}`
-      : "La simulación falló.",
-    detail: result ? toBottleneck(result)?.description : undefined,
-  });
-  activity.value = [
-    ...activity.value,
-    {
-      id: `${stamp}-reply`,
-      role: "agent",
-      text: result
-        ? `Prueba de ${provider.name}: la corrida llegó al editor. Cuando tu CLI llame a Branchpoint, sus simulaciones y propuestas aparecen aquí igual.`
-        : `La prueba de ${provider.name} no pudo simular. Revisa el error arriba y vuelve a intentarlo.`,
-    },
-  ];
-  testing.value = false;
+  const id = `${Date.now()}-simulate`;
+  try {
+    if (!scenario.value) scenario.value = scenarios.value[0]?.id ?? "";
+    activity.value = [
+      ...activity.value,
+      {
+        id,
+        role: "tool",
+        name: "simulate",
+        input: `scenario="${scenario.value}"`,
+        status: "running",
+      },
+    ];
+    const before = run.value;
+    await simulate();
+    // si la corrida no cambió, la simulación falló: no se reportan datos viejos
+    const result = run.value !== before ? run.value : null;
+    const bottleneck = result ? toBottleneck(result) : null;
+    updateTool(id, {
+      status: "done",
+      output: result
+        ? (bottleneck?.title ?? "Sin cuello de botella")
+        : "La simulación falló.",
+      detail: result
+        ? `${bottleneck?.description ?? ""} Fuente: ${provenance.source}.`.trim()
+        : undefined,
+    });
+  } catch {
+    updateTool(id, { status: "done", output: "La simulación falló." });
+  } finally {
+    testing.value = false;
+  }
 }
 
 async function saveVersion() {
@@ -494,7 +494,7 @@ async function saveVersion() {
         :activity="activity"
         :prompt="agentPrompt"
         :testing="testing"
-        @test="testConnection"
+        @test="testSimulation"
         @clear="activity = []"
       />
     </template>

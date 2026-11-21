@@ -23,6 +23,7 @@ const cli = props.connections;
         :endpoint="cli.endpoint"
         :token="cli.tokens[provider.id]"
         :checking="cli.checking[provider.id]"
+        :check-error="cli.checkErrors[provider.id]"
         @generate="cli.generate(provider.id)"
         @check="cli.check(provider.id)"
         @revoke="cli.revoke(provider.id)"
