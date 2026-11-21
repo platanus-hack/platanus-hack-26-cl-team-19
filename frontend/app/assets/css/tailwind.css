@@ -49,6 +49,12 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -90,35 +96,46 @@
 
 :root {
   color-scheme: light;
-  --radius: 0.375rem;
-  --overlay-shadow: 0 8px 24px rgb(0 0 0 / 16%);
-  --background: #fafafa;
-  --foreground: #1c1c1c;
+  --radius: 0.5rem;
+  --overlay-shadow: 0 12px 32px rgb(40 36 110 / 18%);
+  /* Superficies con temperatura índigo: fondo < panel < tarjeta, con borde visible entre ellas. */
+  --background: #f3f4fb;
+  --foreground: #181a2e;
   --card: #ffffff;
   --card-foreground: var(--foreground);
   --popover: var(--card);
   --popover-foreground: var(--foreground);
-  --primary: #262626;
+  /* Marca: índigo eléctrico para acción, foco y selección. */
+  --primary: #4f46e5;
   --primary-foreground: #ffffff;
-  --secondary: #ececec;
+  --secondary: #e3e6f8;
   --secondary-foreground: var(--foreground);
-  --muted: #eeeeee;
-  --muted-foreground: #595959;
-  --accent: var(--secondary);
+  --muted: #e9ebf8;
+  --muted-foreground: #4a4f6b;
+  --accent: #dadefa;
   --accent-foreground: var(--foreground);
-  --destructive: var(--primary);
-  --destructive-foreground: var(--primary-foreground);
-  --border: #e2e2e2;
-  --input: #777777;
-  --ring: #555555;
-  --sidebar: #f3f3f3;
+  --destructive: #c81e3a;
+  --destructive-foreground: #ffffff;
+  --border: #d3d7ee;
+  --input: #8288ad;
+  --ring: #4f46e5;
+  --sidebar: #e9ecf8;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: #e6e6e6;
+  --sidebar-accent: #d9dcf6;
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+  /* Tres colores de marca, fuera de la escala de grises:
+     brand = acción y selección, highlight = lo que bifurca o propone el agente,
+     info = datos y aristas. Ninguno reemplaza a status-* ni source-*. */
+  --brand: var(--primary);
+  --brand-foreground: var(--primary-foreground);
+  --highlight: #e11d8f;
+  --highlight-foreground: #ffffff;
+  --info: #0e7490;
+  --info-foreground: #ffffff;
   --status-healthy: #e6f3eb;
   --status-healthy-foreground: #215836;
   --status-healthy-border: #4c8764;
@@ -147,20 +164,27 @@
 
 .dark {
   color-scheme: dark;
-  --overlay-shadow: 0 8px 24px rgb(0 0 0 / 48%);
-  --background: #151515;
-  --foreground: #f2f2f2;
-  --card: #1e1e1e;
-  --primary: #eeeeee;
-  --primary-foreground: #202020;
-  --secondary: #303030;
-  --muted: #292929;
-  --muted-foreground: #b5b5b5;
-  --border: #414141;
-  --input: #858585;
-  --ring: #bcbcbc;
-  --sidebar: #1a1a1a;
-  --sidebar-accent: #2c2c2c;
+  --overlay-shadow: 0 12px 32px rgb(0 0 0 / 55%);
+  --background: #0f1124;
+  --foreground: #eef0ff;
+  --card: #181b36;
+  --primary: #8b85ff;
+  --primary-foreground: #0f1124;
+  --secondary: #262a4f;
+  --accent: #2d3262;
+  --muted: #20243f;
+  --muted-foreground: #aeb3d6;
+  --destructive: #f87171;
+  --destructive-foreground: #1a0a0c;
+  --border: #343964;
+  --input: #7f85b0;
+  --ring: #8b85ff;
+  --sidebar: #12142b;
+  --sidebar-accent: #222751;
+  --highlight: #f472b6;
+  --highlight-foreground: #2a0a1c;
+  --info: #22d3ee;
+  --info-foreground: #062a33;
   --status-healthy: #162d22;
   --status-healthy-foreground: #a4dfb7;
   --status-healthy-border: #63936f;
@@ -179,5 +203,15 @@
 
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

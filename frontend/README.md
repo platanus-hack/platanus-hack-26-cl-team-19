@@ -65,7 +65,14 @@ GitHub.
 
 La fuente de verdad está en [tailwind.css](app/assets/css/tailwind.css). Usa los
 roles semánticos de interfaz para fondos, texto, bordes y acciones. Usa
-`status-*` para saturación y `source-*` para procedencia. Acompaña el color de
+`status-*` para saturación y `source-*` para procedencia.
+
+Tres colores de marca, fuera de la escala de grises:
+
+- `primary` (índigo): acción principal, foco y selección.
+- `highlight` (magenta): lo que bifurca o propone el agente, como "Aplicar" en
+  una propuesta y el lado nuevo de un diff. Úsalo poco, para que se note.
+- `info` (cian): datos y aristas del diagrama. Acompaña el color de
 estado con una etiqueta visible y un icono. Los valores de las muestras son
 ilustrativos.
 
