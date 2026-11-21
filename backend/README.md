@@ -442,6 +442,11 @@ curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "re
 curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 10}' localhost:8000/projects/$P/compare | python -c 'import json,sys; print(json.load(sys.stdin)["cost_delta"])'
 ```
 
+**API o DB sin precio (JAJ-88).** Solo hay precios para la API en `fargate` y para la DB en `supabase` o `rds_postgres`. En `local` cuestan US$0, y en otro proveedor (por ejemplo `render`) no tienen precio. En ambos casos el total no las incluye, así que **no cambia con sus réplicas ni con su plan**. Un repo importado con Docker Compose queda en `local`. Con branchpoint-shop-demo, por ejemplo, 1 y 5 réplicas daban "= Igual", y los US$62/mes eran solo la caché.
+- **`CostEstimate.missing`:** `["api", "db"]`, los componentes sin precio. El primer elemento de `warnings` lo explica y dice qué proveedor usar para comparar.
+- **`CostDelta.missing`:** los que faltan en alguna de las dos versiones.
+- **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
+
 ### Costo de fallar (JAJ-74)
 
 `failure_cost(modelo, run)` (`app/costs/failure.py`) da las ventas en juego por hora según lo que simuló el motor. Es la fórmula de JAJ-11: sesiones por hora × fracción que falla × conversión × ticket. La conversión y el ticket salen del `business` del modelo, y las requests por sesión de `traffic`. La cota de `build_model.py` (`checks.sales_at_stake_per_hour`) suponía que todo falla; aquí la fracción sale de la tasa de error del `Run`.

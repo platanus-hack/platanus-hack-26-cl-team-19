@@ -296,6 +296,10 @@ def compare_summary(
 def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
     sign = "+" if cost.diff >= 0 else "−"
     text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
+    if cost.missing:  # JAJ-88: sin esto, "+US$0.00" con la API en local se lee como "no cambia el costo"
+        names = " ni ".join({"api": "la API", "db": "la DB"}[c] for c in cost.missing)
+        verb = "tienen" if len(cost.missing) > 1 else "tiene"
+        text += f" sin contar {names}, que no {verb} precio (despliegue local o proveedor sin precios)"
     if fa is None or fb is None:
         return text + "."
     if fa.too_short or fb.too_short:

@@ -21,6 +21,10 @@ Lo que no tiene precio queda en ``unpriced``, con el motivo: por ejemplo, los wo
 porque el modelo no dice su tamaño. Los estáticos (CDN, S3) no están: el modelo describe la API,
 no el frontend.
 
+Si la API o la DB corren en local (US$0) o en un proveedor sin precios, quedan en ``missing`` con un
+aviso, el primero de ``warnings`` (JAJ-88): el total no las incluye, así que no cambia con sus
+réplicas ni su plan, y una comparación que dé "= Igual" no es un resultado.
+
 Diferencia con el spike: ``por_tramos`` de ``costs.py`` cobra la transferencia desde el primer GB.
 AWS regala los primeros 100 GB del mes (*"first 10 TB / month data transfer out beyond the global
 free tier"*), así que aquí el primer tramo pagado empieza después de esos 100 GB.
@@ -83,6 +87,9 @@ class CostEstimate:
     unpriced: list[str]  # componentes sin precio, con el motivo
     warnings: list[str]
     schema: str = COST_SCHEMA
+    # JAJ-88: la API o la DB sin precio real (en local, que cuesta US$0, o un proveedor sin precios).
+    # El total no las incluye, así que no cambia con sus réplicas ni con su plan: "= Igual" no es un resultado.
+    missing: list[str] = field(default_factory=list)  # "api", "db"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -308,6 +315,9 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
     for name in raw["deployment"].get("queues", {}):
         unpriced.append(f"Workers de la cola '{name}': el modelo no dice en qué máquina corren.")
 
+    missing = _missing(raw)
+    if missing:
+        warnings.insert(0, _missing_warning(raw, missing))  # primero: cambia cómo leer el total
     if raw["deployment"]["db"].get("pooler"):
         warnings.append("El pooler de Supabase (Supavisor) viene incluido en el plan: no suma costo.")
     warnings.append("No incluye los estáticos del frontend (CDN, S3): el modelo describe la API.")
@@ -327,6 +337,32 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
         lines=lines,
         unpriced=unpriced,
         warnings=warnings,
+        missing=missing,
+    )
+
+
+PRICED_API = {"fargate"}
+PRICED_DB = {"supabase", "rds_postgres"}
+COMPONENT_NAMES = {"api": "la API", "db": "la DB"}
+
+
+def _missing(raw: dict[str, Any]) -> list[str]:
+    """La API y la DB que no tienen precio real: en local o en un proveedor sin precios (JAJ-88)."""
+    dep = raw["deployment"]
+    out = []
+    if dep["api"].get("provider", "local") not in PRICED_API:
+        out.append("api")
+    if dep["db"].get("provider", "local") not in PRICED_DB:
+        out.append("db")
+    return out
+
+
+def _missing_warning(raw: dict[str, Any], missing: list[str]) -> str:
+    dep = raw["deployment"]
+    parts = [f"{COMPONENT_NAMES[c]} ({dep[c].get('provider', 'local')})" for c in missing]
+    return (
+        f"Sin precio para {' ni '.join(parts)}: el total no las incluye y no cambia con sus réplicas ni con su "
+        "plan. Para comparar costos, indica dónde se desplegaría: la API en fargate y la DB en supabase o rds_postgres."
     )
 
 
@@ -337,6 +373,8 @@ class CostDelta:
     diff: float  # b − a
     pct: float | None  # (b − a) / a; None si a es 0
     by_line: dict[str, float]  # diferencia por componente (b − a), con 0 si falta en una
+    # JAJ-88: componentes sin precio en alguna de las dos versiones; la diferencia no los cuenta
+    missing: list[str] = field(default_factory=list)
 
 
 def cost_delta(a: CostEstimate, b: CostEstimate) -> CostDelta:
@@ -344,4 +382,5 @@ def cost_delta(a: CostEstimate, b: CostEstimate) -> CostDelta:
     la = {line.id: value(line.usd_month) for line in a.lines}
     lb = {line.id: value(line.usd_month) for line in b.lines}
     by_line = {k: round(lb.get(k, 0.0) - la.get(k, 0.0), 2) for k in sorted(set(la) | set(lb))}
-    return CostDelta(va, vb, round(vb - va, 2), round((vb - va) / va, 4) if va else None, by_line)
+    missing = [c for c in ("api", "db") if c in a.missing or c in b.missing]
+    return CostDelta(va, vb, round(vb - va, 2), round((vb - va) / va, 4) if va else None, by_line, missing)
