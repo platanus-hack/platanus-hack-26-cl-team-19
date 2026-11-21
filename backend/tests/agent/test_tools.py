@@ -39,6 +39,7 @@ def test_schemas_cover_every_tool(tools):
         "set_traffic",
         "set_deployment",
         "set_goals",
+        "submit_architecture",
     }
     assert all(s["input_schema"].get("additionalProperties") is False for s in tools.schemas())
 

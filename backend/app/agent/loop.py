@@ -119,7 +119,7 @@ def run_agent(
     * ``{"type": "error", "message"}`` si el LLM falla.
     """
     history = [dict(m) for m in messages]
-    schemas = tools.schemas()
+    schemas = tools.schemas(cli=False)  # el chat no ve el repo: sin submit_architecture
     usage: dict[str, int] = {}
     for iteration in range(1, max_iterations + 1):
         try:

@@ -35,7 +35,10 @@ backend/
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
 │   │   └── failure.py       #   failure_cost(modelo, run): ventas en juego por hora (JAJ-74)
-│   ├── ingest/              # ingesta determinista del repo (ADR 0001, paso 1)
+│   ├── ingest/              # del repo al modelo (ADR 0001, pasos 1 y 3)
+│   │   ├── extract.py       #   extractor AST de FastAPI → grafo intermedio (JAJ-7)
+│   │   ├── build_model.py   #   grafo + catálogo + IaC → model/v1, sin importar el framework (JAJ-45, JAJ-85)
+│   │   ├── ai_graph.py      #   la arquitectura que manda la IA de la CLI para otros frameworks (JAJ-85, JAJ-86)
 │   │   └── iac.py           #   archivos de despliegue → servicios y números OBSERVADO (JAJ-60)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos (JAJ-55) y ProjectStore sobre Postgres (JAJ-56)
@@ -367,6 +370,7 @@ El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las 
 | `set_traffic` | Tráfico del usuario → pico en req/s y escenario del evento, como versión nueva |
 | `set_deployment` | Réplicas, vCPU o plan de DB del usuario, como versión nueva |
 | `set_goals` | Metas del proyecto: p95, errores y presupuesto |
+| `submit_architecture` | Solo MCP. La arquitectura de un repo que la CLI leyó en local: crea el proyecto o suma una versión (ver abajo) |
 
 Reglas, iguales en los dos modos:
 
@@ -375,6 +379,24 @@ Reglas, iguales en los dos modos:
 - **Errores con la forma `{"error": "..."}`,** también para argumentos desconocidos o mal tipados. En MCP, un middleware los rechaza antes de la tool, porque el SDK los descarta en silencio.
 - **Límites por usuario:** 60 llamadas por minuto y 300 simulaciones por día (`compare` cuenta 2). Son en memoria, por instancia de la API.
 - **Metas:** `projects.slo_p95_ms`, `slo_error_rate` y `budget_usd_month` del modelo de datos (JAJ-55). El p95 solo mide las requests exitosas. Por eso, si el usuario no declaró una meta de errores, `simulate` y `compare` exigen un piso de 1 % (`SUPUESTO`, y lo dicen): una versión que rechaza el 85 % de las requests nunca cumple, aunque su p95 sea bajo.
+
+#### Repos que no son FastAPI (JAJ-85, JAJ-86)
+
+El extractor AST solo lee FastAPI. Para otro framework, la IA de la CLI del usuario lee el repo local y manda su arquitectura con `submit_architecture`:
+
+```
+CLI del usuario: lee rutas y handlers → submit_architecture(endpoints → pasos, componentes)
+  ai_graph.py: valida el schema → grafo intermedio de extract.py (con origin: ia)
+  build_model.build_from_graph: catálogo → model/v1 → proyecto nuevo o versión nueva
+```
+
+- **La IA clasifica, no pone números.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache`, `external` (con el nombre del servicio), `background` o `cpu`. El schema no acepta tiempos, filas ni costos: el único número es la línea de la evidencia.
+- **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`). Los tiempos de sus pasos son `ESTIMADO` como máximo, y la CPU base del framework, el pool y los workers quedan `SUPUESTO` por revisar.
+- **El código manda.** Con `project_id`, la propuesta se suma como versión nueva (origen `agente`): los endpoints y componentes que encontraron el extractor o la IaC quedan intactos, y la respuesta dice qué se ignoró. Sin `project_id`, crea un proyecto con la propuesta como v1.
+- **Diagrama.** `POST /graph` dibuja cada servicio externo con su nombre y los componentes declarados (caché, storage, colas) con su tecnología, `archivo:línea` y procedencia, aunque ningún paso los use.
+- **Sin IA,** los repos FastAPI siguen con el extractor y el modelo de siempre (mismo JSON byte a byte), y la ingesta de otro framework falla con un mensaje que apunta a la CLI.
+
+El chat del editor no ofrece `submit_architecture`, porque no ve el repo.
 
 `read_file` y `grep` no están. En el modo MCP sobran, porque la CLI del usuario lee su repo local. Para el chat haría falta guardar el repo extraído.
 

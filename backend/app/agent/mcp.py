@@ -31,6 +31,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.agent.tools import AgentTools, Limiter, ToolError
 from app.api.auth import AuthError, SupabaseAuth
 from app.api.store import ProjectStore
+from app.ingest.ai_graph import AiComponent, AiEndpoint
 
 INSTRUCTIONS = (
     "Branchpoint simula la arquitectura de un repo con un motor de eventos discretos y propone cambios. "
@@ -38,7 +39,11 @@ INSTRUCTIONS = (
     "estimate_cost, y cada resultado trae su procedencia (cítala). Los números del usuario (tráfico, metas, "
     "réplicas) van en set_traffic, set_goals y set_deployment con su frase textual en quote; si no los dijo, "
     "pregúntaselos. Para cambiar la arquitectura usa propose_version con operaciones de ops_schema y después "
-    "compare con la versión anterior. Cita el archivo:línea del cuello de botella."
+    "compare con la versión anterior. Cita el archivo:línea del cuello de botella. "
+    "Si el usuario quiere analizar un repo que tienes en local y no es FastAPI (o list_projects no lo tiene), "
+    "léelo tú: busca las rutas, sigue cada handler y clasifica sus accesos a la DB, caché, servicios externos y "
+    "colas, con archivo:línea; después mándalo con submit_architecture. No pongas tiempos ni números: los pone "
+    "el catálogo."
 )
 DEFAULT_ALLOWED_HOSTS = "localhost:*,127.0.0.1:*,[::1]:*,testserver"
 
@@ -108,12 +113,12 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
 
     server = MCPServer(name="branchpoint", instructions=INSTRUCTIONS, middleware=[validate_arguments])
 
-    def run(name: str, ctx: Context | None, **args: Any) -> Any:
+    def run(tool: str, ctx: Context | None, /, **args: Any) -> Any:  # posicionales: hay tools con un arg name
         try:
             tools = tools_for(ctx)
         except (ToolError, AuthError) as e:
             return {"error": str(e)}
-        return tools.call(name, {k: v for k, v in args.items() if v is not None})
+        return tools.call(tool, {k: v for k, v in args.items() if v is not None})
 
     # Una función por tool, con su firma: así el schema que ve el LLM es explícito.
     @server.tool(description=_d("list_projects"))
@@ -202,6 +207,31 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
             slo_p95_ms=slo_p95_ms,
             slo_error_rate=slo_error_rate,
             budget_usd_month=budget_usd_month,
+        )
+
+    @server.tool(description=_d("submit_architecture"))
+    def submit_architecture(
+        repo: str,
+        framework: str,
+        language: str,
+        endpoints: list[AiEndpoint],
+        ctx: Context,
+        components: list[AiComponent] | None = None,
+        commit: str | None = None,
+        project_id: str | None = None,
+        name: str | None = None,
+    ) -> Any:
+        return run(
+            "submit_architecture",
+            ctx,
+            repo=repo,
+            framework=framework,
+            language=language,
+            endpoints=[e.model_dump() for e in endpoints],
+            components=[c.model_dump() for c in components] if components else None,
+            commit=commit,
+            project_id=project_id,
+            name=name,
         )
 
     return server

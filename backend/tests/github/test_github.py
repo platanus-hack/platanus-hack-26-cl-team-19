@@ -283,12 +283,12 @@ def test_ingestion_of_another_branch_and_name(client, github):
     assert client.get(f"/projects/{done['project_id']}").json()["name"] == "Tienda (feature)"
 
 
-def test_ingestion_without_fastapi_fails_in_spanish(client, github):
+def test_ingestion_without_endpoints_points_to_the_cli(client, github):
     connect(client)
     github.tarballs["acme/tienda"] = tarball({"README.md": b"# nada"})
     job = client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).json()
     failed = client.get(f"/github/ingestions/{job['id']}").json()
-    assert failed["status"] == "failed" and "No encontramos endpoints de FastAPI" in failed["error_message"]
+    assert failed["status"] == "failed" and "submit_architecture" in failed["error_message"]
     assert failed["project_id"] is None
     assert client.get("/projects").json() == []  # no queda un proyecto a medias
 

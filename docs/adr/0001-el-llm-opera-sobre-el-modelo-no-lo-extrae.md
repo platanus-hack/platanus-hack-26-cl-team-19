@@ -21,6 +21,18 @@ La extracción de la arquitectura es determinista: `extract.py` ([JAJ-7](https:/
 
 Los pasos 1 y 3 no dependen de la IA: si no hay API key, el producto igual entrega un modelo con los huecos marcados como `SUPUESTO`.
 
+## Repos sin extractor (enmienda de JAJ-85 y JAJ-86)
+
+El extractor del paso 1 solo lee FastAPI. Para otros frameworks, la IA de la CLI del usuario (modo MCP, JAJ-54) hace el paso 1: lee el repo local y manda el grafo con la tool `submit_architecture`. Es el mismo grafo intermedio que produce `extract.py` (endpoints → pasos con forma y `archivo:línea`), y el paso 3 no cambia: `build_model.build_from_graph` le pone los números del catálogo.
+
+Lo que se mantiene de esta decisión:
+
+* **La IA clasifica, no escribe números.** El schema es estricto: `kind`, `op` y `shape` de enums del catálogo, evidencia `archivo:línea` y `why` obligatorias, y ningún campo numérico salvo la línea.
+* **Procedencia.** Todo lo que propone queda con `origin` IA y etiqueta `ESTIMADO` como máximo. La CPU base del framework queda `SUPUESTO`, porque el catálogo la midió en FastAPI.
+* **El código manda.** Si el proyecto ya tiene endpoints o componentes del extractor o de la IaC, la propuesta solo agrega lo que falta.
+
+Revisamos herramientas existentes antes de decidirlo. [OWASP Noir](https://github.com/owasp-noir/noir) encuentra endpoints en más de 50 frameworks, pero no los accesos a la DB ni su forma. CodeBoarding y stakgraph arman diagramas de módulos. Ninguna entrega lo que necesita el motor.
+
 ## [2] Enriquecer huecos
 
 `extract.py` expone una lista `gaps[]` con lo que no pudo resolver. Hoy ya los detecta, pero quedan dispersos en los efectos:
@@ -65,7 +77,7 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 
 ## Opciones descartadas
 
-* **El LLM lee el repo y escribe el modelo.** Es más lento, no es reproducible y puede inventar endpoints o latencias. Los spikes mostraron que el AST cubre casi todo.
+* **El LLM lee el repo y escribe el modelo.** Es más lento, no es reproducible y puede inventar endpoints o latencias. Los spikes mostraron que el AST cubre casi todo FastAPI. Para otros frameworks se acepta que la IA proponga el grafo (ver la enmienda de arriba), pero nunca el modelo ni sus números.
 * **El LLM edita el JSON del modelo directamente.** No hay manera de garantizar que no invente números ni que el JSON siga siendo válido para el motor.
 * **El MCP de GitHub para leer el repo.** Es una llamada por archivo y pasa por el LLM (JAJ-53). Queda descartado para la ingesta.
 
@@ -82,3 +94,4 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 * [JAJ-67](https://linear.app/jajathom/issue/JAJ-67): loop del agente y sus tools (paso 4), expuestas por MCP y en el chat del editor. Depende de JAJ-68 y bloquea JAJ-59.
 * [JAJ-54](https://linear.app/jajathom/issue/JAJ-54): dónde corre el loop (MCP en la CLI del usuario). Enmienda la sección Consecuencias de este ADR.
 * [JAJ-81](https://linear.app/jajathom/issue/JAJ-81): conectar la CLI del usuario al MCP (token de Branchpoint y `claude mcp add`).
+* [JAJ-85](https://linear.app/jajathom/issue/JAJ-85) y [JAJ-86](https://linear.app/jajathom/issue/JAJ-86): repos que no son FastAPI y componentes propuestos por la IA, con `submit_architecture`. Enmiendan el paso 1.

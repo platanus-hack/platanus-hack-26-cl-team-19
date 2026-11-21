@@ -136,6 +136,19 @@ def _resolve_int(proj, mod, expr) -> tuple[int, str, bool] | None:
     return (hit[0], hit[1], True) if hit else None
 
 
+def default_pool(why: str) -> dict:
+    """El pool por defecto de SQLAlchemy, como SUPUESTO por revisar, cuando el repo no dice el suyo."""
+    cat = CATALOG["pools"]["sqlalchemy"]
+    return {
+        "library": "sqlalchemy",
+        "defined_at": None,
+        **{
+            k: num(cat[k]["value"], cat[k]["unit"], "SUPUESTO", f"{why}. {cat[k]['source']}", default=True)
+            for k in ("pool_size", "max_overflow", "pool_timeout_s")
+        },
+    }
+
+
 def read_pool(proj: extract.Project) -> dict:
     """Busca create_engine / create_async_engine / asyncpg.create_pool y lee el tamaño del pool."""
     found = []
@@ -169,16 +182,7 @@ def read_pool(proj: extract.Project) -> dict:
     if not found:
         # Sin create_engine visible (lo arma una librería, o la app no usa SQLAlchemy): se asume el pool
         # por defecto de SQLAlchemy, por revisar. Antes de JAJ-57 esto rompía checks() con un KeyError.
-        cat = CATALOG["pools"]["sqlalchemy"]
-        why = "No se encontró create_engine en el repo: se asume el default de SQLAlchemy"
-        return {
-            "library": "sqlalchemy",
-            "defined_at": None,
-            **{
-                k: num(cat[k]["value"], cat[k]["unit"], "SUPUESTO", f"{why}. {cat[k]['source']}", default=True)
-                for k in ("pool_size", "max_overflow", "pool_timeout_s")
-            },
-        }
+        return default_pool("No se encontró create_engine en el repo: se asume el default de SQLAlchemy")
     _, _, mod, node, kind, kwargs = sorted(found, key=lambda f: (f[0], f[1]))[0]  # se evitan los env.py de migraciones
     cat = CATALOG["pools"][kind]
     where = f"{mod.rel}:{node.lineno}"
@@ -255,6 +259,18 @@ def step_for(e: dict, ctx: dict) -> dict:
             default=n.get("needs_review", False),
         )
     step["via"] = e["via"]
+    if e.get("service"):
+        step["service"] = e["service"]
+    if e.get("origin"):
+        # Paso propuesto por la IA (JAJ-85): el costo sale del catálogo, pero la clasificación no la
+        # verificó un extractor, así que el número no puede ser más fuerte que ESTIMADO.
+        t = step["time"]
+        step["time"] = {
+            **t,
+            "label": weakest(t["label"], "ESTIMADO"),
+            "source": f"{t['source']}. {e['origin']['source']}",
+        }
+        step["origin"] = e["origin"]
     return step
 
 
@@ -368,6 +384,13 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
     db += _mean_cache_reads(kept)
     # La CPU propia de FastAPI depende de si el endpoint es async (event loop) o def (threadpool, JAJ-46)
     base_cpu = from_catalog(CATALOG["api"]["cpu_ms" if ep.get("async") else "cpu_ms_sync"])
+    if ep.get("origin") and ep["origin"].get("framework") != "fastapi":
+        # El catálogo midió la CPU propia de FastAPI; en otro framework es un supuesto (JAJ-85).
+        base_cpu = {
+            **base_cpu,
+            "label": "SUPUESTO",
+            "source": f"{base_cpu['source']}. Medido en FastAPI; el repo usa {ep['origin']['framework']}",
+        }
     parts_hold = [s["time"] for s in db + cpu_in_hold] + [s["repeat"] for s in db if "repeat" in s]
     hold = (
         derived(
@@ -389,7 +412,7 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
     ext = [s for s in kept if s["resource"] == "external"]
     for s in kept + dropped:
         s.pop("branch", None)
-    return {
+    out = {
         "id": f"{ep['method']} {ep['path']}",
         "method": ep["method"],
         "path": ep["path"],
@@ -405,6 +428,9 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
         else None,
         "risks": ep["risks"],
     }
+    if ep.get("origin"):
+        out["origin"] = ep["origin"]
+    return out
 
 
 def build_queues(graph: dict, iac: dict, answers: dict, ctx: dict) -> dict:
@@ -800,15 +826,21 @@ def collect_assumptions(node, path="") -> list[dict]:
 
 
 class NoEndpoints(ValueError):
-    """El repo no tiene endpoints de FastAPI que modelar."""
+    """El extractor no encontró endpoints que modelar en el repo."""
+
+
+NO_ENDPOINTS = (
+    "No encontramos endpoints en ese repo y esa rama. El extractor automático lee apps FastAPI; para otro "
+    "framework (Express, Django, Spring, Go...), abre el repo en tu CLI de IA conectada a Branchpoint por MCP "
+    "y pídele que lo analice con submit_architecture."
+)
 
 
 def build(repo: Path, answers: dict) -> dict:
+    """Modelo de un repo FastAPI: el extractor AST arma el grafo y ``build_from_graph`` el modelo."""
     graph = extract.run(repo)
     if not graph["endpoints"]:
-        raise NoEndpoints(
-            "No encontramos endpoints de FastAPI en ese repo y esa rama. Branchpoint analiza apps FastAPI."
-        )
+        raise NoEndpoints(NO_ENDPOINTS)
     proj = extract.Project(repo)
     proj.load()
     iac = scan_deployment(repo).to_dict()
@@ -819,12 +851,15 @@ def build(repo: Path, answers: dict) -> dict:
         workers = iac["observed"]["api.workers"]
     else:
         workers = from_catalog(CATALOG["api"]["workers_default"])
-    pool = read_pool(proj)
+    return build_from_graph(graph, repo.name, answers, iac=iac, workers=workers, pool=read_pool(proj))
+
+
+def endpoint_context(answers: dict) -> dict:
+    """Lo que necesita ``build_endpoint`` para ponerle números a los pasos: respuestas o catálogo."""
     ov = answers.get("overrides", {})
-    rows_default = from_catalog(CATALOG["table_rows_default"])
-    ctx = {
+    return {
         "table_rows": {k: declared(v, "filas", f"filas de {k}") for k, v in ov.get("table_rows", {}).items()},
-        "table_rows_default": rows_default,
+        "table_rows_default": from_catalog(CATALOG["table_rows_default"]),
         "n_plus_one": declared(ov["n_plus_one_list"], "iteraciones", "largo de las listas con N+1")
         if "n_plus_one_list" in ov
         else from_catalog(CATALOG["n_plus_one_list_default"]),
@@ -833,10 +868,35 @@ def build(repo: Path, answers: dict) -> dict:
         "questions": {},
         "queues": {},
     }
+
+
+def summarize_assumptions(model: dict) -> dict:
+    found = collect_assumptions({k: v for k, v in model.items() if k != "checks"})
+    by_source: dict[str, dict] = {}
+    for a in found:
+        g = by_source.setdefault(
+            a["source"],
+            {"source": a["source"], "count": 0, "needs_review": a["needs_review"], "example_path": a["path"]},
+        )
+        g["count"] += 1
+    return {
+        "total": len(found),
+        "by_source": sorted(by_source.values(), key=lambda g: -g["count"]),
+        "items": found,
+    }
+
+
+def build_from_graph(graph: dict, repo_name: str, answers: dict, *, iac: dict, workers: dict, pool: dict) -> dict:
+    """El modelo ``branchpoint.model/v1`` desde el grafo intermedio, sin importar de dónde salió el grafo.
+
+    El grafo es el de ``extract.run`` (endpoints → efectos con forma y ``archivo:línea``). Lo produce el
+    extractor AST de FastAPI o, para otros frameworks, la IA del usuario (``app/ingest/ai_graph.py``).
+    Los números salen siempre del catálogo, de las respuestas o de la IaC (ADR 0001)."""
+    ctx = endpoint_context(answers)
     queues = build_queues(graph, iac, answers.get("deployment", {}).get("queues", {}), ctx)
     ctx["queues"] = queues
     endpoints = [build_endpoint(ep, ctx) for ep in graph["endpoints"]]
-    endpoint_weights(endpoints, ov.get("endpoint_weights", {}))
+    endpoint_weights(endpoints, answers.get("overrides", {}).get("endpoint_weights", {}))
     deployment = deployment_model(answers, workers, pool, iac)
     if queues:
         deployment["queues"] = queues
@@ -846,7 +906,7 @@ def build(repo: Path, answers: dict) -> dict:
     model = {
         "schema": "branchpoint.model/v1",
         "repo": {
-            "path": repo.name,
+            "path": repo_name,
             "extracted_at": TODAY,
             "stats": {k: v for k, v in graph["stats"].items() if not k.startswith("seconds")},
         },
@@ -855,20 +915,10 @@ def build(repo: Path, answers: dict) -> dict:
         "business": business_model(answers),
         "endpoints": endpoints,
     }
+    if graph.get("source"):
+        model["repo"]["source"] = graph["source"]
     model["checks"] = checks(model)
-    found = collect_assumptions({k: v for k, v in model.items() if k != "checks"})
-    by_source: dict[str, dict] = {}
-    for a in found:
-        g = by_source.setdefault(
-            a["source"],
-            {"source": a["source"], "count": 0, "needs_review": a["needs_review"], "example_path": a["path"]},
-        )
-        g["count"] += 1
-    model["assumptions"] = {
-        "total": len(found),
-        "by_source": sorted(by_source.values(), key=lambda g: -g["count"]),
-        "items": found,
-    }
+    model["assumptions"] = summarize_assumptions(model)
     return model
 
 
