@@ -44,7 +44,7 @@ import math
 import time
 from bisect import bisect_right
 from collections.abc import Generator
-from itertools import accumulate
+from itertools import accumulate, count
 from typing import Any
 
 from app.engine.kernel import Resource, Sim
@@ -204,21 +204,36 @@ def simulate(
     cache = [0, 0]  # aciertos, fallos
     rec = Recorder(duration_s, model.endpoints, resources)
     usage = UsageTracker()
+    # lo que está tomado ahora: clave -> (recurso, dueño, línea, desde cuándo). Al soltarlo se anota en
+    # ``usage``; lo que sigue tomado al terminar se anota hasta ``duration_s`` (JAJ-100). Sin esto, en
+    # saturación las requests que tienen el recurso (y siguen en curso) no le cuentan a nadie.
+    held: dict[int, tuple[str, str, str | None, float]] = {}
+    hold_ids = count()
+
+    def take(res: Resource, owner: str, at: str | None) -> int:
+        key = next(hold_ids)
+        held[key] = (res.name, owner, at, sim.now)
+        return key
+
+    def give_back(key: int) -> None:
+        name, owner, at, since = held.pop(key)
+        usage.add(name, owner, at, sim.now - since)
+
     in_flight: dict[int, tuple[Endpoint, float]] = {}
     api_latency_s = model.api.latency_ms / 1000
     pool_timeout_s = model.db.pool_timeout_s
 
     def hold(res: Resource, scale: float, ms: float, owner: str, at: str | None) -> Generator[Any, Any, None]:
         yield res.acquire()
-        seconds = ms * scale / 1000
-        yield seconds
+        key = take(res, owner, at)
+        yield ms * scale / 1000
         res.release()
-        usage.add(res.name, owner, at, seconds)
+        give_back(key)
 
     def run_steps(steps: tuple[Step, ...], conn: list[Any] | None, owner: str) -> Generator[Any, Any, str | None]:
-        """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, desde cuándo,
-        línea que la tomó]`` de la request; ``None`` en un trabajo de una cola (usa su propia conexión
-        y su propia CPU). ``owner``: a nombre de quién se anota el uso de cada recurso."""
+        """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, clave en
+        held]`` de la request; ``None`` en un trabajo de una cola (usa su propia conexión y su propia
+        CPU). ``owner``: a nombre de quién se anota el uso de cada recurso."""
         for step in steps:
             res, ms = step.resource, step.time_ms
             for _ in range(step.repeat):
@@ -228,7 +243,7 @@ def simulate(
                             return ERROR_DB_REFUSED
                         if not (yield pool.acquire(pool_timeout_s)):
                             return ERROR_POOL_TIMEOUT
-                        conn[:] = [True, sim.now, step.at]
+                        conn[:] = [True, take(pool, owner, step.at)]
                     if ms > 0:
                         yield from hold(db_cpu, db_scale, ms, owner, step.at)
                 elif res == RESOURCE_API_CPU and conn is not None:
@@ -266,10 +281,10 @@ def simulate(
     def job(q: _QueueCounters, t0: float) -> Generator[Any, Any, None]:
         owner = f"cola {q.config.name}"
         yield q.resource.acquire()
-        started = sim.now
+        key = take(q.resource, owner, None)
         yield from run_steps(q.config.job_steps, None, owner)
         q.resource.release()
-        usage.add(q.resource.name, owner, None, sim.now - started)
+        give_back(key)
         q.processed += 1
         q.latencies_ms.append((sim.now - t0) * 1000)
 
@@ -280,17 +295,17 @@ def simulate(
             yield api_latency_s
         if not ep.is_async:
             yield threads.acquire()
-            thread_since = sim.now
+            thread = take(threads, ep.id, None)
         if ep.base_cpu_ms > 0:
             yield from hold(api_cpu, api_scale, ep.base_cpu_ms, ep.id, None)
-        conn: list[Any] = [False, 0.0, None]
+        conn: list[Any] = [False, None]
         error = yield from run_steps(ep.steps, conn, ep.id)
         if conn[0]:
             pool.release()
-            usage.add(pool.name, ep.id, conn[2], sim.now - conn[1])
+            give_back(conn[1])
         if not ep.is_async:
             threads.release()
-            usage.add(threads.name, ep.id, None, sim.now - thread_since)
+            give_back(thread)
         del in_flight[rid]
         rec.finish(ep, t0, sim.now, error, client_timeout_s)
 
@@ -355,6 +370,9 @@ def simulate(
             rec.timeout_in_flight(ep)
         else:
             still_running += 1
+    # lo que sigue tomado al terminar también ocupa el recurso: se anota hasta el final (JAJ-100)
+    for name, owner, at, since in held.values():
+        usage.add(name, owner, at, duration_s - since)
 
     hits, misses = cache
     cache_stats = CacheStats(hits, misses, round(hits / (hits + misses), 4) if hits + misses else None)

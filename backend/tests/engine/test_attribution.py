@@ -1,8 +1,11 @@
 """Tests de quién ocupa cada recurso (JAJ-69): endpoint y línea de código detrás del cuello de botella."""
 
+import importlib
+
 import pytest
 
 from app.engine import simulate
+from app.engine.metrics import UsageTracker
 from app.models import load_model
 from app.models.architecture import walk_steps
 from app.samples import load_sample
@@ -140,3 +143,74 @@ def test_template_cyberday_points_to_password_hash():
     assert b.line in hash_lines
     assert b.line_share > 0.5
     assert len(b.line_endpoints) >= 2
+
+
+# --- JAJ-100: lo que sigue tomado al terminar -----------------------------------------------------
+
+
+def holds_and_waits(pool_size=10):
+    """``GET /lento`` toma la conexión y espera 120 s a un servicio externo con ella tomada; ``GET
+    /rapido`` hace una consulta de 1 ms. En 60 s, las conexiones las tiene /lento casi todo el tiempo,
+    pero ninguna de sus requests termina."""
+    raw = model_dict(
+        [
+            endpoint("GET /rapido", [query(1, "rapido.py:1")], weight=0.9, api_cpu_ms=0.1),
+            endpoint(
+                "GET /lento",
+                [
+                    query(1, "lento.py:1"),
+                    {"kind": "external", "resource": "external", "time": 120_000, "at": "lento.py:2"},
+                ],
+                weight=0.1,
+                api_cpu_ms=0.1,
+            ),
+        ]
+    )
+    raw["deployment"]["db"]["pool_per_worker"]["pool_size"] = pool_size
+    return raw
+
+
+def test_resource_still_held_at_the_end_counts_for_whoever_holds_it():
+    """BE-04: antes, el uso se anotaba al soltar. /lento nunca soltaba y quedaba en 0 %, y el banner
+    culpaba a /rapido del 100 % del pool."""
+    run = simulate(load_model(holds_and_waits()), rps=20, duration_s=60, seed=1, client_timeout_s=None)
+    pool = resource(run, "db_pool")
+    assert pool.utilization > 0.9
+    assert pool.by_endpoint[0].endpoint == "GET /lento" and pool.by_endpoint[0].share > 0.9
+    assert run.bottleneck.resource == "db_pool" and run.bottleneck.line == "lento.py:1"
+    assert run.bottleneck.endpoint == "GET /lento"
+
+
+@pytest.mark.parametrize("seconds", [5, 60])
+def test_attributed_time_matches_utilization(monkeypatch, seconds):
+    """Lo que se reparte entre endpoints es todo el tiempo ocupado: la suma de lo anotado de cada
+    recurso calza con utilization × capacidad × duración, también con requests y trabajos en curso."""
+    trackers = []
+
+    class Spy(UsageTracker):
+        def __init__(self):
+            super().__init__()
+            trackers.append(self)
+
+    monkeypatch.setattr(importlib.import_module("app.engine.simulate"), "UsageTracker", Spy)  # el módulo, no la función
+    raw = holds_and_waits()
+    raw["endpoints"].append(
+        endpoint("POST /sync", [cpu(30, "sync.py:1"), query(5, "sync.py:2")], weight=0.2, is_async=False)
+    )
+    raw["deployment"]["queues"] = {
+        "q": {"workers": 2, "job_steps": [{"kind": "cpu", "resource": None, "time": 2000, "at": "job.py:1"}]}
+    }
+    raw["endpoints"].append(
+        endpoint(
+            "POST /encola", [{"kind": "background", "resource": "background", "time": 1, "queue": "q"}], weight=0.2
+        )
+    )
+    run = simulate(load_model(raw), rps=20, duration_s=seconds, seed=1, client_timeout_s=None)
+    seconds_by_resource = {
+        r: sum(sum(lines.values()) for lines in owners.values()) for r, owners in trackers[0]._seconds.items()
+    }
+    for r in run.resources:
+        expected = r.utilization * r.capacity * seconds
+        assert seconds_by_resource.get(r.name, 0.0) == pytest.approx(expected, abs=5e-5 * r.capacity * seconds), (
+            r.name
+        )  # utilization va redondeada a 4 decimales
