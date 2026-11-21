@@ -1,5 +1,5 @@
 {
-  "repo": "/tmp/claude-1000/-home-dvillasc-progra-uc-platanus-hack-26-cl-team-19/959acd64-48c5-4a5e-86b3-72c7c35b5d30/scratchpad/repos/full-stack-fastapi-template",
+  "repo": "full-stack-fastapi-template",
   "stats": {
     "files": 22,
     "functions": 61,
@@ -16,8 +16,8 @@
     "endpoints_with_plugin": 0,
     "endpoints_with_background": 0,
     "risks": 0,
-    "seconds_parse": 0.018,
-    "seconds_total": 0.034
+    "seconds_parse": 0.017,
+    "seconds_total": 0.04
   },
   "endpoints": [
     {
@@ -28,6 +28,7 @@
       "line": 14,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -44,9 +45,17 @@
         {
           "kind": "db",
           "op": "read",
-          "detail": "session.exec",
+          "detail": "session.exec(Item)",
+          "shape": "count_all",
           "file": "backend/app/api/routes/items.py",
           "line": 23,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/api/routes/items.py:21",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.items:read_items"
           ]
@@ -55,18 +64,16 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(Item)",
+          "shape": "range",
           "file": "backend/app/api/routes/items.py",
           "line": 27,
-          "via": [
-            "backend.app.api.routes.items:read_items"
-          ]
-        },
-        {
-          "kind": "db",
-          "op": "read",
-          "detail": "session.exec",
-          "file": "backend/app/api/routes/items.py",
-          "line": 34,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/api/routes/items.py:21",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.items:read_items"
           ]
@@ -75,8 +82,34 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(Item)",
+          "shape": "count",
+          "file": "backend/app/api/routes/items.py",
+          "line": 34,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/api/routes/items.py:21",
+              "else"
+            ]
+          ],
+          "via": [
+            "backend.app.api.routes.items:read_items"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "session.exec(Item)",
+          "shape": "range",
           "file": "backend/app/api/routes/items.py",
           "line": 42,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/api/routes/items.py:21",
+              "else"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.items:read_items"
           ]
@@ -85,8 +118,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -102,6 +138,7 @@
       "line": 49,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -119,8 +156,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(Item)",
+          "shape": "pk",
           "file": "backend/app/api/routes/items.py",
           "line": 53,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:read_item"
           ]
@@ -129,8 +169,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -146,6 +189,7 @@
       "line": 62,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -163,8 +207,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/api/routes/items.py",
           "line": 69,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:create_item"
           ]
@@ -173,8 +220,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/items.py",
           "line": 70,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:create_item"
           ]
@@ -183,8 +233,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/api/routes/items.py",
           "line": 71,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:create_item"
           ]
@@ -193,8 +246,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -210,6 +266,7 @@
       "line": 76,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -228,8 +285,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(Item)",
+          "shape": "pk",
           "file": "backend/app/api/routes/items.py",
           "line": 86,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:update_item"
           ]
@@ -238,8 +298,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/api/routes/items.py",
           "line": 93,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:update_item"
           ]
@@ -248,8 +311,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/items.py",
           "line": 94,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:update_item"
           ]
@@ -258,8 +324,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/api/routes/items.py",
           "line": 95,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:update_item"
           ]
@@ -268,8 +337,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -285,6 +357,7 @@
       "line": 100,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -303,8 +376,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(Item)",
+          "shape": "pk",
           "file": "backend/app/api/routes/items.py",
           "line": 106,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:delete_item"
           ]
@@ -313,8 +389,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.delete",
+          "shape": "stage",
           "file": "backend/app/api/routes/items.py",
           "line": 111,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:delete_item"
           ]
@@ -323,8 +402,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/items.py",
           "line": 112,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.items:delete_item"
           ]
@@ -333,8 +415,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -350,7 +435,9 @@
       "line": 24,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -367,8 +454,16 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/crud.py",
           "line": 57,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/crud.py:55",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.login:login_access_token",
             "backend.app.crud:authenticate"
@@ -378,8 +473,16 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/crud.py",
           "line": 58,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/crud.py:55",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.login:login_access_token",
             "backend.app.crud:authenticate"
@@ -389,8 +492,16 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/crud.py",
           "line": 59,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/crud.py:55",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.login:login_access_token",
             "backend.app.crud:authenticate"
@@ -400,12 +511,35 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:login_access_token",
             "backend.app.crud:authenticate",
             "backend.app.crud:get_user_by_email"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "verify_and_update",
+          "detail": "password_hash.verify_and_update (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 32,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/crud.py:47",
+              "body"
+            ]
+          ],
+          "via": [
+            "backend.app.api.routes.login:login_access_token",
+            "backend.app.crud:authenticate",
+            "backend.app.core.security:verify_password"
           ]
         }
       ],
@@ -419,6 +553,7 @@
       "line": 46,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -435,8 +570,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -452,6 +590,7 @@
       "line": 54,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -468,8 +607,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:recover_password",
             "backend.app.crud:get_user_by_email"
@@ -486,7 +628,9 @@
       "line": 78,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -503,8 +647,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:reset_password",
             "backend.app.crud:get_user_by_email"
@@ -514,8 +661,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/crud.py",
           "line": 28,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:reset_password",
             "backend.app.crud:update_user"
@@ -525,8 +675,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/crud.py",
           "line": 29,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:reset_password",
             "backend.app.crud:update_user"
@@ -536,11 +689,34 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/crud.py",
           "line": 30,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:reset_password",
             "backend.app.crud:update_user"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "password_hash.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 36,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/crud.py:23",
+              "body"
+            ]
+          ],
+          "via": [
+            "backend.app.api.routes.login:reset_password",
+            "backend.app.crud:update_user",
+            "backend.app.core.security:get_password_hash"
           ]
         }
       ],
@@ -554,6 +730,7 @@
       "line": 105,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -570,8 +747,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -580,8 +760,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.login:recover_password_html_content",
             "backend.app.crud:get_user_by_email"
@@ -598,7 +781,9 @@
       "line": 24,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -612,8 +797,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/api/routes/private.py",
           "line": 35,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.private:create_user"
           ]
@@ -622,10 +810,27 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/private.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.private:create_user"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "password_hash.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 36,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "backend.app.api.routes.private:create_user",
+            "backend.app.core.security:get_password_hash"
           ]
         }
       ],
@@ -639,6 +844,7 @@
       "line": 37,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -654,9 +860,12 @@
         {
           "kind": "db",
           "op": "read",
-          "detail": "session.exec",
+          "detail": "session.exec(User)",
+          "shape": "count_all",
           "file": "backend/app/api/routes/users.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:read_users"
           ]
@@ -665,8 +874,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "range",
           "file": "backend/app/api/routes/users.py",
           "line": 48,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:read_users"
           ]
@@ -675,8 +887,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -692,7 +907,9 @@
       "line": 57,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -709,8 +926,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -719,8 +939,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:create_user",
             "backend.app.crud:get_user_by_email"
@@ -730,8 +953,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/crud.py",
           "line": 14,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:create_user",
             "backend.app.crud:create_user"
@@ -741,8 +967,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/crud.py",
           "line": 15,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:create_user",
             "backend.app.crud:create_user"
@@ -752,11 +981,29 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/crud.py",
           "line": 16,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:create_user",
             "backend.app.crud:create_user"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "password_hash.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 36,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "backend.app.api.routes.users:create_user",
+            "backend.app.crud:create_user",
+            "backend.app.core.security:get_password_hash"
           ]
         }
       ],
@@ -770,6 +1017,7 @@
       "line": 82,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -787,8 +1035,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/api/routes/users.py",
           "line": 97,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user_me"
           ]
@@ -797,8 +1048,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/users.py",
           "line": 98,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user_me"
           ]
@@ -807,8 +1061,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/api/routes/users.py",
           "line": 99,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user_me"
           ]
@@ -817,8 +1074,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -827,8 +1087,16 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/api/routes/users.py:89",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.users:update_user_me",
             "backend.app.crud:get_user_by_email"
@@ -845,7 +1113,9 @@
       "line": 104,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -862,8 +1132,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/api/routes/users.py",
           "line": 119,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_password_me"
           ]
@@ -872,8 +1145,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/users.py",
           "line": 120,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_password_me"
           ]
@@ -882,10 +1158,41 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "verify_and_update",
+          "detail": "password_hash.verify_and_update (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 32,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "backend.app.api.routes.users:update_password_me",
+            "backend.app.core.security:verify_password"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "password_hash.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 36,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "backend.app.api.routes.users:update_password_me",
+            "backend.app.core.security:get_password_hash"
           ]
         }
       ],
@@ -899,6 +1206,7 @@
       "line": 125,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -915,8 +1223,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -932,6 +1243,7 @@
       "line": 133,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -949,8 +1261,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.delete",
+          "shape": "stage",
           "file": "backend/app/api/routes/users.py",
           "line": 141,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:delete_user_me"
           ]
@@ -959,8 +1274,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/users.py",
           "line": 142,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:delete_user_me"
           ]
@@ -969,8 +1287,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -986,7 +1307,9 @@
       "line": 147,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -1003,8 +1326,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:register_user",
             "backend.app.crud:get_user_by_email"
@@ -1014,8 +1340,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/crud.py",
           "line": 14,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:register_user",
             "backend.app.crud:create_user"
@@ -1025,8 +1354,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/crud.py",
           "line": 15,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:register_user",
             "backend.app.crud:create_user"
@@ -1036,11 +1368,29 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/crud.py",
           "line": 16,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:register_user",
             "backend.app.crud:create_user"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "password_hash.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 36,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "backend.app.api.routes.users:register_user",
+            "backend.app.crud:create_user",
+            "backend.app.core.security:get_password_hash"
           ]
         }
       ],
@@ -1054,6 +1404,7 @@
       "line": 163,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -1070,8 +1421,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/routes/users.py",
           "line": 169,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:read_user_by_id"
           ]
@@ -1080,8 +1434,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -1097,7 +1454,9 @@
       "line": 187,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -1114,8 +1473,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/routes/users.py",
           "line": 197,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user"
           ]
@@ -1124,8 +1486,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -1134,8 +1499,16 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(User)",
+          "shape": "lookup",
           "file": "backend/app/crud.py",
           "line": 36,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/api/routes/users.py:203",
+              "body"
+            ]
+          ],
           "via": [
             "backend.app.api.routes.users:update_user",
             "backend.app.crud:get_user_by_email"
@@ -1145,8 +1518,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.add",
+          "shape": "stage",
           "file": "backend/app/crud.py",
           "line": 28,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user",
             "backend.app.crud:update_user"
@@ -1156,8 +1532,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/crud.py",
           "line": 29,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user",
             "backend.app.crud:update_user"
@@ -1167,11 +1546,34 @@
           "kind": "db",
           "op": "read",
           "detail": "session.refresh",
+          "shape": "pk",
           "file": "backend/app/crud.py",
           "line": 30,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:update_user",
             "backend.app.crud:update_user"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "password_hash.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "backend/app/core/security.py",
+          "line": 36,
+          "in_loop": false,
+          "branch": [
+            [
+              "backend/app/crud.py:23",
+              "body"
+            ]
+          ],
+          "via": [
+            "backend.app.api.routes.users:update_user",
+            "backend.app.crud:update_user",
+            "backend.app.core.security:get_password_hash"
           ]
         }
       ],
@@ -1185,6 +1587,7 @@
       "line": 215,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -1203,8 +1606,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/routes/users.py",
           "line": 221,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:delete_user"
           ]
@@ -1213,8 +1619,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.exec(Item)",
+          "shape": "range",
           "file": "backend/app/api/routes/users.py",
           "line": 229,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:delete_user"
           ]
@@ -1223,8 +1632,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.delete",
+          "shape": "stage",
           "file": "backend/app/api/routes/users.py",
           "line": 230,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:delete_user"
           ]
@@ -1233,8 +1645,11 @@
           "kind": "db",
           "op": "write",
           "detail": "session.commit",
+          "shape": "commit",
           "file": "backend/app/api/routes/users.py",
           "line": 231,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.routes.users:delete_user"
           ]
@@ -1243,8 +1658,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -1260,6 +1678,7 @@
       "line": 16,
       "rooted": true,
       "path_resolved": true,
+      "async": false,
       "touches": [
         "db"
       ],
@@ -1276,8 +1695,11 @@
           "kind": "db",
           "op": "read",
           "detail": "session.get(User)",
+          "shape": "pk",
           "file": "backend/app/api/deps.py",
           "line": 41,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "backend.app.api.deps:get_current_user"
           ]
@@ -1293,6 +1715,7 @@
       "line": 30,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [],
       "db_in_handler": false,
       "db_ops": [],

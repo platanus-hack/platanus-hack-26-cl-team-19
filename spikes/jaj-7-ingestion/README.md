@@ -44,6 +44,13 @@ Por cada endpoint: método, path completo, handler con archivo:línea, las funci
 - `cache`: receptores con nombre `redis` o `cache`.
 - `background`: `.delay()`, `.apply_async()` y `BackgroundTasks.add_task`.
 - `plugin`: `x.instance.metodo()`, donde el destino se resuelve en runtime.
+- `cpu`: hash o verificación de contraseñas con pwdlib, passlib, bcrypt o argon2.
+
+Agregado en [JAJ-45](../jaj-45-numeros/README.md), para asignarle a cada efecto un número del catálogo:
+- `shape`: la forma de cada acceso a DB (`pk`, `lookup`, `range`, `count`, `count_all`, `scan`, `commit`, `stage`, `unknown`). Se deduce de la cadena del statement o del SQL de aiosql.
+- `branch`: las ramas `if/else` que contienen la llamada.
+- `in_loop`: si la llamada se repite dentro de un loop.
+- `async`: si el endpoint es `async def`.
 
 Cómo resuelve las llamadas:
 - Imports absolutos y relativos.
