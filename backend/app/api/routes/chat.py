@@ -1,4 +1,4 @@
-"""``POST /projects/{id}/chat``: el chat del agente en el editor (JAJ-67, modo secundario de JAJ-54).
+"""``POST /projects/{id}/chat``: el chat del agente en el editor (JAJ-67), el modo principal del agente (ADR 0001).
 
 Transmite el loop (``app/agent/loop.py``) como NDJSON: una línea JSON por evento (``text``,
 ``tool_call``, ``tool_result``, ``done``, ``error``), para que el editor muestre cada tool call y su

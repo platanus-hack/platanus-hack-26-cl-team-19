@@ -8,7 +8,7 @@ Reemplaza el paso 1 del [ADR 0001](0001-el-llm-opera-sobre-el-modelo-no-lo-extra
 
 Ahora la arquitectura (endpoints → pasos con forma de query, caché, colas, servicios externos y componentes) la lee una IA. Lo hace con un schema estricto, igual para todos los lenguajes. La IA puede correr en dos lugares, con el mismo schema:
 
-* **La CLI del usuario** (modo MCP, [JAJ-54](https://linear.app/jajathom/issue/JAJ-54)): lee su repo local y llama a `submit_architecture`.
+* **Una CLI de IA por `/mcp`** (vía secundaria, ver [ADR 0001](0001-el-llm-opera-sobre-el-modelo-no-lo-extrae.md)): lee su repo local y llama a `submit_architecture`.
 * **La ingesta de GitHub:** la IA (Claude u OpenAI, a elección del usuario) corre en el backend y lee el tarball con `list_files`, `read_file` y `grep` (`backend/app/ingest/analyzer.py`). La key sale con la misma regla que el chat: la del header, la personal elegida en Configuración o la de Branchpoint con cuota (IA-2, `llm_key` en `backend/app/api/routes/credentials.py`).
 
 Lo demás del ADR 0001 sigue igual: el modelo lo arma `build_model.py` con el catálogo, el LLM no edita el JSON del modelo, y el agente opera con tools tipadas.

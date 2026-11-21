@@ -1,14 +1,15 @@
-"""Branchpoint como servidor MCP (JAJ-54, JAJ-67): las tools del agente para la CLI de IA del usuario.
+"""Branchpoint como servidor MCP (JAJ-54, JAJ-67): las tools del agente para una CLI de IA.
 
-El loop con el LLM corre en la CLI del usuario (por ejemplo Claude Code con su suscripción) y el
-backend solo ejecuta las tools de ``app/agent/tools.py``. Se monta en la API en ``/mcp``:
+Es la vía secundaria del agente (ADR 0001): el modo principal es el chat del editor, y la interfaz no
+ofrece vincular una CLI (JAJ-123). Sirve para pruebas internas y para quien ya usa una CLI. El loop con
+el LLM corre en la CLI (por ejemplo Claude Code) y el backend solo ejecuta las tools de
+``app/agent/tools.py``. ``INSTRUCTIONS`` es también el prompt base del chat. Se monta en la API en ``/mcp``:
 
     claude mcp add --scope user --transport http branchpoint https://<api>/mcp --header "Authorization: Bearer <token>"
 
 **Quién llama.** Con login (``SUPABASE_URL``), cada request trae el token de sesión de Supabase, el
 mismo que usa el editor (JAJ-78), y el usuario solo ve sus proyectos. Sin login
-(``BRANCHPOINT_AUTH=off``), los proyectos sin dueño. El token de larga duración para emparejar la
-CLI es JAJ-81.
+(``BRANCHPOINT_AUTH=off``), los proyectos sin dueño. No hay token de larga duración (JAJ-81 cancelada).
 
 **Transporte.** Streamable HTTP sin estado (cada request se valida sola) y respuestas JSON.
 ``BRANCHPOINT_MCP_ALLOWED_HOSTS`` (separados por coma) son los Host aceptados (protección contra DNS
