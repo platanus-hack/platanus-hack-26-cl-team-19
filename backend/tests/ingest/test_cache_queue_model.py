@@ -7,7 +7,12 @@ from app.ingest.build_model import build
 from app.models import load_model
 
 
-def test_ingestion_models_cache_aside_and_celery_worker(tmp_path):
+@pytest.mark.parametrize(
+    ("concurrency", "replicas", "expected_workers", "label"),
+    [(3, None, 3, "OBSERVADO"), (3, 2, 6, "OBSERVADO"), (None, None, 1, "SUPUESTO")],
+    ids=["concurrencia", "concurrencia-por-replica", "concurrencia-desconocida"],
+)
+def test_ingestion_models_cache_aside_and_celery_worker(tmp_path, concurrency, replicas, expected_workers, label):
     (tmp_path / "main.py").write_text(
         dedent(
             """\
@@ -43,10 +48,13 @@ def test_ingestion_models_cache_aside_and_celery_worker(tmp_path):
         ),
         encoding="utf-8",
     )
-    (tmp_path / "compose.yml").write_text(
-        "services:\n  refresh-worker:\n    command: celery -A main.celery worker -Q refresh --concurrency=3\n",
-        encoding="utf-8",
-    )
+    command = "celery -A main.celery worker -Q refresh"
+    if concurrency is not None:
+        command += f" --concurrency={concurrency}"
+    manifest = f"services:\n  refresh-worker:\n    command: {command}\n"
+    if replicas is not None:
+        manifest += f"    deploy:\n      replicas: {replicas}\n"
+    (tmp_path / "compose.yml").write_text(manifest, encoding="utf-8")
 
     raw = build(tmp_path, {})
     cached_endpoint = next(ep for ep in raw["endpoints"] if ep["method"] == "GET")
@@ -56,12 +64,15 @@ def test_ingestion_models_cache_aside_and_celery_worker(tmp_path):
     assert lookup["hit_ratio"]["value"] is None
     assert lookup["hit_ratio"]["needs_review"]
     queue = raw["deployment"]["queues"]["refresh"]
-    assert queue["workers"]["value"] == 3 and queue["workers"]["label"] == "OBSERVADO"
+    assert (queue["workers"]["value"], queue["workers"]["label"]) == (expected_workers, label)
+    assert queue["workers"].get("derived", False) == (replicas is not None)
     assert queue["job_steps"][0]["detail"] == "db.get(Item)"
-    assert {m["field"] for m in raw["deployment"]["iac"]["missing"]} >= {
+    missing = {m["field"] for m in raw["deployment"]["iac"]["missing"]}
+    assert missing >= {
         f"overrides.cache_hit_ratio.{lookup['at']}",
         "deployment.queues.refresh.max_length",
     }
+    assert ("deployment.queues.refresh.workers" in missing) == (concurrency is None)
     model = load_model(raw)
     post_steps = next(ep for ep in model.endpoints if ep.id == "POST /refresh").steps
     assert [step.queue for step in post_steps] == ["refresh", None]
@@ -83,6 +94,44 @@ def test_ingestion_models_cache_aside_and_celery_worker(tmp_path):
     run = simulate(load_model(configured), rps=100, duration_s=5, seed=1)
     assert run.cache.hits > 0 and run.cache.misses > 0
     assert run.queues[0].processed > 0
+
+
+def test_discarded_cache_branch_does_not_ask_for_hit_ratio(tmp_path):
+    (tmp_path / "main.py").write_text(
+        dedent(
+            """\
+            from fastapi import FastAPI
+
+            app = FastAPI()
+
+            def load_cached():
+                cached = redis.get("item")
+                if cached is None:
+                    cached = db.get(Item, 1)
+                    redis.set("item", cached)
+                return cached
+
+            @app.get("/item")
+            def get_item(use_cache: bool):
+                if use_cache:
+                    return load_cached()
+                else:
+                    db.get(User, 1)
+                    db.get(Order, 1)
+                    return db.get(Item, 1)
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    model = build(tmp_path, {})
+    endpoint = model["endpoints"][0]
+    assert all(step["kind"] == "db" for step in endpoint["steps"])
+    (cache,) = endpoint["alternatives"]
+    assert cache["on_miss"]
+    assert f"overrides.cache_hit_ratio.{cache['at']}" not in {
+        missing["field"] for missing in model["deployment"]["iac"]["missing"]
+    }
 
 
 @pytest.mark.parametrize("key, guarded", [("x", True), ("another_key", False)])

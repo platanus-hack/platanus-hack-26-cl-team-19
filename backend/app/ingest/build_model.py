@@ -319,7 +319,6 @@ def effect_steps(effects: list[dict], ctx: dict) -> list[dict]:
         what = f"tasa de aciertos de la caché en {at}"
         if ratio is None:
             step["hit_ratio"] = num(None, "fracción", "SUPUESTO", f"Falta la {what}", default=True)
-            ctx["questions"][f"overrides.cache_hit_ratio.{at}"] = f"¿Cuál es la {what}, como fracción entre 0 y 1?"
         else:
             if type(ratio) not in (int, float) or not 0 <= ratio <= 1:
                 raise ValueError(f"La {what} debe estar entre 0 y 1")
@@ -327,6 +326,16 @@ def effect_steps(effects: list[dict], ctx: dict) -> list[dict]:
         step["on_miss"] = selected
         moved.update(region)
     return [step for i, step in enumerate(steps) if i not in moved]
+
+
+def _add_cache_questions(steps: list[dict], questions: dict[str, str]) -> None:
+    """Pregunta por las cachés que quedaron en los pasos de la simulación."""
+    for step in steps:
+        if step.get("hit_ratio", {}).get("needs_review"):
+            at = step["at"]
+            questions[f"overrides.cache_hit_ratio.{at}"] = (
+                f"¿Cuál es la tasa de aciertos de la caché en {at}, como fracción entre 0 y 1?"
+            )
 
 
 def _mean_cache_reads(steps: list[dict]) -> list[dict]:
@@ -346,6 +355,7 @@ def _mean_cache_reads(steps: list[dict]) -> list[dict]:
 def build_endpoint(ep: dict, ctx: dict) -> dict:
     steps = effect_steps(ep["effects"], ctx)
     kept, dropped = pick_branches(steps)
+    _add_cache_questions(kept, ctx["questions"])
     order = {id(s): i for i, s in enumerate(steps)}
     kept.sort(key=lambda s: order[id(s)])
     db = [s for s in kept if s["resource"] == "db_connection"]
@@ -415,6 +425,7 @@ def build_queues(graph: dict, iac: dict, answers: dict, ctx: dict) -> dict:
             continue
         candidates = effect_steps(effects, ctx)
         steps, _ = pick_branches(candidates)
+        _add_cache_questions(steps, ctx["questions"])
         order = {id(step): i for i, step in enumerate(candidates)}
         steps.sort(key=lambda step: order[id(step)])
         for step in steps:
