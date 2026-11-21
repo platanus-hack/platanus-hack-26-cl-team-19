@@ -9,7 +9,7 @@
 5. **Validado con Claude Code real** (plan Pro, sin API key). Conectado a `mcp_server.py`, el agente:
    * simuló CyberDay y citó el cuello de botella con su `archivo:línea`;
    * probó 4 propuestas con `propose`, porque cada arreglo movía el cuello a otro lado;
-   * recomendó 6 réplicas, pooler y DB large: p95 de 22,3 s a 287 ms, 0 % de errores, +US$244/mes.
+   * recomendó 6 réplicas, pooler y DB large: p95 de 22,3 s a 287 ms, 0 % de errores, +US$244/mes (números `SUPUESTO` del motor).
 
    Todos los números salieron de las tools.
 
@@ -48,7 +48,7 @@ Fuentes leídas el 2026-11-21.
   - **El token:** identifica al usuario y al proyecto, no es una credencial de IA. Se guarda hasheado y se puede revocar.
   - **Después:** OAuth de MCP, que Claude Code soporta para servidores remotos.
   - **Conexión verificada:** el primer `tools/list` con ese token.
-- **Las tools son las del ADR 0001 y salen del backend:** `simulate`, `compare`, `propose` (operaciones de JAJ-68), `estimate_cost`, `get_model`, `list_assumptions`, `set_traffic`/`set_deployment`/`set_goals` (con `quote`) y `read_file`/`grep`. Cada `propose` aceptado crea una versión con origen `agente`, y el editor la muestra.
+- **Las tools son las del ADR 0001 y salen del backend.** El `propose` del spike junta en una sola llamada dos tools del ADR: `propose_version`, que aplica las operaciones y crea la versión, y `compare`, que simula antes y después. En JAJ-67 van separadas. Son: `simulate`, `compare`, `propose_version` (operaciones de JAJ-68), `estimate_cost`, `get_model`, `list_assumptions`, `set_traffic`/`set_deployment`/`set_goals` (con `quote`) y `read_file`/`grep`. Cada `propose_version` aceptado crea una versión con origen `agente`, y el editor la muestra.
 - **"El LLM nunca inventa números" se cumple por construcción:** las tools devuelven los números del motor, el catálogo y la tabla de precios. Las `instructions` del servidor le piden al LLM citar esos resultados.
 
 ### 2. Modo chat en el editor (secundario): loop en el backend (JAJ-67)
@@ -110,7 +110,7 @@ python spikes/jaj-54-byos/mcp_server.py   # http://127.0.0.1:8765/mcp
 python spikes/jaj-54-byos/check_client.py
 ```
 
-Resultado (template en CyberDay ×20):
+Resultado (template en CyberDay ×20; todos los números son `SUPUESTO`, salen del motor):
 
 - **`simulate`:** p95 de 22,3 s. El cuello es la CPU de la API al 100 %, y el 59 % se va en `backend/app/core/security.py:36`, el hash de contraseñas.
 - **`propose` con `scale_api` replicas 0:** devuelve `Operaciones inválidas: 0.scale_api.replicas: Input should be greater than or equal to 1`, que el LLM lee y corrige.
@@ -169,10 +169,10 @@ Lo anotó el bot reviewer sobre el spike, y aplica al servidor MCP del backend:
 
 - **Ningún número libre del LLM.** El tráfico entra solo por `set_traffic(..., quote)` y las metas por `set_goals(..., quote)`. `simulate` elige un escenario del proyecto y no recibe `rps` ni duración. En `propose`, `apply_ops` (JAJ-68) rechaza un `hit_ratio` sin la `quote` del usuario, y los números de diseño, como las réplicas, quedan `SUPUESTO` con la fuente "Propuesta del agente". El spike ya lo cumple, y `check_client.py` prueba las dos cosas: el `rps` inventado se descarta y el `add_cache` sin `quote` se rechaza.
 - **Procedencia en cada resultado.** Etiqueta (`SUPUESTO` o `ESTIMADO`), fuente (motor, escenario, semilla y duración) y cantidad de supuestos, para que el agente pueda citarlos. Todas las advertencias, sin recortar. El spike ya lo cumple.
-- **Límites por token de Branchpoint** (el que conecta la CLI). En modo CLI, Branchpoint no controla el loop, así que el servidor pone un rate limit de llamadas por minuto y un tope de simulaciones por token y por día. Cada `propose` cuenta como 2 simulaciones. La duración ya es fija en el servidor.
-- **Errores con una sola forma** (`{"error": ...}`), también para un ejemplo o un escenario que no existen, y para errores internos. Así el LLM corrige igual en todos los casos. En el spike lo cumplen `simulate` y `propose`; `list_examples` no recibe argumentos. En JAJ-67 hay que sumar que los argumentos desconocidos se rechacen con `{"error": ...}` en vez de descartarse en silencio, como hoy el `rps`.
+- **Límites por token de Branchpoint** (el que conecta la CLI). En modo CLI, Branchpoint no controla el loop, así que el servidor pone un rate limit de llamadas por minuto y un tope de simulaciones por token y por día. Cuentan `simulate` (1) y `compare` (2). `propose_version` no simula. La duración ya es fija en el servidor.
+- **Errores con una sola forma** (`{"error": ...}`), también para un ejemplo o un escenario que no existen, y para errores internos. Así el LLM corrige igual en todos los casos. En el spike lo cumplen todas las tools. En JAJ-67 hay que sumar que los argumentos desconocidos se rechacen con `{"error": ...}` en vez de descartarse en silencio, como hoy el `rps`.
 - **El cuello de botella con `line` como campo propio,** no solo dentro de `message`. El spike ya lo cumple.
-- **`check_client.py` pasa a ser un test** que corre en CI.
+- **`check_client.py` pasa a ser un test** que corre en CI, con `mcp>=2,<3` en las dependencias del backend.
 - **Credenciales fuera de los logs.** "No se registra en logs" cubre también los middlewares de request, las trazas de error y el token de Branchpoint.
 
 ## Pendientes

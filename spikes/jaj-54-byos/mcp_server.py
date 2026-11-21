@@ -106,7 +106,10 @@ def _simulate(raw: dict[str, Any], scenario: str, seed: int) -> Run:
 @server.tool()
 def list_examples() -> list[dict[str, Any]]:
     """Lista los modelos de ejemplo (repos analizados) con su despliegue y las req/s de cada escenario."""
-    return [{"id": sid, **model_summary(raw, load_model(raw))} for sid in sample_ids() if (raw := load_sample(sid))]
+    try:
+        return [{"id": sid, **model_summary(raw, load_model(raw))} for sid in sample_ids() if (raw := load_sample(sid))]
+    except Exception as e:  # noqa: BLE001 - todo error llega al LLM con la misma forma
+        return [{"error": f"Error interno de Branchpoint ({type(e).__name__}): {e}"}]
 
 
 @server.tool()
@@ -127,7 +130,10 @@ def simulate(example: str, scenario: str = "cyberday", seed: int = 0) -> dict[st
 def ops_schema() -> dict[str, Any]:
     """JSON Schema de las operaciones de arquitectura que acepta propose (scale_api, change_db_plan,
     add_pooler, add_cache, move_to_queue)."""
-    return ops_json_schema()
+    try:
+        return ops_json_schema()
+    except Exception as e:  # noqa: BLE001 - todo error llega al LLM con la misma forma
+        return {"error": f"Error interno de Branchpoint ({type(e).__name__}): {e}"}
 
 
 @server.tool()

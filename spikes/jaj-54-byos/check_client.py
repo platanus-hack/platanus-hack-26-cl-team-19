@@ -22,7 +22,11 @@ EXAMPLE = "full-stack-fastapi-template"
 def payload(result) -> object:
     if getattr(result, "structuredContent", None):
         return result.structuredContent
-    return json.loads(result.content[0].text)
+    text = result.content[0].text
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        raise AssertionError(f"La tool respondió texto, no JSON (is_error={result.is_error}): {text[:200]}") from None
 
 
 async def main() -> None:
@@ -33,6 +37,7 @@ async def main() -> None:
             print("tools:", [t.name for t in tools.tools])
 
             sim = payload(await session.call_tool("simulate", {"example": EXAMPLE, "scenario": "cyberday"}))
+            assert "error" not in sim, sim
             print("\nsimulate cyberday:", json.dumps(sim, ensure_ascii=False, indent=1)[:900])
 
             bad = payload(
@@ -46,6 +51,7 @@ async def main() -> None:
                     "propose", {"example": EXAMPLE, "ops": [{"op": "scale_api", "replicas": 4}], "scenario": "cyberday"}
                 )
             )
+            assert "error" not in prop, prop
             print("\npropose scale_api ×4:")
             print(" changes:", prop["changes"])
             print(" p95 ms:", prop["p95_ms"], "| errores:", prop["error_rate"])
@@ -77,6 +83,7 @@ async def main() -> None:
 
             # simulate no tiene rps en su schema: un número inventado por el LLM se descarta
             sneaky = payload(await session.call_tool("simulate", {"example": EXAMPLE, "rps": 5000}))
+            assert "error" not in sneaky, sneaky  # si un día el SDK lo rechaza, este caso cambia
             assert sneaky["rps"] == sim["rps"], "simulate usó un rps que no viene del escenario"
             print(f"\nsimulate con rps=5000 inventado: usa {sneaky['rps']} req/s, la tasa del escenario")
 
