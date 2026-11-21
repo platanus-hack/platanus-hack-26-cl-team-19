@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowLeft, ExternalLink, Lock, RefreshCw } from "@lucide/vue";
+import CliConnectCard from "@/components/onboarding/CliConnectCard.vue";
+import { cliProviders } from "@/components/onboarding/cli-providers";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +14,8 @@ definePageMeta({ middleware: "supabase-session" });
 useSeoMeta({ title: "Configuración · Branchpoint" });
 
 const github = useGithubConnection();
+const cli = useCliConnections();
+const isMock = !useRuntimeConfig().public.apiBase.trim();
 const connected = computed(() => github.installations.value.length > 0);
 const accounts = computed(() =>
   github.installations.value.map((item) => item.account_login).join(", "),
@@ -35,7 +40,13 @@ const accounts = computed(() =>
       <section aria-labelledby="github-title" class="flex flex-col gap-4">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h2 id="github-title" class="text-base font-semibold">GitHub</h2>
+            <h2
+              id="github-title"
+              class="flex items-center gap-2 text-base font-semibold"
+            >
+              <BrandIcon brand="github" class="size-5" />
+              GitHub
+            </h2>
             <p class="mt-1 text-sm text-muted-foreground">
               Los repos a los que Branchpoint puede acceder, con permiso de solo
               lectura.
@@ -137,6 +148,7 @@ const accounts = computed(() =>
               :variant="github.awaitingGithub.value ? 'outline' : 'default'"
               @click="github.connect()"
             >
+              <BrandIcon brand="github" data-icon="inline-start" />
               {{
                 github.awaitingGithub.value
                   ? "Volver a abrir GitHub"
@@ -164,15 +176,41 @@ const accounts = computed(() =>
 
       <Separator />
 
-      <section aria-labelledby="cli-title" class="flex flex-col gap-2">
+      <section aria-labelledby="cli-title" class="flex flex-col gap-4">
         <div class="flex items-start justify-between gap-4">
-          <h2 id="cli-title" class="text-base font-semibold">CLI local</h2>
-          <Badge variant="outline">Próximamente</Badge>
+          <div>
+            <h2 id="cli-title" class="text-base font-semibold">CLI local</h2>
+            <p class="mt-1 text-sm text-muted-foreground">
+              El agente corre en tu propia CLI, con tu suscripción. Activa las
+              que uses para simular y proponer versiones desde tu terminal.
+            </p>
+          </div>
+          <span class="shrink-0 text-sm text-muted-foreground" role="status">{{
+            cli.progress.value
+          }}</span>
         </div>
-        <p class="text-sm text-muted-foreground">
-          Conecta tu CLI de IA para simular y proponer versiones del modelo
-          desde tu terminal.
-        </p>
+        <Alert v-if="!isMock">
+          <AlertDescription
+            >La conexión con la CLI todavía es una vista previa: el comando no
+            funciona aún.</AlertDescription
+          >
+        </Alert>
+        <div class="flex flex-col gap-4">
+          <CliConnectCard
+            v-for="provider in cliProviders"
+            :key="provider.id"
+            v-model:selected="cli.selected[provider.id]"
+            :provider="provider"
+            :state="cli.states[provider.id]"
+            :endpoint="cli.endpoint"
+            :token="cli.tokens[provider.id]"
+            :checking="cli.checking[provider.id]"
+            connected-at="hace un momento"
+            @generate="cli.generate(provider.id)"
+            @check="cli.check(provider.id)"
+            @revoke="cli.revoke(provider.id)"
+          />
+        </div>
       </section>
     </main>
   </div>

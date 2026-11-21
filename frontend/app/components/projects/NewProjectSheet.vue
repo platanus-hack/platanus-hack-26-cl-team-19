@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandIcon from "@/components/BrandIcon.vue";
 import { ExternalLink, Plus } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -134,6 +135,7 @@ async function createProject() {
             @click="github.connect()"
           >
             <Spinner v-if="github.connecting.value" data-icon="inline-start" />
+            <BrandIcon v-else brand="github" data-icon="inline-start" />
             Conectar con GitHub
           </Button>
         </div>

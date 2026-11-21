@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandIcon from "@/components/BrandIcon.vue";
 import AppWordmark from "@/components/AppWordmark.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ async function continueWithGitHub() {
     <div v-if="enabled" class="flex flex-col items-start gap-2">
       <Button :disabled="pending" @click="continueWithGitHub">
         <Spinner v-if="pending" data-icon="inline-start" />
+        <BrandIcon v-else brand="github" data-icon="inline-start" />
         {{ pending ? "Abriendo GitHub…" : "Continuar con GitHub" }}
       </Button>
       <p class="text-xs text-muted-foreground">

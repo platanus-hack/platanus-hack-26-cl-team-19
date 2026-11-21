@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowLeft, ArrowRight, Check } from "@lucide/vue";
 import CliConnectCard from "@/components/onboarding/CliConnectCard.vue";
@@ -175,7 +176,10 @@ async function addDemoRepository() {
             analizar. Solo pide permiso de lectura.
           </p>
           <div class="flex flex-wrap items-center gap-2">
-            <Button @click="github.connect()">Conectar con GitHub</Button>
+            <Button @click="github.connect()">
+              <BrandIcon brand="github" data-icon="inline-start" />
+              Conectar con GitHub
+            </Button>
             <Button variant="ghost" @click="step = 'cli'"
               >Omitir por ahora</Button
             >

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import CliProviderIcon from "./CliProviderIcon.vue";
+import BrandIcon from "@/components/BrandIcon.vue";
 import type { CliConnectionState, CliProvider } from "./cli-providers";
 
 const props = withDefaults(
@@ -57,7 +57,7 @@ const { copy, copied } = useClipboard({ copiedDuring: 1500 });
 <template>
   <Card
     :aria-label="`Conectar ${provider.name}`"
-    class="h-full transition-colors"
+    class="transition-colors"
     :class="selected ? '' : 'border-dashed bg-transparent'"
   >
     <CardHeader>
@@ -65,7 +65,7 @@ const { copy, copied } = useClipboard({ copiedDuring: 1500 });
         <span
           class="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background"
         >
-          <CliProviderIcon :provider="provider.id" class="size-6" />
+          <BrandIcon :brand="provider.id" class="size-6" />
         </span>
         <label :for="`cli-${provider.id}`" class="cursor-pointer">{{
           provider.name
