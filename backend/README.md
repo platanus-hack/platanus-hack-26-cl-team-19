@@ -31,6 +31,8 @@ backend/
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
 │   │   └── failure.py       #   failure_cost(modelo, run): ventas en juego por hora (JAJ-74)
+│   ├── ingest/              # ingesta determinista del repo (ADR 0001, paso 1)
+│   │   └── iac.py           #   archivos de despliegue → servicios y números OBSERVADO (JAJ-60)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos (JAJ-55) y ProjectStore sobre Postgres (JAJ-56)
 │   └── cli.py               # correr una simulación desde la terminal
@@ -39,6 +41,7 @@ backend/
     ├── engine/              # tests del kernel y del motor
     ├── agent/               # tests de las operaciones
     ├── costs/               # tests de los precios y del costo (contra el spike de JAJ-11)
+    ├── ingest/              # tests del lector de archivos de despliegue
     └── api/                 # tests de la API
 ```
 

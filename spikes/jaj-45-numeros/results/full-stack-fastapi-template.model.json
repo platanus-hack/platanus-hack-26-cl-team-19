@@ -147,6 +147,93 @@
         "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
         "date": "2026-11-21"
       }
+    },
+    "services": [
+      {
+        "name": "proxy",
+        "role": "proxy",
+        "at": "compose.yml:3",
+        "image": "traefik:v3.7",
+        "engine": "traefik",
+        "version": "v3.7",
+        "source_file": "compose:compose.yml"
+      },
+      {
+        "name": "db",
+        "role": "db",
+        "at": "compose.yml:20",
+        "image": "postgres:18",
+        "engine": "postgres",
+        "version": "18",
+        "source_file": "compose:compose.yml"
+      },
+      {
+        "name": "adminer",
+        "role": "other",
+        "at": "compose.yml:34",
+        "image": "adminer",
+        "source_file": "compose:compose.yml"
+      },
+      {
+        "name": "backend",
+        "role": "api",
+        "at": "compose.yml:49",
+        "image": "backend:latest",
+        "workers": {
+          "value": 4,
+          "unit": "procesos",
+          "label": "OBSERVADO",
+          "source": "4 workers en el CMD del Dockerfile de backend",
+          "date": "2026-11-21",
+          "at": "backend/Dockerfile:65"
+        },
+        "source_file": "compose:compose.yml"
+      },
+      {
+        "name": "mailpit",
+        "role": "other",
+        "at": "compose.override.yml:71",
+        "image": "axllent/mailpit",
+        "source_file": "compose:compose.override.yml"
+      },
+      {
+        "name": "playwright",
+        "role": "other",
+        "at": "compose.override.yml:77",
+        "source_file": "compose:compose.override.yml"
+      }
+    ],
+    "iac": {
+      "files": [
+        {
+          "path": "compose.yml",
+          "kind": "compose"
+        },
+        {
+          "path": "compose.deploy.yml",
+          "kind": "compose"
+        },
+        {
+          "path": "compose.override.yml",
+          "kind": "compose"
+        },
+        {
+          "path": "backend/Dockerfile",
+          "kind": "dockerfile"
+        },
+        {
+          "path": "frontend/Dockerfile.playwright",
+          "kind": "dockerfile"
+        }
+      ],
+      "deploy_targets": [
+        {
+          "target": "fastapi cloud",
+          "at": ".github/workflows/deploy.yml:51"
+        }
+      ],
+      "warnings": [],
+      "missing": []
     }
   },
   "traffic": {

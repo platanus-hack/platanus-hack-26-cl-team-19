@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn>=0.30",
     "psycopg[binary,pool]>=3.2",  # ProjectStore sobre Postgres (app/db), con DATABASE_URL
     "python-dotenv>=1.0",  # uvicorn --env-file .env
+    "pyyaml>=6.0",  # app/ingest/iac.py: Docker Compose, Kubernetes y render.yaml
 ]
 
 [project.optional-dependencies]
