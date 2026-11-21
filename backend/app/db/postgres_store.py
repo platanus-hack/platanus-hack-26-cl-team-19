@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app.api.store import (
+    Attachment,
     GitHubInstallation,
     Origin,
     Project,
@@ -53,6 +54,27 @@ def _uuid(project_id: str) -> uuid.UUID | None:
         return uuid.UUID(project_id)
     except ValueError:
         return None
+
+
+_ATTACHMENT = (
+    "id, owner_id, project_id, kind, filename, media_type, bytes, storage_path, status, created_at, expires_at"
+)
+
+
+def _attachment(row: dict[str, Any]) -> Attachment:
+    return Attachment(
+        id=str(row["id"]),
+        owner=str(row["owner_id"]),
+        project_id=str(row["project_id"]),
+        kind=row["kind"],
+        filename=row["filename"],
+        media_type=row["media_type"],
+        bytes=row["bytes"],
+        storage_path=row["storage_path"],
+        status=row["status"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+    )
 
 
 def _version(row: dict[str, Any]) -> Version:
@@ -460,3 +482,73 @@ class PostgresProjectStore:
                 (owner, installation_id, repo_id, full_name, default_branch),
             ).fetchone()
         return str(row["id"])
+
+    # ---------- Adjuntos del chat (IA-6) ----------
+
+    def create_attachment(self, attachment: Attachment) -> Attachment:
+        with self._conn() as conn:
+            row = conn.execute(
+                f"""insert into chat_attachments
+                    (id, owner_id, project_id, kind, filename, media_type, bytes, storage_path, status, expires_at)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning {_ATTACHMENT}""",
+                (
+                    attachment.id,
+                    attachment.owner,
+                    attachment.project_id,
+                    attachment.kind,
+                    attachment.filename,
+                    attachment.media_type,
+                    attachment.bytes,
+                    attachment.storage_path,
+                    attachment.status,
+                    attachment.expires_at,
+                ),
+            ).fetchone()
+        return _attachment(row)
+
+    def get_attachment(self, attachment_id: str, owner: str) -> Attachment | None:
+        aid = _uuid(attachment_id)
+        if aid is None:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                f"select {_ATTACHMENT} from chat_attachments where id = %s and owner_id = %s", (aid, owner)
+            ).fetchone()
+        return _attachment(row) if row else None
+
+    def list_attachments(self, project_id: str, owner: str, include_pending: bool = False) -> list[Attachment]:
+        pid = _uuid(project_id)
+        if pid is None:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""select {_ATTACHMENT} from chat_attachments
+                    where project_id = %s and owner_id = %s and expires_at > now() and (%s or status = 'ready')
+                    order by created_at, id""",
+                (pid, owner, include_pending),
+            ).fetchall()
+        return [_attachment(r) for r in rows]
+
+    def mark_attachment_ready(self, attachment_id: str, owner: str, size: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "update chat_attachments set status = 'ready', bytes = %s where id = %s and owner_id = %s",
+                (size, _uuid(attachment_id), owner),
+            )
+
+    def delete_attachment(self, attachment_id: str, owner: str) -> None:
+        aid = _uuid(attachment_id)
+        if aid is None:
+            return
+        with self._conn() as conn:
+            conn.execute("delete from chat_attachments where id = %s and owner_id = %s", (aid, owner))
+
+    def expired_attachments(self, owner: str | None, limit: int = 100) -> list[Attachment]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""select {_ATTACHMENT} from chat_attachments
+                    where expires_at <= now() and (%s::uuid is null or owner_id = %s::uuid)
+                    order by expires_at limit %s""",
+                (owner, owner, limit),
+            ).fetchall()
+        return [_attachment(r) for r in rows]

@@ -44,6 +44,8 @@ Los dos servicios despliegan la rama `main` del espejo cada vez que cambia.
 | `BRANCHPOINT_MCP_ALLOWED_HOSTS` | `branchpoint-api-laq9.onrender.com,branchpoint-api-laq9.onrender.com:*` | Los `Host` que acepta `/mcp` (protección contra DNS rebinding, JAJ-67). Sin ella, solo localhost: la CLI del usuario no se puede conectar a producción |
 | `ANTHROPIC_API_KEY` | sin definir | Key del equipo para Claude (chat y extracción con la cuota de abajo). Se configura como secreto del backend |
 | `OPENAI_API_KEY` | sin definir | Opcional. Key del equipo para OpenAI, con la misma cuota. Sin ella, OpenAI usa solo la key del usuario. Secreta |
+| `SUPABASE_SECRET_KEY` | la secret key del proyecto | Con `SUPABASE_URL`, habilita los adjuntos del chat en Supabase Storage (bucket `chat-attachments`). Secreta |
+| `BRANCHPOINT_ATTACHMENT_TTL_HOURS` | `24` | Horas que vive un adjunto del chat |
 | `BRANCHPOINT_TEAM_CHAT_LIMIT` | `30` | Mensajes de chat al día (UTC) por usuario con la key del equipo |
 | `BRANCHPOINT_TEAM_EXTRACT_LIMIT` | `5` | Repos analizados con IA al día (UTC) por usuario con la key del equipo |
 

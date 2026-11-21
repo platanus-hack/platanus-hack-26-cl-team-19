@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
@@ -97,6 +97,29 @@ class RepoSource:
     @property
     def note(self) -> str:
         return f"Extraída de {self.repo_full_name}@{self.branch} ({self.commit_sha[:7]})"
+
+
+AttachmentKind = Literal["image", "log"]
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """Un archivo que el usuario subió al chat (IA-6). Vive en Storage hasta ``expires_at``."""
+
+    id: str
+    owner: str
+    project_id: str
+    kind: AttachmentKind
+    filename: str
+    media_type: str
+    bytes: int | None
+    storage_path: str
+    status: Literal["pending", "ready"]
+    created_at: datetime
+    expires_at: datetime
+
+    def expired(self, now: datetime | None = None) -> bool:
+        return self.expires_at <= (now or datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -216,6 +239,28 @@ class ProjectStore(Protocol):
         """La ``repo_connections.id`` de ese repo para ``owner``. Reutiliza la que ya existe."""
         ...
 
+    # ---------- Adjuntos del chat (IA-6) ----------
+
+    def create_attachment(self, attachment: Attachment) -> Attachment:
+        """Registra el adjunto en ``pending``. La ruta ya validó el proyecto con ``get``."""
+        ...
+
+    def get_attachment(self, attachment_id: str, owner: str) -> Attachment | None:
+        """El adjunto si es de ``owner`` (vencido o no)."""
+        ...
+
+    def list_attachments(self, project_id: str, owner: str, include_pending: bool = False) -> list[Attachment]:
+        """Los adjuntos vigentes del proyecto, del más viejo al más nuevo."""
+        ...
+
+    def mark_attachment_ready(self, attachment_id: str, owner: str, size: int) -> None: ...
+
+    def delete_attachment(self, attachment_id: str, owner: str) -> None: ...
+
+    def expired_attachments(self, owner: str | None, limit: int = 100) -> list[Attachment]:
+        """Los vencidos de ``owner``, o de todos con ``None`` (para una limpieza periódica)."""
+        ...
+
 
 class OwnedStore:
     """El store visto por un usuario (JAJ-78): ``create``, ``get`` y ``list`` llevan su ``owner``
@@ -256,6 +301,7 @@ class InMemoryProjectStore:
         self._installations: dict[int, tuple[str | None, str, bool]] = {}  # id → (owner, cuenta, revocada)
         self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
         self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
+        self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
 
     def create(
         self,
@@ -368,3 +414,41 @@ class InMemoryProjectStore:
     ) -> str:
         with self._lock:
             return self._connections.setdefault((owner, repo_id), uuid.uuid4().hex[:12])
+
+    def create_attachment(self, attachment: Attachment) -> Attachment:
+        with self._lock:
+            self._attachments[attachment.id] = attachment
+        return attachment
+
+    def get_attachment(self, attachment_id: str, owner: str) -> Attachment | None:
+        a = self._attachments.get(attachment_id)
+        return a if a is not None and a.owner == owner else None
+
+    def list_attachments(self, project_id: str, owner: str, include_pending: bool = False) -> list[Attachment]:
+        now = datetime.now(UTC)
+        mine = [
+            a
+            for a in self._attachments.values()
+            if a.project_id == project_id
+            and a.owner == owner
+            and not a.expired(now)
+            and (include_pending or a.status == "ready")
+        ]
+        return sorted(mine, key=lambda a: a.created_at)
+
+    def mark_attachment_ready(self, attachment_id: str, owner: str, size: int) -> None:
+        with self._lock:
+            a = self._attachments.get(attachment_id)
+            if a is not None and a.owner == owner:
+                self._attachments[attachment_id] = replace(a, status="ready", bytes=size)
+
+    def delete_attachment(self, attachment_id: str, owner: str) -> None:
+        with self._lock:
+            a = self._attachments.get(attachment_id)
+            if a is not None and a.owner == owner:
+                del self._attachments[attachment_id]
+
+    def expired_attachments(self, owner: str | None, limit: int = 100) -> list[Attachment]:
+        now = datetime.now(UTC)
+        gone = [a for a in self._attachments.values() if a.expired(now) and (owner is None or a.owner == owner)]
+        return sorted(gone, key=lambda a: a.expires_at)[:limit]
