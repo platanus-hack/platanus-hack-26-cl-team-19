@@ -159,6 +159,7 @@ class ProjectRepository(BaseModel):
     id: str = Field(description="Id del proyecto que abre este repo (hoy, el mismo proyecto).")
     full_name: str = Field(serialization_alias="fullName", description='"owner/nombre" en GitHub.')
     branch: str | None = Field(None, description="Rama analizada para la v1.")
+    primary: bool = Field(True, description="El repo que simula el motor (IA-5). Va primero en la lista.")
 
 
 class ProjectDetail(BaseModel):
@@ -169,8 +170,8 @@ class ProjectDetail(BaseModel):
     versions: list[VersionSummary]
     repositories: list[ProjectRepository] | None = Field(
         None,
-        description="El repo del que salió la v1 (JAJ-92). null si el proyecto salió de un ejemplo o de un "
-        "modelo subido a mano: así el editor usa su fallback (el nombre del proyecto).",
+        description="Los repos de los que salió la v1, el principal primero (JAJ-92, IA-5). null si el proyecto "
+        "salió de un ejemplo o de un modelo subido a mano: así el editor usa su fallback (el nombre del proyecto).",
     )
 
 

@@ -59,15 +59,15 @@ def _summary(v: Version) -> VersionSummary:
 
 
 def _detail(p: Project) -> ProjectDetail:
-    # JAJ-92: el repo va en una lista porque el editor ya agrupa varios repos por proyecto; hoy hay uno
-    repos = [ProjectRepository(id=p.id, full_name=p.repo_full_name, branch=p.branch)] if p.repo_full_name else None
+    # JAJ-92 e IA-5: todos los repos del proyecto, el principal primero
+    repos = [ProjectRepository(id=p.id, full_name=r.full_name, branch=r.branch, primary=r.primary) for r in p.repos()]
     return ProjectDetail(
         id=p.id,
         name=p.name,
         sample=p.sample,
         created_at=p.created_at,
         versions=[_summary(v) for v in p.versions],
-        repositories=repos,
+        repositories=repos or None,
     )
 
 

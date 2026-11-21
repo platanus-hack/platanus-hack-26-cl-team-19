@@ -29,6 +29,15 @@ class Version:
     model: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class ProjectRepo:
+    """Un repo del proyecto (IA-5). El principal es el que simula el motor."""
+
+    full_name: str
+    branch: str | None
+    primary: bool = True
+
+
 @dataclass
 class Project:
     id: str
@@ -41,6 +50,14 @@ class Project:
     # ejemplo o de un modelo subido a mano
     repo_full_name: str | None = None
     branch: str | None = None
+    # todos los repos (IA-5), el principal primero. Vacío en proyectos de un ejemplo o anteriores a IA-5
+    repositories: list[ProjectRepo] = field(default_factory=list)
+
+    def repos(self) -> list[ProjectRepo]:
+        """Los repos del proyecto, el principal primero. Un proyecto de un solo repo lo deriva de su v1."""
+        if self.repositories:
+            return self.repositories
+        return [ProjectRepo(self.repo_full_name, self.branch, True)] if self.repo_full_name else []
 
     def version(self, number: int) -> Version | None:
         return self.versions[number - 1] if 1 <= number <= len(self.versions) else None
@@ -161,9 +178,11 @@ class ProjectStore(Protocol):
         sample: str | None,
         owner: str | None = None,
         source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
     ) -> Project:
         """Crea el proyecto con su v1. Con ``source``, la v1 queda ligada al repo, la rama y el commit
-        analizados (JAJ-57)."""
+        analizados (JAJ-57). ``sources`` son todos los repos del proyecto, el principal (``source``) primero
+        (IA-5)."""
         ...
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
@@ -271,8 +290,15 @@ class OwnedStore:
         self._store = store
         self.owner = owner
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None, source: RepoSource | None = None) -> Project:
-        return self._store.create(name, model, sample, self.owner, source)
+    def create(
+        self,
+        name: str,
+        model: dict[str, Any],
+        sample: str | None,
+        source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
+    ) -> Project:
+        return self._store.create(name, model, sample, self.owner, source, sources)
 
     def get(self, project_id: str) -> Project | None:
         return self._store.get(project_id, self.owner)
@@ -282,6 +308,15 @@ class OwnedStore:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._store, name)
+
+
+def _repositories(source: RepoSource | None, sources: list[RepoSource] | None) -> list[ProjectRepo]:
+    """Los repos de un proyecto nuevo: solo con más de uno se guardan aparte (uno se deriva de la v1)."""
+    if not sources or len(sources) < 2:
+        return []
+    primary = source.repo_full_name if source else sources[0].repo_full_name
+    ordered = sorted(sources, key=lambda s: s.repo_full_name != primary)
+    return [ProjectRepo(s.repo_full_name, s.branch, s.repo_full_name == primary) for s in ordered]
 
 
 def _now() -> str:
@@ -310,6 +345,7 @@ class InMemoryProjectStore:
         sample: str | None,
         owner: str | None = None,
         source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
     ) -> Project:
         project = Project(
             id=uuid.uuid4().hex[:12],
@@ -319,6 +355,7 @@ class InMemoryProjectStore:
             owner=owner,
             repo_full_name=source.repo_full_name if source else None,
             branch=source.branch if source else None,
+            repositories=_repositories(source, sources),
         )
         note = source.note if source else "Extraída del repo"
         project.versions.append(Version(1, "repo", None, note, project.created_at, copy.deepcopy(model)))

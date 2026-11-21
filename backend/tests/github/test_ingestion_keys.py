@@ -112,3 +112,42 @@ def test_openai_without_keys_is_422(client, keys):
     r = start(client, provider="openai")
     assert r.status_code == 422 and "OpenAI" in r.json()["error"]["message"]
     assert keys == []
+
+
+# ---------- varios repos (IA-5) ----------
+
+
+@pytest.fixture
+def multi(store, monkeypatch):
+    from tests.github.test_multirepo import RepoAnalyst, TwoRepoGitHub
+
+    monkeypatch.setenv("BRANCHPOINT_FRONTEND_URL", "http://front.test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-branchpoint")
+    app = create_app(store=store, auth=FakeAuth(), github_app=TwoRepoGitHub(), attachment_storage=None)
+    app.state.llm_factory = lambda key, model=None: RepoAnalyst()
+    client = TestClient(app, follow_redirects=False, headers={"Authorization": f"Bearer {ALICE}"})
+    connect(client)
+    return client
+
+
+TWO = {"repos": [{"full_name": "acme/api"}, {"full_name": "acme/worker"}], "primary": "acme/api"}
+
+
+def test_two_repos_need_two_extractions_or_nothing(multi, store, monkeypatch):
+    monkeypatch.setenv("BRANCHPOINT_TEAM_EXTRACT_LIMIT", "1")
+    r = multi.post("/github/ingestions", json=TWO)
+    assert r.status_code == 429 and r.json()["error"]["code"] == "team_extract_quota"
+    assert store.team_used(ALICE)["extractions"] == 0
+
+
+def test_two_repos_are_saved_and_listed(multi, store, monkeypatch):
+    monkeypatch.setenv("BRANCHPOINT_TEAM_EXTRACT_LIMIT", "5")
+    r = multi.post("/github/ingestions", json=TWO)
+    assert r.status_code == 202
+    job = wait(multi, r.json()["id"])
+    assert job["status"] == "done", job["error_message"]
+    assert store.team_used(ALICE)["extractions"] == 2
+    project = store.get(job["project_id"], ALICE)
+    assert [(x.full_name, x.primary) for x in project.repos()] == [("acme/api", True), ("acme/worker", False)]
+    listed = multi.get("/projects").json()[0]["repositories"]
+    assert [(x["fullName"], x["primary"]) for x in listed] == [("acme/api", True), ("acme/worker", False)]

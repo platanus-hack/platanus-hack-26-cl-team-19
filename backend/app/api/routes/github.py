@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.agent.loop import model_for
 from app.api.auth import User, current_user, owner_of
@@ -64,13 +64,62 @@ class ConnectionOut(BaseModel):
     revoked: bool
 
 
-class StartIngestion(BaseModel):
-    provider: Provider = Field("anthropic", description="Quién lee el repo: Anthropic (Claude) u OpenAI.")
-    repo_full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$", examples=["acme/tienda"])
+REPO_NAME = r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+MAX_REPOS = 4
+
+
+class RepoChoice(BaseModel):
+    full_name: str = Field(pattern=REPO_NAME, examples=["acme/api"])
     branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
+
+
+class StartIngestion(BaseModel):
+    """Un repo (``repo_full_name`` y ``branch``, la forma de siempre) o varios (``repos`` y ``primary``, IA-5)."""
+
+    provider: Provider = Field("anthropic", description="Quién lee el repo: Anthropic (Claude) u OpenAI.")
+    repo_full_name: str | None = Field(None, pattern=REPO_NAME, examples=["acme/tienda"])
+    branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
+    repos: list[RepoChoice] | None = Field(
+        None, min_length=1, max_length=MAX_REPOS, description=f"Entre 1 y {MAX_REPOS} repos, sin repetidos."
+    )
+    primary: str | None = Field(
+        None, description="El repo que simula el motor. Obligatorio con más de un repo; tiene que estar en repos."
+    )
     name: str | None = Field(
         None, min_length=1, max_length=120, description="nombre del proyecto; por defecto, el repo"
     )
+
+    @model_validator(mode="after")
+    def _one_shape(self) -> StartIngestion:
+        if (self.repo_full_name is None) == (self.repos is None):
+            raise ValueError("manda repo_full_name o repos, no los dos")
+        if self.repos is not None:
+            names = [r.full_name.lower() for r in self.repos]
+            if len(set(names)) != len(names):
+                raise ValueError("repos repetidos")
+            if len(self.repos) > 1:
+                if self.primary is None:
+                    raise ValueError("con más de un repo, primary es obligatorio")
+                if self.primary.lower() not in names:
+                    raise ValueError("primary tiene que ser uno de repos")
+        return self
+
+    def choices(self) -> list[RepoChoice]:
+        """Los repos pedidos, el principal primero."""
+        if self.repos is None:
+            return [RepoChoice(full_name=self.repo_full_name or "", branch=self.branch)]
+        primary = (self.primary or self.repos[0].full_name).lower()
+        return sorted(self.repos, key=lambda r: r.full_name.lower() != primary)
+
+
+class RepoProgressOut(BaseModel):
+    full_name: str
+    branch: str
+    primary: bool
+    status: Literal["queued", "running", "done", "failed"]
+    endpoints: int | None
+    llm_steps: int | None
+    error_message: str | None
 
 
 class IngestionOut(BaseModel):
@@ -87,10 +136,13 @@ class IngestionOut(BaseModel):
     version: int | None
     error_message: str | None
     created_at: str
+    repos: list[RepoProgressOut] | None = Field(None, description="con varios repos: el avance de cada uno")
 
 
 def _out(job: Ingestion) -> IngestionOut:
-    return IngestionOut(**{k: v for k, v in job.__dict__.items() if k != "owner"})
+    data = {k: v for k, v in job.__dict__.items() if k not in ("owner", "repos")}
+    repos = [RepoProgressOut(**r.__dict__) for r in job.repos] if job.repos else None
+    return IngestionOut(**data, repos=repos)
 
 
 def get_github(request: Request) -> GitHubApp:
@@ -284,16 +336,22 @@ def start_ingestion(
     x_openai_api_key: str | None = Header(default=None),
 ) -> IngestionOut:
     owner = owner_of(user)
-    repo = _repo_or_404(request, github, owner, req.repo_full_name)
+    choices = req.choices()
+    found = [_repo_or_404(request, github, owner, c.full_name) for c in choices]
+    branches = [c.branch or r.default_branch for c, r in zip(choices, found, strict=True)]
     # La arquitectura la lee la IA (ADR 0002). La key sale como en el chat: la del header, la personal elegida
-    # o la de Branchpoint con su cuota de extracción. El 422 y el 429 salen acá, antes de encolar.
+    # o la de Branchpoint, que descuenta 1 análisis por repo, todos o ninguno (IA-5). El 422 y el 429 salen
+    # acá, antes de encolar.
     header = x_openai_api_key if req.provider == "openai" else x_anthropic_api_key
-    key = llm_key(request, user, req.provider, header, None, purpose="extract")
+    key = llm_key(request, user, req.provider, header, None, purpose="extract", units=len(found))
     factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
-    llm = factory(key.key, model=model_for(req.provider, "extract"))
-    job = jobs.start(owner, repo.full_name, req.branch or repo.default_branch)
+    llms = [factory(key.key, model=model_for(req.provider, "extract")) for _ in found]  # uno por repo
+    repo, llm = found[0], llms[0]
+    others = [(r.full_name, b) for r, b in zip(found[1:], branches[1:], strict=True)]
+    job = jobs.start(owner, repo.full_name, branches[0], others or None)
     name = req.name or repo.full_name.split("/", 1)[1]
     cap = team_token_cap() if key.source == "team" else None  # el tope es solo para la key de Branchpoint
+    secondaries = [(r, b, m) for r, b, m in zip(found[1:], branches[1:], llms[1:], strict=True)] or None
     tasks.add_task(
         run_ingestion,
         jobs,
@@ -305,6 +363,7 @@ def start_ingestion(
         llm,
         provider=req.provider,
         max_tokens_total=cap,
+        secondaries=secondaries,
     )
     return _out(job)
 

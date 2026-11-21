@@ -23,6 +23,7 @@ from app.api.store import (
     Origin,
     Project,
     ProjectGoals,
+    ProjectRepo,
     ProjectScenario,
     RepoSource,
     Version,
@@ -88,8 +89,9 @@ def _version(row: dict[str, Any]) -> Version:
     )
 
 
-def _project(row: dict[str, Any], versions: list[Version]) -> Project:
+def _project(row: dict[str, Any], versions: list[Version], repos: list[ProjectRepo] | None = None) -> Project:
     return Project(
+        repositories=repos or [],
         id=str(row["id"]),
         name=row["name"],
         sample=row["sample_id"],
@@ -231,8 +233,10 @@ class PostgresProjectStore:
         sample: str | None,
         owner: str | None = None,
         source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
     ) -> Project:
         conn_id = _uuid(source.connection_id) if source else None
+        extra = sources if sources and len(sources) > 1 else []
         with self._conn() as conn:
             # owner_id referencia auth.users: un usuario que no existe ahí no puede crear proyectos
             row = conn.execute(
@@ -263,9 +267,20 @@ class PostgresProjectStore:
                     "insert into scenarios (project_id, name, multiplier, rps) values (%s, %s, %s, %s)",
                     [(row["id"], s.name, s.multiplier, s.rps) for s in scenarios_from_model(model)],
                 )
+                primary = source.repo_full_name if source else None
+                cur.executemany(
+                    "insert into project_repositories (project_id, repo_connection_id, branch, commit_sha,"
+                    " is_primary, position) values (%s, %s, %s, %s, %s, %s)",
+                    [
+                        (row["id"], _uuid(s.connection_id), s.branch, s.commit_sha, s.repo_full_name == primary, i)
+                        for i, s in enumerate(extra)
+                    ],
+                )
         # el returning no trae el repo (está en repo_connections): sale del source, igual que get y list
         repo = {"repo_full_name": source.repo_full_name, "branch": source.branch} if source else {}
-        return _project({**row, **repo}, [_version(v1)])
+        primary_name = source.repo_full_name if source else None
+        repos = [ProjectRepo(s.repo_full_name, s.branch, s.repo_full_name == primary_name) for s in extra]
+        return _project({**row, **repo}, [_version(v1)], sorted(repos, key=lambda r: not r.primary))
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
         pid = _uuid(project_id)
@@ -279,7 +294,7 @@ class PostgresProjectStore:
             ).fetchone()
             if row is None:
                 return None
-            return _project(row, self._summaries(conn, [pid])[pid])
+            return _project(row, self._summaries(conn, [pid])[pid], self._repos(conn, [pid]).get(pid))
 
     def get_version(self, project_id: str, number: int) -> Version | None:
         pid = _uuid(project_id)
@@ -298,8 +313,26 @@ class PostgresProjectStore:
                 " order by p.created_at desc",
                 (owner,),
             ).fetchall()
-            versions = self._summaries(conn, [r["id"] for r in rows])
-        return [_project(r, versions[r["id"]]) for r in rows]
+            ids = [r["id"] for r in rows]
+            versions = self._summaries(conn, ids)
+            repos = self._repos(conn, ids)
+        return [_project(r, versions[r["id"]], repos.get(r["id"])) for r in rows]
+
+    @staticmethod
+    def _repos(conn: Connection, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[ProjectRepo]]:
+        """Los repos de varios proyectos (IA-5), el principal primero. Solo los de más de un repo tienen filas."""
+        if not project_ids:
+            return {}
+        rows = conn.execute(
+            "select pr.project_id, rc.repo_full_name, pr.branch, pr.is_primary from project_repositories pr"
+            " join repo_connections rc on rc.id = pr.repo_connection_id"
+            " where pr.project_id = any(%s) order by pr.project_id, pr.is_primary desc, pr.position",
+            (project_ids,),
+        ).fetchall()
+        out: dict[uuid.UUID, list[ProjectRepo]] = {}
+        for r in rows:
+            out.setdefault(r["project_id"], []).append(ProjectRepo(r["repo_full_name"], r["branch"], r["is_primary"]))
+        return out
 
     def add_version(
         self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
