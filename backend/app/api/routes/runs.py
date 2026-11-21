@@ -38,11 +38,17 @@ def run_model(raw: dict, req: RunParams) -> Run:
             available=available,
         )
     rate = req.rps if req.rps is not None else model.scenario(req.scenario).rps
-    if rate * req.duration_s > MAX_SIMULATED_REQUESTS:
+    try:
+        profile = req.build_profile()
+    except ValueError as e:  # ej. un perfil con multiplicador 0 en todos los tramos
+        raise ApiError(422, INVALID_PARAMETERS, str(e)) from e
+    duration = profile.duration_s if profile else req.duration_s
+    expected = rate * duration * (profile.mean if profile else 1.0)
+    if expected > MAX_SIMULATED_REQUESTS:
         raise ApiError(
             422,
             RUN_TOO_LARGE,
-            f"{rate:g} req/s durante {req.duration_s:g} s son {rate * req.duration_s:,.0f} requests; "
+            f"{rate:g} req/s durante {duration:g} s son {expected:,.0f} requests; "
             f"el máximo por llamada es {MAX_SIMULATED_REQUESTS:,}. Baja la duración o la tasa.",
             max_requests=MAX_SIMULATED_REQUESTS,
         )
@@ -57,6 +63,7 @@ def run_model(raw: dict, req: RunParams) -> Run:
             client_timeout_s=req.client_timeout_s,
             cache_hit_ratio=req.cache_hit_ratio,
             cpu_credits=req.cpu_credits,
+            traffic_profile=profile,
         )
     except ValueError as e:  # ej. un escenario con 0 req/s o vCPU en 0
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from e

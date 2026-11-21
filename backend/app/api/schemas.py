@@ -6,12 +6,25 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.costs import CostDelta, CostEstimate, FailureCost
 from app.models.compare import RunDelta
 from app.models.run import Run
+from app.models.traffic import TrafficProfile, TrafficSegment, preset
 
-# Tope de requests simuladas por llamada (tasa × duración), para que una request no bloquee el
-# servidor. CyberDay ×20 en 60 s son ~16.000; 300.000 tardan unos pocos segundos.
+# Tope de requests simuladas por llamada (tasa × duración, o tasa × duración × multiplicador medio
+# con perfil), para que una request no bloquee el servidor. CyberDay ×20 en 60 s son ~16.000;
+# 300.000 tardan unos pocos segundos.
 MAX_SIMULATED_REQUESTS = 300_000
+
+
+class TrafficSegmentIn(BaseModel):
+    """Un tramo del perfil de tráfico: va linealmente de from_multiplier a to_multiplier × la tasa base."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_s: float = Field(gt=0, le=3600, description="Segundos que dura el tramo.")
+    from_multiplier: float = Field(ge=0, le=100, description="Multiplicador de la tasa al inicio del tramo.")
+    to_multiplier: float = Field(ge=0, le=100, description="Multiplicador de la tasa al final del tramo.")
 
 
 class RunParams(BaseModel):
@@ -41,6 +54,22 @@ class RunParams(BaseModel):
             "carga sostenida); burst, todos sus vCPU (solo mientras duren los créditos o pagando el exceso)."
         ),
     )
+    traffic_profile: list[TrafficSegmentIn] | Literal["pico"] | None = Field(
+        None,
+        description=(
+            "Tasa que cambia en el tiempo (JAJ-71). 'pico': subida, meseta y bajada en duration_s. Una lista de "
+            "tramos: la duración es la suma de los tramos y duration_s no se usa. Sin él, tasa constante."
+        ),
+    )
+
+    def build_profile(self) -> TrafficProfile | None:
+        if self.traffic_profile is None:
+            return None
+        if self.traffic_profile == "pico":
+            return preset("pico", self.duration_s)
+        return TrafficProfile(
+            tuple(TrafficSegment(s.duration_s, s.from_multiplier, s.to_multiplier) for s in self.traffic_profile)
+        )
 
 
 class RunRequest(RunParams):
@@ -127,9 +156,13 @@ class ProjectDetail(BaseModel):
     versions: list[VersionSummary]
 
 
+Region = Literal["us-east-1", "sa-east-1"]  # regiones con precios de AWS en el snapshot de JAJ-11
+
+
 class CompareRequest(RunParams):
     a: int = Field(ge=1, description="Versión base (ej. 1).")
     b: int = Field(ge=1, description="Versión a comparar contra la base.")
+    region: Region = Field("us-east-1", description="Región de AWS para los costos (JAJ-72).")
 
 
 class CompareResponse(BaseModel):
@@ -138,3 +171,19 @@ class CompareResponse(BaseModel):
     run_a: Run
     run_b: Run
     delta: RunDelta
+    # JAJ-72: costo mensual de cada versión y la diferencia, por componente
+    cost_a: CostEstimate
+    cost_b: CostEstimate
+    cost_delta: CostDelta
+    # JAJ-74: ventas en juego por hora de cada versión, según su tasa de error (None si el modelo
+    # no trae conversión, ticket o requests por sesión)
+    failure_a: FailureCost | None = None
+    failure_b: FailureCost | None = None
+    summary: str | None = Field(None, description="La comparación en una frase: costo extra y ventas que se evitan.")
+
+
+class CostRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: dict[str, Any] = Field(description="Modelo branchpoint.model/v1 completo.")
+    region: Region = Field("us-east-1", description="Región de AWS donde corre la infraestructura.")

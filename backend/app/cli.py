@@ -3,6 +3,7 @@
 python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario cyberday
 python -m app.cli MODELO.json --rps 500 --duration 30 --out run.json
 python -m app.cli app/samples/fastapi-realworld-example-app.model.json --cpu-credits burst
+python -m app.cli app/samples/full-stack-fastapi-template.model.json --profile pico --duration 300
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 from app.engine import simulate
 from app.engine.simulate import ARRIVALS, CPU_CREDITS
 from app.models import load_model
+from app.models.traffic import PRESETS, preset
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,6 +37,12 @@ def main(argv: list[str] | None = None) -> int:
         default="sustained",
         help="DB con créditos de CPU (db.t4g.*): sustained = vCPU sostenidos (por defecto), burst = todos los vCPU",
     )
+    ap.add_argument(
+        "--profile",
+        choices=PRESETS,
+        default=None,
+        help="perfil de tráfico en --duration segundos (pico: subida, meseta y bajada); sin él, tasa constante",
+    )
     ap.add_argument("--out", type=Path, default=None, help="guarda el Run completo en JSON")
     a = ap.parse_args(argv)
 
@@ -49,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         client_timeout_s=a.client_timeout or None,
         cache_hit_ratio=a.cache_hit,
         cpu_credits=a.cpu_credits,
+        traffic_profile=preset(a.profile, a.duration) if a.profile else None,
     )
 
     lat = run.latency

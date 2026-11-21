@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import install_error_handlers
-from app.api.routes import health, models, projects, runs
+from app.api.routes import costs, health, models, projects, runs
 from app.api.store import InMemoryProjectStore, ProjectStore
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -44,6 +44,7 @@ def create_app(cors_origins: list[str] | None = None, store: ProjectStore | None
     app.include_router(runs.router)
     app.include_router(models.router)
     app.include_router(projects.router)
+    app.include_router(costs.router)
     return app
 
 
