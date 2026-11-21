@@ -64,7 +64,8 @@ async function addDemoRepository() {
     <AppHeader minimal />
 
     <main
-      class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      class="mx-auto flex w-full flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      :class="step === 'cli' ? 'max-w-3xl' : 'max-w-md'"
     >
       <ol
         aria-label="Configuración"
