@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
@@ -31,7 +31,7 @@ from app.api.auth import User, current_user, owner_of
 from app.api.errors import NOT_FOUND, ApiError
 from app.api.routes.credentials import Provider, llm_key
 from app.github.client import GitHubApp, GitHubError, Repo
-from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion
+from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion, team_token_cap
 from app.github.state import InvalidState, sign_state, verify_state
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -81,6 +81,8 @@ class IngestionOut(BaseModel):
     stage: Literal["acceso", "analisis", "preparacion"] | None
     commit_sha: str | None
     endpoints: int | None
+    llm_steps: int | None = Field(None, description="vueltas de la IA leyendo el repo, en vivo")
+    cost: dict[str, Any] | None = Field(None, description="al terminar: US$ de los tokens (ESTIMADO) o null")
     project_id: str | None = Field(description="al terminar: el proyecto creado, con su v1")
     version: int | None
     error_message: str | None
@@ -291,7 +293,19 @@ def start_ingestion(
     llm = factory(key.key, model=model_for(req.provider, "extract"))
     job = jobs.start(owner, repo.full_name, req.branch or repo.default_branch)
     name = req.name or repo.full_name.split("/", 1)[1]
-    tasks.add_task(run_ingestion, jobs, job.id, github, request.app.state.store, repo, name, llm, provider=req.provider)
+    cap = team_token_cap() if key.source == "team" else None  # el tope es solo para la key de Branchpoint
+    tasks.add_task(
+        run_ingestion,
+        jobs,
+        job.id,
+        github,
+        request.app.state.store,
+        repo,
+        name,
+        llm,
+        provider=req.provider,
+        max_tokens_total=cap,
+    )
     return _out(job)
 
 

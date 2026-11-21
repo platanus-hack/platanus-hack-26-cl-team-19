@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import copy
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -314,6 +315,142 @@ def _line(root: Path, file: str, line: int) -> str | None:
             if i == line:
                 return text
     return None
+
+
+# ---------- evidencia contra el repo (IA-4) ----------
+
+EVIDENCE_WINDOW = 30  # líneas alrededor de la línea citada donde tiene que aparecer la ruta del endpoint
+_PARAM_SEGMENT = re.compile(r"^(\{[^}]*\}|:\w+|<[^>]*>|\*.*|\[.*\])$")
+
+
+@dataclass(frozen=True)
+class EvidenceProblem:
+    """Un problema de evidencia. ``where`` ubica el elemento: ("endpoints", 3) o ("endpoints", 3, "effects", 0)."""
+
+    where: tuple
+    message: str
+
+
+def _static_segments(path: str) -> list[str]:
+    """Los segmentos fijos de la ruta (sin parámetros). Vacío para ``/`` o rutas solo de parámetros."""
+    return [p for p in path.split("/") if p and not _PARAM_SEGMENT.match(p) and "{" not in p and ":" not in p]
+
+
+class _Files:
+    """Lee cada archivo del repo una vez, sin salir de ``root`` (tampoco por symlink)."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.resolve()
+        self._cache: dict[str, list[str] | str] = {}
+
+    def lines(self, file: str) -> list[str] | str:
+        """Las líneas del archivo, o el problema en español."""
+        if file not in self._cache:
+            path = (self.root / file).resolve()
+            if not path.is_relative_to(self.root):
+                self._cache[file] = f"'{file}' sale del repo"
+            elif not path.is_file():
+                self._cache[file] = f"'{file}' no existe en el repo"
+            else:
+                self._cache[file] = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return self._cache[file]
+
+
+def evidence_problems(sub: ArchitectureSubmission, root: Path) -> list[EvidenceProblem]:
+    """Los problemas de evidencia de una entrega, con su ubicación. Lista vacía: todo calza."""
+    files = _Files(root)
+    out: list[EvidenceProblem] = []
+
+    def check(where: tuple, label: str, item: _Evidence, path: str | None = None) -> bool:
+        lines = files.lines(item.file)
+        if isinstance(lines, str):
+            out.append(EvidenceProblem(where, f"{label}: {lines}"))
+            return False
+        if item.line > len(lines):
+            out.append(EvidenceProblem(where, f"{label}: '{item.file}' tiene {len(lines)} líneas, no {item.line}"))
+            return False
+        segments = _static_segments(path) if path is not None else []
+        if segments:
+            lo, hi = max(0, item.line - 1 - EVIDENCE_WINDOW), min(len(lines), item.line + EVIDENCE_WINDOW)
+            near = any(seg in text for seg in segments for text in lines[lo:hi])
+            # @router.delete("/{id}") trae solo el parámetro: el segmento ("items") está en el prefix del router,
+            # lejos de la línea (lo encontró la medición de IA-0). Basta con que aparezca como palabra en el archivo.
+            in_file = near or any(
+                re.search(rf"(?<![\w-]){re.escape(seg)}(?![\w-])", text) for seg in segments for text in lines
+            )
+            if not in_file:
+                shown = max(segments, key=len)
+                out.append(
+                    EvidenceProblem(
+                        where,
+                        f"{label}: '{shown}' no aparece en {item.file} cerca de la línea {item.line} "
+                        f"(±{EVIDENCE_WINDOW}) ni en el resto del archivo. Cita la línea donde se declara la ruta.",
+                    )
+                )
+                return False
+        return True
+
+    def effects(where: tuple, label: str, steps: list[AiEffect]) -> None:
+        for j, e in enumerate(steps):
+            w = (*where, "effects", j)
+            check(w, f"{label} paso {j} ({e.kind} {e.detail[:40]})", e)
+            for k, miss in enumerate(e.on_miss or []):
+                check((*w, "on_miss", k), f"{label} paso {j} on_miss {k}", miss)
+
+    for i, ep in enumerate(sub.endpoints):
+        label = f"endpoints[{i}] ({ep.method} {ep.path})"
+        if check(("endpoints", i), label, ep, ep.path):
+            effects(("endpoints", i), label, ep.effects)
+    for i, job in enumerate(sub.jobs):
+        label = f"jobs[{i}] ({job.task})"
+        if check(("jobs", i), label, job):
+            effects(("jobs", i), label, job.effects)
+    for i, c in enumerate(sub.components):
+        check(("components", i), f"components[{i}] ({c.name})", c)
+    for i, o in enumerate(sub.observations):
+        check(("observations", i), f"observations[{i}] ({o.field})", o)
+    return out
+
+
+def check_evidence(sub: ArchitectureSubmission, root: Path) -> list[str]:
+    """Problemas de evidencia de la entrega contra el repo, en español y con su ubicación, para que el LLM los
+    corrija. Lista vacía = válida. Comprueba que cada archivo exista dentro del repo, que la línea esté en
+    rango y, en los endpoints, que el segmento fijo más largo de la ruta aparezca cerca de la línea citada."""
+    return [p.message for p in evidence_problems(sub, root)]
+
+
+def drop_invalid(sub: ArchitectureSubmission, problems: list[EvidenceProblem]) -> ArchitectureSubmission | None:
+    """La entrega sin los elementos con problemas (endpoints, pasos, trabajos, componentes, observaciones).
+    ``None`` si no queda ningún endpoint."""
+    bad = {p.where for p in problems}
+    data = sub.model_dump()
+
+    def keep_effects(where: tuple, steps: list[dict]) -> list[dict]:
+        kept = []
+        for j, e in enumerate(steps):
+            w = (*where, "effects", j)
+            if w in bad:
+                continue
+            if e.get("on_miss"):
+                misses = [m for k, m in enumerate(e["on_miss"]) if (*w, "on_miss", k) not in bad]
+                e["on_miss"] = misses or None
+            kept.append(e)
+        return kept
+
+    for key in ("endpoints", "jobs", "components", "observations"):
+        items = []
+        for i, item in enumerate(data[key]):
+            if (key, i) in bad:
+                continue
+            if key in ("endpoints", "jobs"):
+                item["effects"] = keep_effects((key, i), item["effects"])
+                if key == "jobs" and not item["effects"]:
+                    continue
+            items.append(item)
+        data[key] = items
+    if not data["endpoints"]:
+        return None
+    return ArchitectureSubmission.model_validate(data)
 
 
 def observed_values(sub: ArchitectureSubmission, root: Path | None) -> tuple[dict[str, dict], list[str]]:

@@ -6,7 +6,7 @@ Spec: [`docs/specs/ia-00-medir-analizador.md`](../../docs/specs/ia-00-medir-anal
 
 **Estado.**
 
-* **Calidad con un LLM real: medida** en los 4 repos chicos, con Claude (Fable 5.2) leyendo cada repo en modo CLI (ADR 0002). Encontró 80 de 80 endpoints, no inventó ninguno y el 100 % de la evidencia es válida (193 citas). Ver [Resultados](#resultados).
+* **Calidad con un LLM real: medida** en los 4 repos chicos, con Claude (Fable 5.2) leyendo cada repo en modo CLI (ADR 0002). Encontró 80 de 80 endpoints, no inventó ninguno y el 100 % de la evidencia es válida (196 citas, con `check_evidence` de IA-4). Ver [Resultados](#resultados).
 * **Tokens, tiempo y costo por la API: sin medir.** En el entorno no había `ANTHROPIC_API_KEY` ni `OPENAI_API_KEY`, así que `analyze_repo` no corrió contra un proveedor. Esa parte queda con la estimación previa y los comandos de [Cómo correrlo](#cómo-correrlo).
 
 ## Qué hay
@@ -100,15 +100,15 @@ Cómo se midió: Claude (el agente de Claude Code, Fable 5.2) leyó cada repo co
 
 * valida cada entrega con el schema;
 * compara los endpoints con `reference.json`, sin el prefijo de montaje (`/api`, `/api/v1`);
-* revisa **toda** la evidencia, no una muestra de 20: el archivo existe, la línea está en rango y alguna parte de la ruta aparece a ±30 líneas.
+* revisa **toda** la evidencia (endpoints, pasos y componentes), no una muestra de 20, con `check_evidence` de IA-4.
 
 Cada entrega se armó además con `build_from_ai` y se simuló CyberDay con el motor.
 
 | Repo | Endpoints / reales | Inventados | Pasos | Evidencia válida | Arma un modelo que simula |
 |---|---|---|---|---|---|
-| fastapi-realworld (FastAPI + asyncpg) | 19 / 19 | 0 | 19 | 38 / 38 | sí (p95 5,9 ms) |
-| full-stack-fastapi (FastAPI + SQLModel) | 23 / 23 | 0 | 37 | 60 / 60 | sí (p95 25,5 ms) |
-| node-express (Express + Prisma) | 19 / 19 | 0 | 31 | 50 / 50 | sí (p95 44,1 ms) |
+| fastapi-realworld (FastAPI + asyncpg) | 19 / 19 | 0 | 19 | 39 / 39 | sí (p95 5,9 ms) |
+| full-stack-fastapi (FastAPI + SQLModel) | 23 / 23 | 0 | 37 | 61 / 61 | sí (p95 25,5 ms) |
+| node-express (Express + Prisma) | 19 / 19 | 0 | 31 | 51 / 51 | sí (p95 44,1 ms) |
 | django (Django REST) | 19 / 19 | 0 | 26 | 45 / 45 | sí (p95 7,4 ms) |
 
 ```bash
@@ -117,7 +117,7 @@ cd backend && .venv/bin/python ../spikes/ia-0-analizador/score.py --repos ~/ia0-
 
 **Lo que encontró la medición:**
 
-1. **Un falso positivo en la regla de evidencia de IA-4.** `check_evidence` exigía que el segmento fijo más largo de la ruta apareciera cerca de la línea citada. En FastAPI, `@router.delete("/{id}")` solo trae el parámetro: el segmento (`items`) viene del `prefix=` del `APIRouter`, a 89 líneas. Con esa regla, 3 de 80 endpoints bien citados salían como evidencia inválida (96,7 % y 97,4 % en los repos de FastAPI). La corrección, que va en la PR de IA-4: vale cualquier segmento fijo o el nombre de un parámetro. Con ella, 100 %.
+1. **Un falso positivo en la regla de evidencia de IA-4.** `check_evidence` exigía que el segmento fijo más largo de la ruta apareciera cerca de la línea citada. En FastAPI, `@router.delete("/{id}")` solo trae el parámetro: el segmento (`items`) viene del `prefix=` del `APIRouter`, a 89 líneas. Con esa regla, 3 de 80 endpoints bien citados salían como evidencia inválida (96,7 % y 97,4 % en los repos de FastAPI). La corrección, que va en la PR de IA-4: vale un segmento fijo cerca de la línea o, si no está cerca, que aparezca como palabra en el mismo archivo (donde está el `prefix`). Una ruta inventada (`/invoices`) sigue fallando. Con ella, 100 %.
 2. **La referencia de Django estaba mal.** La armé desde la spec RealWorld sin leer las vistas; tiene un endpoint distinto. Se corrigió leyendo el repo.
 
 **Límites de esta medición:**
@@ -139,7 +139,7 @@ Pendiente de key. Se llena con `results/runs.jsonl`.
 |---|---|---|
 | Endpoints encontrados / reales | ≥ 80 % | **100 %** en los 4 chicos (Claude, modo CLI); por la API, pendiente |
 | Endpoints inventados | 0 | **0** (Claude, modo CLI) |
-| Evidencia válida en la muestra | ≥ 95 % | **100 %** de 193 citas, con la regla corregida; 98,4 % con la regla original de IA-4 |
+| Evidencia válida en la muestra | ≥ 95 % | **100 %** de 196 citas, con la regla corregida; 98,5 % con la regla original de IA-4 |
 | `shape` correcto en la muestra | ≥ 80 % | sin revisión independiente |
 | Tiempo por repo | < 3 min | pendiente (API) |
 | Costo por repo | < US$1 | estimado: sí en los 4 chicos; no en mealie sin caché |
@@ -148,7 +148,7 @@ Pendiente de key. Se llena con `results/runs.jsonl`.
 
 ## Ajustes para IA-4
 
-Salen de la estimación y del código, no todavía de la medición:
+Salen de la estimación y del código, no todavía de la medición. IA-4 (JAJ-120) aplicó el 1, el 2, el 4 y el 7; el 3, el 5 y el 6 esperan la medición:
 
 1. **Caché de prompt en el analizador.** Marcar con `cache_control` el último bloque del historial en cada vuelta de `analyze_repo` con Anthropic. Es el ajuste de mayor efecto en el costo (mealie: de ~US$25 a ~3,7).
 2. **Tope de tokens de la key de Branchpoint:** dejar 1.500.000, el valor provisorio de la spec de IA-4. Cubre con holgura los repos de hasta ~50 endpoints (unos 50k estimados) y corta un repo como mealie sin caché antes de gastar unos US$6. Revisarlo con la medición.
