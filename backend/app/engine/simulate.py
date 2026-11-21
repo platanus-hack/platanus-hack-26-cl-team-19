@@ -128,6 +128,12 @@ BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
 CPU_CREDITS = ("sustained", "burst")
 QUEUE_PREFIX = "queue:"
+# Presupuesto de eventos por corrida (JAJ-99). La simulación legítima más pesada que se permite (el
+# tope de 300.000 requests de la API con fastapi-realworld-example-app en pico_normal, 48 eventos
+# por request por sus N+1) usa unos 14,4 millones y tarda ~11 s. El presupuesto le deja margen y
+# garantiza que ninguna corrida quede simulando para siempre. Es un límite del servicio, no un
+# número del modelo.
+MAX_EVENTS = 20_000_000
 
 
 def resource_label(name: str) -> str:
@@ -347,7 +353,7 @@ def simulate(
 
     sim.start(source() if traffic_profile is None else profiled_source(traffic_profile))
     sim.start(sampler())
-    sim.run(until=duration_s)
+    sim.run(until=duration_s, max_events=MAX_EVENTS)
 
     still_running = 0
     for ep, t0 in in_flight.values():
