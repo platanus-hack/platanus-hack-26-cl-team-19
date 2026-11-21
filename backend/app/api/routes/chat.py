@@ -5,17 +5,15 @@ Transmite el loop (``app/agent/loop.py``) como NDJSON: una línea JSON por event
 resultado a medida que ocurren.
 
 **Credencial.**
-* **Del usuario:** su API key de Anthropic en el header ``X-Anthropic-Api-Key``. Se usa solo en esta
+* **Del usuario:** su API key en ``X-Anthropic-Api-Key`` o ``X-OpenAI-Api-Key``, según el proveedor. Se usa solo en esta
   request: no se guarda, no se escribe en logs y no vuelve en la respuesta.
-* **Demo:** sin header y con ``BRANCHPOINT_CHAT_DEMO=on``, la del equipo (el SDK la resuelve del
-  entorno), con un tope de mensajes por usuario y por día.
-* **Sin ninguna de las dos:** 422 con instrucciones. El modo principal es MCP desde la CLI del usuario.
+* **Con sesión:** se usa la clave elegida en Configuración. La key de Claude del equipo
+  tiene cuota diaria por usuario. OpenAI usa la clave personal.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterator
 from typing import Literal
 
@@ -23,14 +21,13 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent.loop import AnthropicLLM, run_agent
-from app.agent.tools import AgentTools, ToolError
+from app.agent.loop import LLM, AnthropicLLM, run_agent
+from app.agent.tools import AgentTools
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
+from app.api.routes.credentials import ChatKeySource, Provider, chat_key
 
 router = APIRouter(prefix="/projects", tags=["agent"])
-
-DEMO_MESSAGES_PER_DAY = 30
 
 
 class ChatMessage(BaseModel):
@@ -43,13 +40,11 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    provider: Provider = "anthropic"
+    expected_source: ChatKeySource | None = None
     messages: list[ChatMessage] = Field(
         min_length=1, max_length=40, description="La conversación, la última del usuario."
     )
-
-
-def _demo_on() -> bool:
-    return os.environ.get("BRANCHPOINT_CHAT_DEMO", "").strip().lower() == "on"
 
 
 @router.post("/{project_id}/chat", summary="Chat con el agente: transmite cada tool call (NDJSON)")
@@ -59,6 +54,7 @@ def chat(
     request: Request,
     user: User | None = Depends(current_user),
     x_anthropic_api_key: str | None = Header(default=None),
+    x_openai_api_key: str | None = Header(default=None),
 ) -> StreamingResponse:
     owner = owner_of(user)
     store = request.app.state.store
@@ -67,20 +63,10 @@ def chat(
     if req.messages[-1].role != "user":
         raise ApiError(422, INVALID_PARAMETERS, "El último mensaje tiene que ser del usuario.")
     limiter = request.app.state.limiter
-    key = (x_anthropic_api_key or "").strip() or None
-    if key is None:
-        if not _demo_on():
-            raise ApiError(
-                422,
-                INVALID_PARAMETERS,
-                "Para usar el chat del editor manda tu API key de Anthropic (header X-Anthropic-Api-Key), o "
-                "conecta tu CLI de IA por MCP (ver docs).",
-            )
-        try:  # modo demo: tope de mensajes por usuario y día
-            limiter.daily(f"chat-demo:{owner or 'anon'}", DEMO_MESSAGES_PER_DAY, "mensajes del chat de demo")
-        except ToolError as e:
-            raise ApiError(429, INVALID_PARAMETERS, str(e)) from None
-    llm = request.app.state.llm_factory(key)
+    header = x_openai_api_key if req.provider == "openai" else x_anthropic_api_key
+    key = chat_key(request, user, req.provider, header, req.expected_source)
+    factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
+    llm: LLM = factory(key)
     tools = AgentTools(store, owner, limiter)
     messages = [m.model_dump() for m in req.messages]
 

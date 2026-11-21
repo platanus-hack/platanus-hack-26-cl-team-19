@@ -114,6 +114,75 @@ class PostgresProjectStore:
     def _conn(self) -> Any:
         return self._pool.connection()  # transacción: commit al salir del with, rollback si hay error
 
+    def credential_providers(self, owner: str) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "select provider from llm_credentials where owner_id = %s and revoked_at is null", (owner,)
+            ).fetchall()
+        return [row["provider"] for row in rows]
+
+    def personal_chat_providers(self, owner: str) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """select provider from llm_credentials
+                   where owner_id = %s and (provider = 'openai' or use_personal) and revoked_at is null""",
+                (owner,),
+            ).fetchall()
+        return [row["provider"] for row in rows]
+
+    def select_chat_key(self, owner: str, provider: str, personal: bool) -> bool:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "update llm_credentials set use_personal = %s where owner_id = %s and provider = %s and revoked_at is null",
+                (personal, owner, provider),
+            )
+            return cursor.rowcount > 0 or not personal
+
+    def team_chat_used(self, owner: str) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "select messages from team_chat_usage where owner_id = %s and usage_date = (now() at time zone 'UTC')::date",
+                (owner,),
+            ).fetchone()
+        return row["messages"] if row else 0
+
+    def charge_team_chat(self, owner: str, limit: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                """insert into team_chat_usage (owner_id, usage_date, messages)
+                   values (%s, (now() at time zone 'UTC')::date, 1)
+                   on conflict (owner_id, usage_date) do update
+                   set messages = team_chat_usage.messages + 1 where team_chat_usage.messages < %s
+                   returning messages""",
+                (owner, limit),
+            ).fetchone()
+        return row is not None
+
+    def save_credential(self, owner: str, provider: str, key: str) -> None:
+        with self._conn() as conn:
+            secret = conn.execute("select vault.create_secret(%s) as id", (key,)).fetchone()
+            conn.execute(
+                """insert into llm_credentials (owner_id, provider, secret_id)
+                   values (%s, %s, %s)
+                   on conflict (owner_id, provider) do update
+                   set secret_id = excluded.secret_id, revoked_at = null, key_hint = null""",
+                (owner, provider, secret["id"]),
+            )
+
+    def delete_credential(self, owner: str, provider: str) -> None:
+        with self._conn() as conn:
+            conn.execute("delete from llm_credentials where owner_id = %s and provider = %s", (owner, provider))
+
+    def personal_chat_key(self, owner: str, provider: str) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                """select s.decrypted_secret from llm_credentials c
+                   join vault.decrypted_secrets s on s.id = c.secret_id
+                   where c.owner_id = %s and c.provider = %s and (c.provider = 'openai' or c.use_personal) and c.revoked_at is null""",
+                (owner, provider),
+            ).fetchone()
+        return row["decrypted_secret"] if row else None
+
     def create(
         self,
         name: str,

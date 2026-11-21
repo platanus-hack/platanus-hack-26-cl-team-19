@@ -42,7 +42,7 @@ Los dos servicios despliegan la rama `main` del espejo cada vez que cambia.
 | `GITHUB_APP_CLIENT_SECRET` | el client secret de la app | Secreta |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | `/etc/secrets/github-app.pem` | La private key va como **Secret File** de Render con ese nombre, no pegada en una variable |
 | `BRANCHPOINT_MCP_ALLOWED_HOSTS` | `branchpoint-api-laq9.onrender.com,branchpoint-api-laq9.onrender.com:*` | Los `Host` que acepta `/mcp` (protección contra DNS rebinding, JAJ-67). Sin ella, solo localhost: la CLI del usuario no se puede conectar a producción |
-| `BRANCHPOINT_CHAT_DEMO` | sin definir | Con `on` y la credencial del equipo, el chat del editor funciona sin la key del usuario (30 mensajes por día). Apagado por defecto |
+| `ANTHROPIC_API_KEY` | sin definir | Key del equipo para Claude (30 mensajes por usuario autenticado por día UTC). Se configura como secreto del backend |
 
 Sin las variables `GITHUB_APP_*`, `/github/*` responde 503. No configurarlas mientras el backend corra sin login: cualquiera vería y podría analizar los repos de las instalaciones.
 
