@@ -1,0 +1,129 @@
+"""JAJ-54: prototipo de Branchpoint como servidor MCP, para que el usuario lo use con SU propia CLI de IA.
+
+El agente (el loop con el LLM) corre en la CLI del usuario, por ejemplo Claude Code con su suscripción.
+Branchpoint solo expone tools que llaman al motor. Así Branchpoint nunca ve ni guarda una credencial
+de IA, y los tokens los paga la cuenta del usuario, dentro de lo que permite cada proveedor (ver
+README.md).
+
+Tools (las mismas del ADR 0001, sobre los modelos de ejemplo de backend/app/samples):
+  * list_examples(): modelos de ejemplo y sus escenarios.
+  * simulate(example, scenario, ...): corre el motor y devuelve el resumen del Run.
+  * propose(example, ops, scenario): aplica operaciones tipadas (JAJ-68), simula antes y después
+    con la misma semilla y devuelve el delta y el costo mensual.
+  * ops_schema(): el JSON Schema de las operaciones, para que el LLM sepa qué puede pedir.
+
+Ninguna tool recibe números del LLM fuera de las operaciones validadas: los números salen del motor,
+del catálogo y de la tabla de precios.
+
+Uso (desde la raíz del repo, con las dependencias del backend y `pip install mcp`):
+    python spikes/jaj-54-byos/mcp_server.py                 # http://127.0.0.1:8765/mcp
+    claude mcp add --transport http branchpoint http://127.0.0.1:8765/mcp
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
+
+from mcp.server.mcpserver import MCPServer  # noqa: E402  (mcp 2.x)
+
+from app.agent.ops import OpError, apply_ops, ops_json_schema  # noqa: E402
+from app.costs.estimate import estimate_cost  # noqa: E402
+from app.engine import simulate as run_engine  # noqa: E402
+from app.models import load_model  # noqa: E402
+from app.models.compare import run_delta  # noqa: E402
+from app.models.graph import model_summary  # noqa: E402
+from app.models.run import Run  # noqa: E402
+from app.samples import load_sample, sample_ids  # noqa: E402
+
+server = MCPServer(
+    name="branchpoint",
+    instructions=(
+        "Branchpoint simula la arquitectura de un repo (motor de eventos discretos) y propone cambios. "
+        "Nunca inventes latencias, capacidades ni costos: salen de simulate y propose. Para proponer un "
+        "cambio, pide ops_schema y usa propose con operaciones de ese schema. Cita el archivo:línea del "
+        "cuello de botella que devuelve el motor."
+    ),
+)
+
+
+def _example(example: str) -> dict[str, Any]:
+    raw = load_sample(example)
+    if raw is None:
+        raise ValueError(f"No existe el ejemplo '{example}'. Hay: {', '.join(sample_ids())}.")
+    return raw
+
+
+def _summary(run: Run) -> dict[str, Any]:
+    b = run.bottleneck
+    return {
+        "scenario": run.scenario,
+        "rps": run.rps,
+        "p95_ms": run.latency.p95_ms,
+        "error_rate": round(run.error_rate, 4),
+        "throughput_rps": round(run.throughput_rps, 1),
+        "bottleneck": {
+            "resource": b.resource,
+            "utilization": round(b.utilization, 3),
+            "message": b.message,
+            "line": getattr(b, "line", None),
+        },
+        "warnings": run.warnings[:5],
+    }
+
+
+def _simulate(raw: dict[str, Any], scenario: str, seed: int, duration_s: float, rps: float | None) -> Run:
+    return run_engine(load_model(raw), scenario, seed=seed, duration_s=duration_s, rps=rps)
+
+
+@server.tool()
+def list_examples() -> list[dict[str, Any]]:
+    """Lista los modelos de ejemplo (repos analizados) con su despliegue y las req/s de cada escenario."""
+    return [{"id": sid, **model_summary(raw, load_model(raw))} for sid in sample_ids() if (raw := load_sample(sid))]
+
+
+@server.tool()
+def simulate(
+    example: str, scenario: str = "cyberday", seed: int = 0, duration_s: float = 30, rps: float | None = None
+) -> dict[str, Any]:
+    """Simula un modelo de ejemplo bajo un escenario (pico_normal, cyberday) y resume el Run:
+    p95, errores, throughput y el cuello de botella con su archivo:línea."""
+    return _summary(_simulate(_example(example), scenario, seed, duration_s, rps))
+
+
+@server.tool()
+def ops_schema() -> dict[str, Any]:
+    """JSON Schema de las operaciones de arquitectura que acepta propose (scale_api, change_db_plan,
+    add_pooler, add_cache, move_to_queue)."""
+    return ops_json_schema()
+
+
+@server.tool()
+def propose(example: str, ops: list[dict[str, Any]], scenario: str = "cyberday", seed: int = 0) -> dict[str, Any]:
+    """Aplica operaciones de arquitectura a un modelo de ejemplo, simula antes y después con el mismo
+    escenario y semilla, y devuelve el delta (p95, errores, cuello de botella) y el costo mensual."""
+    raw = _example(example)
+    try:
+        result = apply_ops(raw, ops)
+    except OpError as e:
+        return {"error": str(e)}  # el LLM lo lee y corrige
+    before = _simulate(raw, scenario, seed, 30, None)
+    after = _simulate(result.model, scenario, seed, 30, None)
+    delta = run_delta(before, after, raw, result.model)
+    cost_a, cost_b = estimate_cost(raw), estimate_cost(result.model)
+    return {
+        "changes": result.changes,
+        "warnings": result.warnings,
+        "before": _summary(before),
+        "after": _summary(after),
+        "p95_ms": {"before": delta.p95_ms.a, "after": delta.p95_ms.b},
+        "error_rate": {"before": delta.error_rate.a, "after": delta.error_rate.b},
+        "usd_month": {"before": cost_a.total, "after": cost_b.total},
+    }
+
+
+if __name__ == "__main__":
+    server.run("streamable-http", host="127.0.0.1", port=8765)
