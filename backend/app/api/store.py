@@ -70,6 +70,27 @@ class ProjectScenario:
         return float(peak) * self.multiplier
 
 
+@dataclass(frozen=True)
+class RepoSource:
+    """De qué repo, rama y commit salió una v1 analizada (JAJ-57)."""
+
+    connection_id: str  # repo_connections.id
+    repo_full_name: str
+    branch: str
+    commit_sha: str
+    stats: dict[str, Any] | None = None  # repo.stats del extractor, para ingestions.stats
+
+    @property
+    def note(self) -> str:
+        return f"Extraída de {self.repo_full_name}@{self.branch} ({self.commit_sha[:7]})"
+
+
+@dataclass(frozen=True)
+class GitHubInstallation:
+    installation_id: int
+    account_login: str
+
+
 def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
     """Los escenarios de ``traffic.scenarios`` del modelo, para cargarlos al crear un proyecto.
 
@@ -96,7 +117,17 @@ class ProjectStore(Protocol):
     primero por ``get(project_id, owner)``.
     """
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None, owner: str | None = None) -> Project: ...
+    def create(
+        self,
+        name: str,
+        model: dict[str, Any],
+        sample: str | None,
+        owner: str | None = None,
+        source: RepoSource | None = None,
+    ) -> Project:
+        """Crea el proyecto con su v1. Con ``source``, la v1 queda ligada al repo, la rama y el commit
+        analizados (JAJ-57)."""
+        ...
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
         """El proyecto con el historial de versiones, si es de ``owner``. Las versiones pueden venir
@@ -139,6 +170,26 @@ class ProjectStore(Protocol):
         """Guarda el ``Run`` de la versión ``number``. Si la clave ya existe, no hace nada (JAJ-75)."""
         ...
 
+    # ---------- GitHub App (JAJ-57) ----------
+
+    def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
+        """Liga la instalación al usuario que la verificó. Si ya existía, pasa a ese usuario."""
+        ...
+
+    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
+        """Las instalaciones vigentes de ``owner``."""
+        ...
+
+    def revoke_installation(self, installation_id: int) -> None:
+        """GitHub dijo que la instalación ya no existe: deja de listarse."""
+        ...
+
+    def connect_repo(
+        self, owner: str | None, installation_id: int, repo_id: int, full_name: str, default_branch: str
+    ) -> str:
+        """La ``repo_connections.id`` de ese repo para ``owner``. Reutiliza la que ya existe."""
+        ...
+
 
 class OwnedStore:
     """El store visto por un usuario (JAJ-78): ``create``, ``get`` y ``list`` llevan su ``owner``
@@ -149,8 +200,8 @@ class OwnedStore:
         self._store = store
         self.owner = owner
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project:
-        return self._store.create(name, model, sample, self.owner)
+    def create(self, name: str, model: dict[str, Any], sample: str | None, source: RepoSource | None = None) -> Project:
+        return self._store.create(name, model, sample, self.owner, source)
 
     def get(self, project_id: str) -> Project | None:
         return self._store.get(project_id, self.owner)
@@ -174,10 +225,23 @@ class InMemoryProjectStore:
         self._runs: dict[str, dict[str, Any]] = {}  # cache_key → Run como dict (JAJ-75)
         self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
+        self._installations: dict[int, tuple[str | None, str]] = {}  # id → (owner, cuenta)
+        self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
+        self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None, owner: str | None = None) -> Project:
+    def create(
+        self,
+        name: str,
+        model: dict[str, Any],
+        sample: str | None,
+        owner: str | None = None,
+        source: RepoSource | None = None,
+    ) -> Project:
         project = Project(id=uuid.uuid4().hex[:12], name=name, sample=sample, created_at=_now(), owner=owner)
-        project.versions.append(Version(1, "repo", None, "Extraída del repo", project.created_at, copy.deepcopy(model)))
+        note = source.note if source else "Extraída del repo"
+        project.versions.append(Version(1, "repo", None, note, project.created_at, copy.deepcopy(model)))
+        if source:
+            self.sources[project.id] = source
         with self._lock:
             self._projects[project.id] = project
             self._scenarios[project.id] = {s.name: s for s in scenarios_from_model(model)}
@@ -231,3 +295,20 @@ class InMemoryProjectStore:
             raise KeyError(f"{project_id} v{number}")
         with self._lock:
             self._runs.setdefault(cache_key, copy.deepcopy(run))
+
+    def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
+        with self._lock:
+            self._installations[installation_id] = (owner, account_login)
+
+    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
+        return [GitHubInstallation(i, login) for i, (o, login) in self._installations.items() if o == owner]
+
+    def revoke_installation(self, installation_id: int) -> None:
+        with self._lock:
+            self._installations.pop(installation_id, None)
+
+    def connect_repo(
+        self, owner: str | None, installation_id: int, repo_id: int, full_name: str, default_branch: str
+    ) -> str:
+        with self._lock:
+            return self._connections.setdefault((owner, repo_id), uuid.uuid4().hex[:12])

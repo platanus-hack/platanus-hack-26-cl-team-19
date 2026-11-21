@@ -102,6 +102,14 @@ export function useEditorProject() {
     });
   }
 
+  async function openProject(id: string) {
+    await request("Abriendo proyecto…", async () => {
+      project.value = await api.getProject(id);
+      const latest = project.value.versions.at(-1)?.number ?? 1;
+      await displayVersion(await api.getVersion(id, latest));
+    });
+  }
+
   async function openVersion(number: number) {
     const current = project.value;
     if (!current) return;
@@ -200,6 +208,7 @@ export function useEditorProject() {
     pending,
     error,
     loadModels,
+    openProject,
     openSample,
     openVersion,
     saveReplicas,

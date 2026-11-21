@@ -11,8 +11,13 @@ useSeoMeta({ title: "Branchpoint" });
       Simula cómo responde una arquitectura al tráfico y compara el impacto de
       tus cambios.
     </p>
-    <Button class="self-start" as-child>
-      <NuxtLink to="/editor">Abrir editor</NuxtLink>
-    </Button>
+    <div class="flex flex-wrap gap-2">
+      <Button as-child>
+        <NuxtLink to="/editor">Abrir editor</NuxtLink>
+      </Button>
+      <Button variant="outline" as-child>
+        <NuxtLink to="/conectar">Conectar repo de GitHub</NuxtLink>
+      </Button>
+    </div>
   </main>
 </template>

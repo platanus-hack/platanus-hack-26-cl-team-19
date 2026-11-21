@@ -52,6 +52,7 @@ const {
   pending,
   error,
   loadModels,
+  openProject,
   openSample,
   openVersion,
   saveReplicas,
@@ -111,7 +112,14 @@ const changes = computed(() =>
   comparison.value ? toVersionChanges(comparison.value) : [],
 );
 
-onMounted(loadModels);
+const route = useRoute();
+onMounted(async () => {
+  // en serie: request() descarta una acción si hay otra en curso
+  await loadModels();
+  // /editor?project=<id>: el proyecto que creó la ingesta de un repo (JAJ-57)
+  const id = route.query.project;
+  if (typeof id === "string" && id) await openProject(id);
+});
 watch([base, target], () => {
   comparison.value = null;
 });
