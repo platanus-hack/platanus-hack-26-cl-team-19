@@ -109,7 +109,8 @@ def test_set_goals_and_simulate_checks_them(tools, project):
     assert pct["goals"] == {"slo_p95_ms": 300, "slo_error_rate": 0.01, "budget_usd_month": None}
     r = tools.call("simulate", {"project_id": project.id, "scenario": "cyberday"})
     assert r["bottleneck"]["line"] == "backend/app/core/security.py:36"
-    assert r["goals"]["p95"] == {"goal_ms": 300, "ok": False} and r["goals"]["meets_all"] is False
+    p95 = r["goals"]["p95"]
+    assert p95["goal_ms"] == 300 and p95["ok"] is False and r["goals"]["meets_all"] is False
     assert r["provenance"]["label"] == "SUPUESTO" and "60 s simulados" in r["provenance"]["source"]
 
 

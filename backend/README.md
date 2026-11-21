@@ -187,6 +187,31 @@ Además:
 - **La v2 (API ×3 y pooler)** aguanta la subida, pero a los 2 minutos se satura la DB y los errores llegan al 60 %.
 - **La v1 llega al 81 %** de errores.
 
+### Cuando el sistema no alcanza a atender (JAJ-89)
+
+`error_rate` solo cuenta las requests que terminaron, sea bien o con error. Una request que sigue en fila cuando se acaba la simulación, y todavía no llega al timeout del cliente, no es ni ok ni error: queda en `in_flight`. En un sistema saturado la fila crece sin parar, así que un "0 % de errores" puede esconder un colapso. Con branchpoint-shop-demo a 400 req/s, 60 s y semilla 7 (el perfil de su `simulate_demo.py`), el `Run` daba 0 % de errores con un p95 de 22 s.
+
+Por eso el `Run` trae `saturation`:
+- `saturated`: se cumplen dos condiciones.
+  1. **Muchas requests sin respuesta:** al menos 5 % (`UNANSWERED_SATURATED`).
+  2. **Una espera que crece o que llegó al timeout:** la espera que implica la fila (Ley de Little: fila / tasa de llegada) es al final al menos 1,5 veces la de la mitad, más 0,25 s (`WAIT_GROWTH` y `WAIT_GROWTH_MIN_S`). También cuenta si llegó al 80 % del timeout del cliente (`TIMEOUT_SHARE`) **si además ya hay timeouts y algún recurso está sobre el 90 %**: un endpoint sano que tarda 25 s deja una espera de 25 s, y alguna request puede vencer por azar, pero eso es latencia y no falta de capacidad. En simulaciones de más de ~2× el timeout, la espera deja de crecer porque las requests que vencen pasan a error, pero el sistema sigue colapsado.
+
+  La primera condición sola no basta. Sin saturación, la fracción en curso es latencia / duración: un endpoint sano de 3 s (una llamada a un LLM) deja 10 % en curso en 30 s. Pero en un sistema sano la espera se estabiliza en la latencia, y en uno saturado crece sin parar. La tasa de llegada se mide en una ventana de 3 s, así que un perfil que sube no se confunde con una fila que crece. Con menos de 4 s simulados no se evalúa.
+- `wait_mid_s` y `wait_end_s`: la espera a la mitad y al final.
+- `label` (`SUPUESTO`) y `source`: la procedencia de `saturated`, armada desde las constantes del motor. El editor puede mostrarla junto al aviso. El agente la recibe de dos formas:
+  - en `simulate` y `compare`, dentro del bloque `saturation`, con `label` y `source` (son de `saturated`; los conteos salen del motor);
+  - en las metas (`goals.errors` y `goals.p95`), anidada en `saturated_provenance`, para que no pise el `label` y el `source` del piso del 1 %.
+- `unanswered` y `unanswered_rate`: cuántas quedaron sin respuesta.
+- `error_rate_if_unanswered_fail`: la tasa de error si esas requests terminaran fallando. Es el techo de `error_rate`.
+- `offered_rps`: las req/s que llegaron (con perfil, el promedio).
+- `message`: el aviso en español. También va primero en `warnings`, y dice cuánto crece la espera y dónde estaba la fila.
+
+Los umbrales (5 %, ×1,5, 0,25 s y 80 % del timeout) y la forma de medir (ventana de 3 s, mínimo de 4 s) son **SUPUESTO**: los eligió el equipo, con el razonamiento de arriba, y no salen de una medición. Los tests cubren los dos lados: el colapso con 0 % de errores se marca, también en simulaciones de 60 y 120 s; un endpoint lento, una simulación corta o un perfil que sube no se marcan (`tests/engine/test_saturation.py`). Con branchpoint-shop-demo (60 s, semilla 7), a 400 req/s queda 39 % sin respuesta y la espera crece de 11 a 22 s. A 100 req/s no aparece el aviso.
+
+En `compare`, `summary` agrega "Ojo: v1 no alcanza a atender este tráfico (v1 deja 39 % de las requests sin respuesta al terminar): su tasa de error es un piso". Las metas del agente (`simulate` y `compare` de `app/agent/tools.py`) usan ese techo, así que una versión saturada nunca "cumple" por su 0 % de errores. El bloque `errors` dice con qué tasa juzgó (`basis`, `value` y el `error_rate` original), y el de `p95` dice por qué no cumple.
+
+**Runs guardados (JAJ-75):** no hay que subir ninguna versión. `ENGINE_VERSION` es el hash del código de `app/engine` y `app/models`, así que este cambio ya cambia la clave de los runs guardados y se vuelven a simular. Un `Run` guardado antes, sin `saturation`, se sigue leyendo (queda en `None`).
+
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
 ## Cómo usarlo

@@ -49,6 +49,7 @@ from typing import Any
 
 from app.engine.kernel import Resource, Sim
 from app.engine.metrics import (
+    ERROR_CLIENT_TIMEOUT,
     ERROR_DB_REFUSED,
     ERROR_POOL_TIMEOUT,
     ERROR_QUEUE_FULL,
@@ -76,6 +77,7 @@ from app.models.run import (
     QueueStats,
     ResourceStats,
     Run,
+    Saturation,
     SecondSample,
 )
 from app.models.traffic import TrafficProfile
@@ -87,6 +89,41 @@ RESOURCE_LABELS = {
     "db_cpu": "CPU de la DB",
 }
 SATURATION_WARNING = 0.9  # JAJ-44: sobre esto, latencia y errores se muestran como piso
+# JAJ-89: cuándo el sistema "no alcanza a atender". Todos estos números son SUPUESTO, elegidos por el
+# equipo (no medidos), y saturation_source() los cita en cada Run:
+# * UNANSWERED_SATURATED: fracción mínima de requests sin respuesta al terminar para avisar. Por sí sola
+#   no basta: sin saturación, la fracción en curso es latencia / duración (un endpoint sano de 3 s en
+#   30 s deja 10 %).
+# * WAIT_GROWTH y WAIT_GROWTH_MIN_S: la espera que implica la fila (Ley de Little: fila / tasa de
+#   llegada) tiene que crecer entre la mitad y el final. Sana, se estabiliza en la latencia; saturada,
+#   crece. El mínimo en segundos evita que el ruido de esperas de milisegundos cuente como crecer.
+# * TIMEOUT_SHARE: o la espera llegó cerca del timeout del cliente. En simulaciones largas (más de ~2×
+#   el timeout) la espera deja de crecer porque las que vencen pasan a error, y sigue colapsado.
+# * WAIT_WINDOW_S y MIN_SECONDS_FOR_GROWTH: cómo se mide (ventana de la tasa de llegada, y bajo cuántos
+#   segundos no se evalúa).
+UNANSWERED_SATURATED = 0.05
+WAIT_GROWTH = 1.5
+WAIT_GROWTH_MIN_S = 0.25
+TIMEOUT_SHARE = 0.8
+WAIT_WINDOW_S = 3
+MIN_SECONDS_FOR_GROWTH = 4
+
+
+def saturation_source() -> str:
+    """De dónde sale ``Saturation.saturated``: los umbrales, armados desde las constantes (JAJ-89)."""
+    return (
+        f"JAJ-89, umbrales elegidos por el equipo: saturado = al menos {_es(UNANSWERED_SATURATED * 100)} % de las "
+        f"requests sin respuesta al terminar, y una espera (Ley de Little, tasa de llegada en {WAIT_WINDOW_S} s) "
+        f"que crece de la mitad al final (×{_es(WAIT_GROWTH)} más {_es(WAIT_GROWTH_MIN_S)} s) o que llega al "
+        f"{_es(TIMEOUT_SHARE * 100)} % del timeout del cliente. No se evalúa con menos de {MIN_SECONDS_FOR_GROWTH} s."
+    )
+
+
+def _es(x: float) -> str:
+    """Un número con coma decimal: 1.5 → '1,5'."""
+    return f"{x:g}".replace(".", ",")
+
+
 BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
 CPU_CREDITS = ("sustained", "burst")
@@ -352,6 +389,7 @@ def simulate(
         cpu,
         usage,
         traffic_profile,
+        client_timeout_s,
     )
 
 
@@ -471,6 +509,7 @@ def _build_run(
     cpu: CpuAdjustment,
     usage: UsageTracker,
     profile: TrafficProfile | None,
+    client_timeout_s: float | None = None,
 ) -> Run:
     resource_stats = [
         ResourceStats(
@@ -491,6 +530,10 @@ def _build_run(
     errors = sum(rec.error_types.values())
     all_latencies = [ms for second in rec.latencies_ms for ms in second]
 
+    requests = sum(rec.arrivals)
+    saturation = _saturation(requests, errors, still_running, duration_s, resource_stats, rec, client_timeout_s)
+    if saturation.message:
+        warnings.insert(0, saturation.message)  # primero: es lo que cambia cómo leer el resto
     for rs in resource_stats:
         if rs.utilization >= SATURATION_WARNING:
             warnings.append(
@@ -505,7 +548,7 @@ def _build_run(
         seed=seed,
         duration_s=duration_s,
         arrivals=arrivals,
-        requests=sum(rec.arrivals),
+        requests=requests,
         ok=ok,
         errors=dict(rec.error_types),
         in_flight=still_running,
@@ -544,6 +587,112 @@ def _build_run(
         ],
         traffic_profile=_profile_segments(profile, rate),
         elapsed_ms=round((time.perf_counter() - wall_start) * 1000, 1),
+        saturation=saturation,
+    )
+
+
+def _pct(x: float) -> str:
+    return f"{x * 100:.0f} %"
+
+
+def _secs(x: float) -> str:
+    return f"{x:.1f}".replace(".", ",") + " s"
+
+
+def _thousands(n: int) -> str:
+    """9317 → '9.317', como se escriben los miles en español."""
+    return f"{n:,}".replace(",", ".")
+
+
+def _implied_wait_s(rec: Recorder, second: int) -> float:
+    """Espera que implica la fila al final del segundo ``second`` (Ley de Little: fila / tasa de llegada).
+
+    La fila es lo que llegó y todavía no termina (ok o error). La tasa de llegada se estima con los
+    últimos ``WAIT_WINDOW_S`` segundos, así un perfil que sube no se confunde con una fila que crece.
+    Si en esa ventana no llegó nada (un perfil que baja a 0) pero queda fila, se usa la tasa promedio
+    hasta ese segundo: con 0 la espera sería infinita, y devolver 0 escondería la fila.
+    """
+    backlog = sum(rec.arrivals[: second + 1]) - sum(rec.ok[: second + 1]) - sum(rec.errors[: second + 1])
+    if backlog <= 0:
+        return 0.0
+    window = rec.arrivals[max(0, second + 1 - WAIT_WINDOW_S) : second + 1]
+    arrival_rate = sum(window) / len(window) if window else 0.0
+    if arrival_rate <= 0:
+        arrival_rate = sum(rec.arrivals[: second + 1]) / (second + 1)
+    return backlog / arrival_rate if arrival_rate > 0 else 0.0
+
+
+def _saturation(
+    requests: int,
+    errors: int,
+    unanswered: int,
+    duration_s: float,
+    stats: list[ResourceStats],
+    rec: Recorder,
+    client_timeout_s: float | None = None,
+) -> Saturation:
+    """Si la fila crece sin parar y quedan muchas requests sin respuesta, el sistema no alcanza a atender
+    (JAJ-89).
+
+    ``error_rate`` no cuenta las requests sin respuesta (no son ok ni error todavía), así que un sistema
+    colapsado puede dar "0 % de errores" con un p95 de decenas de segundos. Pero quedar en curso no basta
+    para decir que está saturado: con un endpoint lento o una simulación corta, una fracción sana queda
+    en curso (latencia / duración). Por eso se exigen las dos cosas: muchas sin respuesta
+    (``UNANSWERED_SATURATED``) y una espera que crece entre la mitad y el final (``WAIT_GROWTH``) o que
+    llegó cerca del timeout del cliente (``TIMEOUT_SHARE``: en simulaciones largas deja de crecer porque
+    las que vencen pasan a error, y sigue colapsado).
+    """
+    rate = unanswered / requests if requests else 0.0
+    worst = (errors + unanswered) / requests if requests else 0.0
+    wait_mid = wait_end = 0.0
+    growing = at_timeout = False
+    if rec.seconds >= MIN_SECONDS_FOR_GROWTH:
+        wait_mid = _implied_wait_s(rec, rec.seconds // 2 - 1)
+        wait_end = _implied_wait_s(rec, rec.seconds - 1)
+        growing = wait_end >= WAIT_GROWTH * wait_mid + WAIT_GROWTH_MIN_S
+        # llegar cerca del timeout solo cuenta si hay timeouts de verdad y algún recurso está saturado: un
+        # endpoint sano que tarda 25 s también deja una espera de 25 s (y alguno puede vencer por azar),
+        # pero eso es latencia, no falta de capacidad
+        timed_out = rec.error_types.get(ERROR_CLIENT_TIMEOUT, 0) > 0
+        full = any(s.utilization >= SATURATION_WARNING for s in stats)
+        at_timeout = (
+            client_timeout_s is not None and timed_out and full and wait_end >= TIMEOUT_SHARE * client_timeout_s
+        )
+    saturated = rate >= UNANSWERED_SATURATED and (growing or at_timeout)
+    message = None
+    if saturated:
+        queued = max(stats, key=lambda s: (s.final_queue, s.utilization), default=None)
+        where = (
+            f" La fila estaba en {queued.label} ({_thousands(queued.final_queue)} esperando)."
+            if queued is not None and queued.final_queue
+            else ""
+        )
+        wait = (
+            f"La espera crece sin parar: unos {_secs(wait_mid)} a la mitad y {_secs(wait_end)} al final."
+            if growing
+            else f"La espera llegó a unos {_secs(wait_end)}, cerca del timeout del cliente ({_secs(client_timeout_s)}): "
+            "las que vencen pasan a error."
+        )
+        advice = (
+            "Simula más tiempo para ver los timeouts, o toma la tasa de error como piso."
+            if growing
+            else "Toma la tasa de error como piso: la fila no se vacía."
+        )
+        message = (
+            f"El sistema no alcanza a atender este tráfico: {_thousands(unanswered)} de {_thousands(requests)} "
+            f"requests ({_pct(rate)}) seguían sin respuesta al terminar y no cuentan como error. {wait}{where} Si "
+            f"terminaran fallando, la tasa de error sería {_pct(worst)}. {advice}"
+        )
+    return Saturation(
+        saturated=saturated,
+        offered_rps=round(requests / duration_s, 3) if duration_s > 0 else 0.0,
+        unanswered=unanswered,
+        unanswered_rate=round(rate, 4),
+        error_rate_if_unanswered_fail=round(worst, 4),
+        message=message,
+        wait_mid_s=round(wait_mid, 3),
+        wait_end_s=round(wait_end, 3),
+        source=saturation_source(),
     )
 
 
