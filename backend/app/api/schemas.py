@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.compare import RunDelta
+from app.models.operations import Operation
 from app.models.run import Run
 
 # Tope de requests simuladas por llamada (tasa × duración), para que una request no bloquee el
@@ -106,6 +107,29 @@ class ProjectDetail(BaseModel):
     sample: str | None
     created_at: str
     versions: list[VersionSummary]
+
+
+class ProposalRequest(BaseModel):
+    """Una propuesta del agente (JAJ-68): operaciones tipadas que se aplican en orden sobre una versión."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ops: list[Operation] = Field(
+        min_length=1, max_length=20, description="Operaciones en orden. Ver GET /operations para sus argumentos."
+    )
+    note: str | None = Field(None, max_length=500, description="Qué propone y por qué, para el historial.")
+    parent: int | None = Field(None, ge=1, description="Versión sobre la que se aplica. Por defecto, la última.")
+
+
+class ProposalResponse(BaseModel):
+    version: VersionDetail
+    changes: list[str] = Field(description="Qué cambió cada operación, en español y en orden.")
+
+
+class OperationInfo(BaseModel):
+    op: str
+    description: str
+    arguments: dict[str, Any] = Field(description="JSON Schema de los argumentos (sirve para definir la tool).")
 
 
 class CompareRequest(RunParams):

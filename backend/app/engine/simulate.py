@@ -5,8 +5,9 @@ Recursos que se arman desde el ``deployment`` del modelo:
 * ``api_cpu``: núcleos de la API, ``min(workers, vCPU) × réplicas``. Los ocupa la CPU base de cada
   request y los pasos de CPU (ej. hash de contraseña, que libera el GIL pero usa un núcleo).
 * ``api_threads``: hilos del threadpool para endpoints ``def`` (síncronos). Los async no los usan.
-* ``db_pool``: conexiones, ``pool por worker × workers × réplicas`` (tope: conexiones de la DB).
-  Esperar más que el timeout del pool es un error.
+* ``db_pool``: conexiones, ``pool por worker × workers × réplicas`` (tope: conexiones de la DB, o
+  las que acepta el pooler si el modelo tiene ``deployment.db.pooler``). Esperar más que el timeout
+  del pool es un error.
 * ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo.
 * ``queue:<nombre>``: workers de cada cola (``deployment.queues``). Encolar es casi instantáneo
   para la request; el trabajo espera un worker libre y usa la CPU de la DB si hace consultas
@@ -133,14 +134,7 @@ def simulate(
     api_scale *= cpu.api_core_factor
     db_scale *= cpu.db_core_factor
     threads = Resource(sim, "api_threads", model.api.threads)
-    pool_capacity = model.app_connections
-    if model.db.max_connections and pool_capacity > model.db.max_connections:
-        warnings.append(
-            f"La app puede abrir {pool_capacity} conexiones y la DB acepta {model.db.max_connections}: "
-            f"se simula con {model.db.max_connections} (las demás fallarían al conectarse)."
-        )
-        pool_capacity = model.db.max_connections
-    pool = Resource(sim, "db_pool", pool_capacity)
+    pool = Resource(sim, "db_pool", _pool_capacity(model, warnings))
     queues = {
         name: _QueueCounters(q, Resource(sim, QUEUE_PREFIX + name, q.workers)) for name, q in model.queues.items()
     }
@@ -336,6 +330,37 @@ def _cpu_adjustment(model: ArchitectureModel, cpu_credits: str, warnings: list[s
         db_vcpu_effective=db_vcpu,
         cpu_credits=credits,
     )
+
+
+def _pool_capacity(model: ArchitectureModel, warnings: list[str]) -> int:
+    """Conexiones que la app puede tener abiertas a la vez.
+
+    Sin pooler, el tope es ``max_connections`` de la DB: las conexiones que pasan de ahí fallarían al
+    conectarse. Con pooler (JAJ-68), la app se conecta al pooler y el tope es lo que acepta el pooler.
+    El motor no modela el multiplexado de transacciones del pooler: la DB sigue limitada por su CPU.
+    """
+    app, db = model.app_connections, model.db
+    if db.pooler_max_clients is not None:
+        kind = db.pooler_kind or "pooler"
+        warnings.append(
+            f"Con {kind}: la app se conecta al pooler, que acepta {db.pooler_max_clients} conexiones "
+            f"(la DB acepta {db.max_connections}). No se modela el multiplexado de transacciones: "
+            "la DB sigue limitada por su CPU."
+        )
+        if app > db.pooler_max_clients:
+            warnings.append(
+                f"La app puede abrir {app} conexiones y el pooler acepta {db.pooler_max_clients}: "
+                f"se simula con {db.pooler_max_clients} (las demás fallarían al conectarse)."
+            )
+            return db.pooler_max_clients
+        return app
+    if db.max_connections and app > db.max_connections:
+        warnings.append(
+            f"La app puede abrir {app} conexiones y la DB acepta {db.max_connections}: "
+            f"se simula con {db.max_connections} (las demás fallarían al conectarse)."
+        )
+        return db.max_connections
+    return app
 
 
 def _cores(sim: Sim, name: str, vcpu: float) -> tuple[Resource, float]:

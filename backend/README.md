@@ -13,12 +13,14 @@ backend/
 │   │   ├── schemas.py       #   lo que recibe y devuelve cada ruta
 │   │   ├── errors.py        #   formato de los errores ({"error": {"code", "message"}})
 │   │   ├── store.py         #   proyectos y versiones (en memoria hasta JAJ-56)
-│   │   └── routes/          #   rutas por tema: health, runs, models, projects
+│   │   └── routes/          #   rutas por tema: health, runs, models, projects, operations
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
 │   │   ├── run.py           #   salida: el Run (branchpoint.run/v1)
 │   │   ├── graph.py         #   grafo del diagrama (nodos y aristas) desde el modelo
-│   │   └── compare.py       #   delta entre dos Run y cambios entre dos modelos
+│   │   ├── compare.py       #   delta entre dos Run y cambios entre dos modelos
+│   │   └── operations.py    #   operaciones tipadas para proponer versiones (JAJ-68)
+│   ├── catalog/             # catálogo de números por defecto (copia del de spikes/jaj-45-numeros)
 │   ├── engine/              # motor de eventos discretos
 │   │   ├── kernel.py        #   reloj, cola de eventos y recursos (genérico)
 │   │   ├── simulate.py      #   arma los recursos desde el modelo y recorre los pasos de cada request
@@ -29,6 +31,7 @@ backend/
 └── tests/
     ├── fixtures/            # versión fija del modelo del template (anterior a JAJ-47) para los tests del motor
     ├── engine/              # tests del kernel y del motor
+    ├── models/              # tests del catálogo y de las operaciones
     └── api/                 # tests de la API
 ```
 
@@ -42,7 +45,7 @@ Los recursos se arman desde el `deployment` del modelo:
 | -- | -- | -- |
 | CPU de la API (`api_cpu`) | `min(workers, vCPU) × réplicas` núcleos | CPU base de cada request y pasos de CPU (ej. hash de contraseña) |
 | Hilos de la API (`api_threads`) | hilos por worker × workers × réplicas | endpoints `def` (síncronos), durante toda la request |
-| Pool de conexiones (`db_pool`) | pool por worker × workers × réplicas (tope: conexiones de la DB) | desde la primera consulta hasta el final de la request |
+| Pool de conexiones (`db_pool`) | pool por worker × workers × réplicas (tope: conexiones de la DB, o las del pooler si hay `deployment.db.pooler`) | desde la primera consulta hasta el final de la request |
 | CPU de la DB (`db_cpu`) | vCPU de la DB | cada consulta, durante su tiempo (también las de los workers de las colas) |
 | Workers de una cola (`queue:<nombre>`) | `workers` de la cola | cada trabajo encolado, durante sus `job_steps` |
 
@@ -96,6 +99,37 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
 - **Cuentas a mano:** el uso de CPU sube exactamente en el factor, y el punto de saturación baja en el factor.
 - **Contra los `checks` de `build_model.py`, que ya aplican el factor y la base de créditos:** en los dos modelos de ejemplo, el motor da el mismo uso de CPU (±5 %) en los escenarios bajo saturación, y el mismo cuello de botella en CyberDay.
 
+### Operaciones para proponer versiones (JAJ-68)
+
+Según el ADR 0001 (`docs/adr/0001-el-llm-opera-sobre-el-modelo-no-lo-extrae.md`), el agente no edita el JSON del modelo ni escribe números. Propone cambios de arquitectura con un conjunto cerrado de operaciones (`app/models/operations.py`). Cada una es una función pura, de modelo v1 a modelo v1:
+
+| Operación | Argumentos | Qué cambia |
+| -- | -- | -- |
+| `scale_api` | `replicas`, `vcpu?` | Réplicas y vCPU de la API, y su costo mensual |
+| `change_db_plan` | `plan`, `provider?` | Plan de la DB del catálogo: vCPU, `max_connections`, procesador (factor de núcleo), créditos de CPU, límite del pooler y precio |
+| `add_pooler` | `max_client_connections?` | Pooler de conexiones (`deployment.db.pooler`): Supavisor en Supabase, con el límite del catálogo, o PgBouncer en otros, donde el límite es obligatorio |
+| `add_cache` | `endpoint`, `hit_ratio`, `steps?` | Las consultas del endpoint pasan a `on_miss` de una caché. Por defecto, las del handler, no las de sus dependencias como la autenticación |
+| `move_to_queue` | `endpoint`, `step`, `workers`, `queue?`, `max_length?` | El paso sale de la request y pasa a los `job_steps` de una cola nueva. La request solo encola |
+
+**Reglas de los números:**
+- **Planes y pasos típicos:** sus números salen del catálogo (`app/catalog`), con su fuente.
+- **Lo que elige quien propone** (réplicas, workers, tasa de aciertos) queda `SUPUESTO`. Con `quote`, la frase del usuario, la fuente es esa frase. Sin `quote`, queda con `needs_review` para que la UI lo resalte.
+- **Procedencia completa:** ningún número nuevo queda sin `label`, `source` y `date`, y un test lo revisa en cada operación.
+
+**Cómo se aplican:**
+- **`apply_operations(modelo, ops)`:** las aplica en orden sobre una copia y valida que el resultado cargue con `load_model()`. Si una operación no aplica (un endpoint o plan inexistente, un pooler repetido), lanza `OperationError` con un mensaje en español y su posición.
+- **El modelo nuevo guarda su historial** en `operations` y marca `checks.stale`, porque las cotas de `build_model.py` eran de la versión anterior.
+- **`POST /projects/{id}/proposals`:** lo mismo desde la API. Guarda el resultado como versión con origen `agente` y su antecesora.
+- **`GET /operations`:** entrega el JSON Schema de cada operación, para definir las tools del agente (JAJ-67).
+
+**Pooler en el motor:** con `deployment.db.pooler.max_client_connections`, la app se conecta al pooler y el tope de conexiones pasa a ser el del pooler, no el `max_connections` de la DB. El motor no modela el multiplexado de transacciones: la DB sigue limitada por su CPU, y el `Run` lo advierte.
+
+**El caso de la tarjeta, con el template en Supabase Micro:**
+- `scale_api(3)` deja 3 réplicas × 4 workers × 15 conexiones = 180, contra 60 de la DB, y el motor lo advierte.
+- Con `add_pooler()`, el pooler de Micro acepta 200 y la advertencia desaparece.
+
+Los tests están en `tests/models/test_operations.py` y `tests/api/test_proposals.py`.
+
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
 ## Cómo usarlo
@@ -140,6 +174,8 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. |
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). |
+| `POST` | `/projects/{id}/proposals` | Aplica `{"ops": [...], "note", "parent"}` en orden sobre la versión `parent` (por defecto, la última) y guarda el resultado como versión con origen `agente`. Devuelve la versión y `changes` (qué cambió cada operación). Si una no aplica, 422 `invalid_operation` con su `index`, y no guarda nada. |
+| `GET` | `/operations` | Las operaciones que acepta `proposals`, con su descripción y el JSON Schema de sus argumentos. |
 
 **Proyectos en memoria:** se pierden al reiniciar la API. `ProjectStore` (`app/api/store.py`) es la interfaz que va a implementar la persistencia (JAJ-56) sin cambiar las rutas.
 
@@ -149,6 +185,10 @@ P=$(curl -s -H "Content-Type: application/json" -d '{"sample": "full-stack-fasta
 curl -s localhost:8000/projects/$P/versions/1 | python -c 'import json,sys; m = json.load(sys.stdin)["model"]; m["deployment"]["api"]["replicas"]["value"] = 4; print(json.dumps({"model": m, "note": "API ×4"}))' > v2.json
 curl -s -H "Content-Type: application/json" --data @v2.json localhost:8000/projects/$P/versions
 curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "scenario": "cyberday"}' localhost:8000/projects/$P/compare
+
+# o que el agente proponga la v3 con operaciones tipadas (JAJ-68), y compararla con la v1
+curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "replicas": 3}, {"op": "add_pooler"}], "note": "API ×3 con pooler"}' localhost:8000/projects/$P/proposals
+curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 3, "scenario": "cyberday"}' localhost:8000/projects/$P/compare
 ```
 
 Body de `POST /runs`. Solo `model` es obligatorio:
@@ -182,6 +222,7 @@ Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "mes
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
 | `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo). |
 | `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
+| `invalid_operation` | Una operación de `POST /projects/{id}/proposals` no aplica al modelo (endpoint o plan inexistente, pooler repetido…). Trae `index`, la posición de la operación. |
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.

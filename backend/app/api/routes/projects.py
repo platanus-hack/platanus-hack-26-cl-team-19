@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
+from app.api.errors import INVALID_OPERATION, INVALID_PARAMETERS, NOT_FOUND, ApiError
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422, run_model
 from app.api.schemas import (
@@ -13,12 +13,15 @@ from app.api.schemas import (
     CreateProjectRequest,
     CreateVersionRequest,
     ProjectDetail,
+    ProposalRequest,
+    ProposalResponse,
     RunParams,
     VersionDetail,
     VersionSummary,
 )
 from app.api.store import Project, ProjectStore, Version
 from app.models.compare import run_delta
+from app.models.operations import OperationError, apply_operations
 from app.models.run import Run
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -93,6 +96,31 @@ def create_version(
     load_or_422(req.model)
     version = store.add_version(project_id, req.model, req.origin, parent, req.note)
     return VersionDetail(**_summary(version).model_dump(), model=version.model)
+
+
+@router.post(
+    "/{project_id}/proposals",
+    response_model=ProposalResponse,
+    status_code=201,
+    summary="Aplicar operaciones tipadas y guardar el resultado como versión del agente",
+)
+def create_proposal(
+    project_id: str, req: ProposalRequest, store: ProjectStore = Depends(get_store)
+) -> ProposalResponse:
+    """``propose_version`` del ADR 0001 (JAJ-68): las operaciones se aplican en orden sobre la versión
+    ``parent`` (por defecto, la última) y el resultado queda como versión nueva con origen ``agente``."""
+    project = _project(store, project_id)
+    parent = req.parent if req.parent is not None else len(project.versions)
+    base = _version(project, parent)
+    try:
+        model, changes = apply_operations(base.model, list(req.ops))
+    except OperationError as e:
+        raise ApiError(422, INVALID_OPERATION, str(e), index=e.index) from e
+    note = req.note or "; ".join(changes)
+    version = store.add_version(project_id, model, "agente", parent, note)
+    return ProposalResponse(
+        version=VersionDetail(**_summary(version).model_dump(), model=version.model), changes=changes
+    )
 
 
 @router.get("/{project_id}/versions/{number}", response_model=VersionDetail, summary="Una versión con su modelo")
