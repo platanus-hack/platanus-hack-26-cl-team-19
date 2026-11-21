@@ -1,8 +1,8 @@
 """``load_model``: cómo se lee un modelo ``branchpoint.model/v1`` (JAJ-110).
 
 Hasta ahora ``load_model`` solo se probaba de forma indirecta, a través del motor y la API. Estos
-tests fijan lo que hace hoy. Los rangos que todavía deja pasar (tiempos negativos, 0 réplicas…)
-son JAJ-101.
+tests fijan lo que hace. Desde JAJ-101 también valida la forma y los rangos (tiempos negativos, 0
+réplicas, un texto donde va un número…), con el campo en el mensaje.
 """
 
 from __future__ import annotations
@@ -119,3 +119,139 @@ def test_invalid_models(change, error, match):
     change(raw)
     with pytest.raises(error, match=match):
         load_model(raw)
+
+
+# --- forma y rangos (JAJ-101) ----------------------------------------------------------------------
+
+STEP = {"kind": "db", "resource": "db_connection", "time": 2, "at": "a.py:1"}
+
+
+@pytest.mark.parametrize(
+    "change, match",
+    [
+        (
+            lambda r: r["deployment"]["api"].update(replicas=0),
+            r"deployment\.api\.replicas debe ser al menos 1 \(es 0\)",
+        ),
+        (lambda r: r["deployment"]["api"].update(workers=0), r"deployment\.api\.workers debe ser al menos 1"),
+        (lambda r: r["deployment"]["api"].update(threads_per_worker=0), r"threads_per_worker debe ser al menos 1"),
+        (lambda r: r["deployment"]["api"].update(vcpu=0), r"deployment\.api\.vcpu debe ser mayor que 0"),
+        (lambda r: r["deployment"]["api"].update(memory_gb=0), r"deployment\.api\.memory_gb debe ser mayor que 0"),
+        (lambda r: r["deployment"]["api"].update(latency_ms=-1), r"latency_ms no puede ser negativo \(es -1\)"),
+        (lambda r: r["deployment"]["db"].update(vcpu=-2), r"deployment\.db\.vcpu debe ser mayor que 0"),
+        (lambda r: r["deployment"]["db"].update(max_connections=0), r"max_connections debe ser al menos 1"),
+        (
+            lambda r: r["deployment"]["db"].update(pool_per_worker={"pool_size": 0, "max_overflow": 0}),
+            r"pool_size \+ max_overflow debe ser al menos 1",
+        ),
+        (
+            lambda r: r["deployment"]["db"].update(pool_per_worker={"pool_size": -1}),
+            r"pool_size no puede ser negativo",
+        ),
+        (lambda r: r["deployment"]["db"].update(pooler={"client_connections": 0}), r"client_connections debe ser al"),
+        (
+            lambda r: r["deployment"].update(queues={"q": {"workers": 1, "max_length": 0}}),
+            r"deployment\.queues\.q\.max_length debe ser al menos 1",
+        ),
+        (
+            lambda r: r["deployment"].update(queues={"q": {"job_steps": [{**STEP, "time": -1}]}}),
+            r"deployment\.queues\.q\.job_steps\[0\]\.time no puede ser negativo",
+        ),
+        (lambda r: r["endpoints"][0].update(weight=-1), r"endpoints\[0\]\.weight no puede ser negativo"),
+        (lambda r: r["endpoints"][0].update(api_cpu_ms=-1), r"endpoints\[0\]\.api_cpu_ms no puede ser negativo"),
+        (lambda r: r["endpoints"][0].update(steps=[{**STEP, "time": -3}]), r"steps\[0\]\.time no puede ser negativo"),
+        (lambda r: r["endpoints"][0].update(steps=[{**STEP, "repeat": -1}]), r"steps\[0\]\.repeat no puede ser neg"),
+        (lambda r: r["endpoints"][0].update(steps=[{**STEP, "repeat": 2.5}]), r"steps\[0\]\.repeat debe ser un entero"),
+        (
+            lambda r: r["endpoints"][0].update(
+                steps=[{"kind": "cache", "resource": "cache", "time": 1, "on_miss": [{**STEP, "time": -1}]}]
+            ),
+            r"steps\[0\]\.on_miss\[0\]\.time no puede ser negativo",
+        ),
+        (lambda r: r["traffic"]["scenarios"]["base"].update(rps=0), r"traffic\.scenarios\.base\.rps debe ser mayor"),
+        (lambda r: r["traffic"].update(peak_rps=-5), r"traffic\.peak_rps debe ser mayor que 0"),
+        (lambda r: r.update(business={"conversion": 1.5}), r"business\.conversion es una fracción"),
+        (lambda r: r.update(business={"ticket_usd": -1}), r"business\.ticket_usd no puede ser negativo"),
+        (lambda r: r.update(schema="branchpoint.model/v1.1"), "Esquema no soportado"),
+    ],
+)
+def test_out_of_range_values_name_the_field(change, match):
+    raw = tiny()
+    change(raw)
+    with pytest.raises(ValueError, match=match):
+        load_model(raw)
+
+
+@pytest.mark.parametrize(
+    "change, match",
+    [
+        (lambda r: r["deployment"].update(db=[]), r"deployment\.db debe ser un objeto \(\{…\}\), no una lista"),
+        (lambda r: r.update(endpoints={"GET /a": {}}), r"endpoints debe ser una lista"),
+        (lambda r: r.update(endpoints=["x"]), r"endpoints\[0\] debe ser un objeto \(\{…\}\), no un texto \('x'\)"),
+        (lambda r: r["endpoints"][0].update(steps=[1]), r"endpoints\[0\]\.steps\[0\] debe ser un objeto"),
+        (lambda r: r["endpoints"][0].update(id=""), r"endpoints\[0\]\.id debe ser un texto"),
+        (lambda r: r["deployment"]["api"].update(replicas="2"), r"replicas debe ser un número, no un texto \('2'\)"),
+        (lambda r: r["deployment"]["api"].update(vcpu=True), r"vcpu debe ser un número, no true"),
+        (lambda r: r["deployment"]["api"].update(vcpu=[2]), r"vcpu debe ser un número, no una lista"),
+        (lambda r: r["traffic"]["scenarios"].update(base=50), r"traffic\.scenarios\.base debe ser un objeto"),
+        (lambda r: r["traffic"].update(profile=[]), r"traffic\.profile debe ser un objeto"),
+        (lambda r: r.update(repo="tiny"), r"repo debe ser un objeto"),
+        (lambda r: r["deployment"].update(queues=[]), r"deployment\.queues debe ser un objeto"),
+    ],
+)
+def test_wrong_shapes_name_the_field(change, match):
+    """Antes eran ``AttributeError`` o ``TypeError`` sin el campo, y en la API un 500 (BE-08)."""
+    raw = tiny()
+    change(raw)
+    with pytest.raises(ValueError, match=match):
+        load_model(raw)
+
+
+def test_a_missing_required_field_names_its_path():
+    raw = tiny()
+    del raw["deployment"]["api"]["workers"]
+    with pytest.raises(KeyError, match=r"deployment\.api\.workers"):
+        load_model(raw)
+
+
+def test_numbers_with_and_without_provenance_load_the_same():
+    """La decisión de JAJ-101: los escalares valen en todo el modelo, igual que ``{"value": …}``."""
+    plain = tiny()
+
+    def boxed(x):
+        return {"value": x, "label": "SUPUESTO"}
+
+    raw = tiny()
+    api = raw["deployment"]["api"]
+    for k in ("replicas", "vcpu", "workers", "threads_per_worker", "latency_ms"):
+        api[k] = boxed(api[k])
+    raw["traffic"]["scenarios"]["base"]["rps"] = 50
+    assert load_model(raw) == load_model(plain)
+
+
+def test_valid_edge_values_still_load():
+    """Los bordes que sí son válidos: tiempo 0, un endpoint con peso 0 (si otro tiene tráfico), sin
+    límite de conexiones ni de cola (``null``), repeat 0 (se lee como 1, como antes) y conversión 1."""
+    raw = tiny(steps=[{**STEP, "time": 0, "repeat": 0}])
+    raw["endpoints"].append({**raw["endpoints"][0], "id": "GET /b", "weight": 0})
+    raw["deployment"]["db"]["max_connections"] = None
+    raw["deployment"]["queues"] = {"q": {"workers": 1, "max_length": None}}
+    raw["business"] = {"conversion": 1, "ticket_usd": 0}
+    m = load_model(raw)
+    assert m.db.max_connections is None and m.queues["q"].max_length is None
+    assert m.endpoints[0].steps[0].repeat == 1 and m.endpoints[1].weight == 0
+
+
+def test_every_sample_and_fixture_still_loads():
+    """La validación no rechaza ningún modelo real del repo."""
+    from pathlib import Path
+
+    from app.samples import sample_ids
+
+    for sample_id in sample_ids():
+        load_model(load_sample(sample_id))
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+    for path in fixtures.rglob("*.json"):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and raw.get("schema") == "branchpoint.model/v1":
+            load_model(raw)

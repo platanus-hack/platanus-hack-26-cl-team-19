@@ -70,11 +70,9 @@ def main(argv: list[str] | None = None) -> int:
         message = detail if isinstance(detail, str) and " " in detail else f"al modelo le falta el campo {detail!r}"
         print(f"error: {message}", file=sys.stderr)
         return 2
-    except (ValueError, TypeError) as e:  # incluye un JSON roto y SimulationTooLarge (JAJ-99)
+    # incluye un JSON roto, uno que no es un objeto (ej. una lista, JAJ-101) y SimulationTooLarge (JAJ-99)
+    except (ValueError, TypeError) as e:
         print(f"error: {e}", file=sys.stderr)
-        return 2
-    except AttributeError:  # el JSON no es un objeto (ej. una lista)
-        print(f"error: {a.model} no es un modelo branchpoint.model/v1", file=sys.stderr)
         return 2
 
     lat = run.latency
