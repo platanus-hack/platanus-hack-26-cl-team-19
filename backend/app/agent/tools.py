@@ -220,6 +220,14 @@ def _provenance(model: dict[str, Any], run: Run) -> dict[str, Any]:
     }
 
 
+# De dónde sale "saturated": umbrales elegidos por el equipo, no medidos (JAJ-89, README del backend)
+SATURATION_PROVENANCE = {
+    "label": "SUPUESTO",
+    "source": "JAJ-89: saturado = al menos 5 % de las requests sin respuesta al terminar y una espera (Ley de "
+    "Little) que crece de la mitad al final: ×1,5 más 0,25 s. Umbrales elegidos por el equipo.",
+}
+
+
 def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[str, Any] | None:
     if goals == ProjectGoals():
         return None
@@ -234,6 +242,7 @@ def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[st
             "value": error_rate,
             "basis": "techo por saturación: error_rate más las requests sin respuesta al terminar (JAJ-89)",
             "error_rate": run.error_rate,
+            **SATURATION_PROVENANCE,
         }
         if saturated
         else {"value": error_rate, "basis": "error_rate"}
@@ -275,7 +284,7 @@ def _run_summary(run: Run, model: dict[str, Any]) -> dict[str, Any]:
         "errors": run.errors,
         "throughput_rps": round(run.throughput_rps, 1),
         # JAJ-89: si quedaron requests sin respuesta, error_rate es un piso; el agente debe decirlo
-        "saturation": asdict(run.saturation) if run.saturation is not None else None,
+        "saturation": {**asdict(run.saturation), **SATURATION_PROVENANCE} if run.saturation is not None else None,
         "bottleneck": {
             "resource": b.resource,
             "utilization": round(b.utilization, 3),

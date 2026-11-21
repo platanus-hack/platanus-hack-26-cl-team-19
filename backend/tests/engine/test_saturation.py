@@ -66,7 +66,7 @@ def with_slow_call(raw, ms):
     "ms, rps, duration_s, profile",
     [
         (3000, 2, 30, None),  # una llamada a un LLM de 3 s: ~10 % sigue en curso al terminar, y está sana
-        (300, 20, 6, None),  # simulación corta: ~8 % en curso
+        (600, 20, 6, None),  # simulación corta: ~10 % en curso, lejos del umbral
         (3000, 2, 30, "subida"),  # tasa que sube: la fila crece, pero la espera no
     ],
 )
@@ -91,6 +91,43 @@ def test_wait_grows_when_overloaded(model):
 def test_very_short_simulation_is_not_judged(model):
     s = simulate(model, "cyberday", seed=1, duration_s=3).saturation
     assert not s.saturated and s.wait_mid_s == s.wait_end_s == 0.0
+
+
+def test_saved_run_round_trips_saturation_as_dataclass(model):
+    """Un Run guardado (JAJ-75) vuelve con saturation como Saturation, no como dict: así lo leen
+    _goal_check y el resumen de compare."""
+    from app.api.run_cache import run_from_json, run_to_json
+    from app.models.run import Saturation
+
+    run = simulate(model, "cyberday", seed=1, duration_s=20)
+    back = run_from_json(run_to_json(run))
+    assert isinstance(back.saturation, Saturation) and back.saturation == run.saturation
+    assert back.saturation.saturated
+
+
+def test_queue_left_when_traffic_drops_to_zero_is_not_hidden(model):
+    """Si el perfil baja a 0 req/s y queda fila, la espera no puede salir 0 (sería esconder la fila)."""
+    from app.models.traffic import TrafficProfile, TrafficSegment
+
+    tp = TrafficProfile((TrafficSegment(14, 1.0, 1.0), TrafficSegment(6, 0.0, 0.0)))
+    s = simulate(model, "cyberday", seed=1, traffic_profile=tp).saturation
+    assert s.wait_end_s > 0 and s.saturated
+
+
+def test_compare_route_says_it(raw):
+    """Por HTTP: compare pasa los dos Run al resumen."""
+    from fastapi.testclient import TestClient
+
+    from app.api.main import create_app
+    from app.api.store import InMemoryProjectStore
+
+    client = TestClient(create_app(store=InMemoryProjectStore(), auth=None))
+    pid = client.post("/projects", json={"sample": SAMPLE}).json()["id"]
+    client.post(f"/projects/{pid}/versions/1/ops", json={"ops": [{"op": "scale_api", "replicas": 2}]})
+    r = client.post(f"/projects/{pid}/compare", json={"a": 1, "b": 2, "scenario": "cyberday", "duration_s": 20})
+    body = r.json()
+    assert r.status_code == 200 and body["run_a"]["saturation"]["saturated"]
+    assert "Ojo:" in body["summary"] and "alcanza a atender" in body["summary"]
 
 
 def test_old_saved_run_without_saturation_still_loads(model):
@@ -128,6 +165,7 @@ def test_compare_summary_says_which_version_does_not_keep_up(raw, model):
     text = compare_summary(1, 2, delta, None, None, run_a, run_b)
     assert "Ojo: v1 no alcanza a atender este tráfico" in text and "v2 deja" not in text
     both = compare_summary(1, 2, delta, None, None, run_a, run_a)
-    assert "Ninguna versión alcanza" in both
+    assert "Ninguna versión alcanza" in both and "sus tasas de error son un piso" in both
+    assert "su tasa de error es un piso" in text
     assert "Ojo" not in compare_summary(1, 2, delta, None, None, run_b, run_b)
     assert "Ojo" not in compare_summary(1, 2, delta, None, None)  # sin runs, como antes

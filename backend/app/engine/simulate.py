@@ -578,10 +578,16 @@ def _implied_wait_s(rec: Recorder, second: int) -> float:
 
     La fila es lo que llegó y todavía no termina (ok o error). La tasa de llegada se estima con los
     últimos ``WAIT_WINDOW_S`` segundos, así un perfil que sube no se confunde con una fila que crece.
+    Si en esa ventana no llegó nada (un perfil que baja a 0) pero queda fila, se usa la tasa promedio
+    hasta ese segundo: con 0 la espera sería infinita, y devolver 0 escondería la fila.
     """
     backlog = sum(rec.arrivals[: second + 1]) - sum(rec.ok[: second + 1]) - sum(rec.errors[: second + 1])
+    if backlog <= 0:
+        return 0.0
     window = rec.arrivals[max(0, second + 1 - WAIT_WINDOW_S) : second + 1]
     arrival_rate = sum(window) / len(window) if window else 0.0
+    if arrival_rate <= 0:
+        arrival_rate = sum(rec.arrivals[: second + 1]) / (second + 1)
     return backlog / arrival_rate if arrival_rate > 0 else 0.0
 
 
