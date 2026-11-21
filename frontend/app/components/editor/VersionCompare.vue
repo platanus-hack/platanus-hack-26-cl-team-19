@@ -46,7 +46,7 @@ const labelOf = (id: string) =>
 const number = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 });
 const format = (row: CompareRow, value: number) =>
   row.format === "currency"
-    ? `${usd(value)}${row.unit}`
+    ? `${usd(value, true)}${row.unit}`
     : `${number.format(value)} ${row.unit}`;
 
 /** Todas las métricas comparadas mejoran al bajar. */
@@ -59,7 +59,7 @@ function delta(row: CompareRow) {
   return {
     text:
       row.format === "currency"
-        ? `${diff > 0 ? "+" : ""}${usd(diff)}${row.unit}`
+        ? `${diff > 0 ? "+" : ""}${usd(diff, true)}${row.unit}`
         : `${diff > 0 ? "+" : "−"}${number.format(Math.abs(diff))} ${row.deltaUnit ?? row.unit}`,
     icon: diff < 0 ? ArrowDown : ArrowUp,
     verdict:
@@ -213,6 +213,8 @@ function delta(row: CompareRow) {
         </tbody>
       </table>
     </div>
+
+    <slot name="results" />
 
     <section
       v-if="rows.length"

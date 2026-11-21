@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import IngestionCredential from "@/components/projects/IngestionCredential.vue";
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowRight, Check } from "@lucide/vue";
+import OnboardingActions from "@/components/onboarding/OnboardingActions.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -44,7 +44,6 @@ const busy = ref(false);
 const error = ref(false);
 const demoRepo = "fastapi/full-stack-fastapi-template";
 const github = useGithubConnection({ immediate: false });
-const credentialUsable = ref(true);
 
 async function addDemoRepository() {
   if (busy.value || repositoryState.value !== "choose") return;
@@ -66,7 +65,7 @@ async function addDemoRepository() {
     <AppHeader minimal />
 
     <main
-      class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      class="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-6 pt-8 pb-20"
     >
       <div class="mb-6">
         <h1 class="text-3xl font-semibold tracking-tight">
@@ -76,6 +75,7 @@ async function addDemoRepository() {
           Trae el código de una rama para analizar su arquitectura.
         </p>
       </div>
+
       <div v-if="!isMock" class="flex flex-col gap-4">
         <Alert v-if="github.returnError.value" variant="destructive">
           <AlertDescription>{{ github.returnError.value }}</AlertDescription>
@@ -126,12 +126,12 @@ async function addDemoRepository() {
               >
             </p>
           </div>
-          <div class="flex flex-wrap items-center gap-2">
+          <OnboardingActions>
             <Button @click="completeOnboarding">
-              Continuar
+              Ir a Mis proyectos
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Button>
-          </div>
+          </OnboardingActions>
         </template>
 
         <template
@@ -141,7 +141,13 @@ async function addDemoRepository() {
             Instala la app en la pestaña de GitHub que se abrió, elige los repos
             y vuelve aquí para ligarla a tu cuenta.
           </p>
-          <div class="flex flex-wrap items-center gap-2">
+          <OnboardingActions>
+            <Button variant="outline" @click="github.connect()">
+              Volver a abrir GitHub
+            </Button>
+            <Button variant="link" class="self-end" @click="completeOnboarding">
+              Omitir por ahora
+            </Button>
             <Button
               :disabled="github.connecting.value"
               @click="github.connect(true)"
@@ -152,13 +158,7 @@ async function addDemoRepository() {
               />
               Listo, ya la instalé
             </Button>
-            <Button variant="ghost" @click="github.connect()">
-              Volver a abrir GitHub
-            </Button>
-            <Button variant="ghost" @click="completeOnboarding">
-              Omitir por ahora
-            </Button>
-          </div>
+          </OnboardingActions>
         </template>
 
         <template v-else-if="!github.repos.value.length">
@@ -166,7 +166,21 @@ async function addDemoRepository() {
             Instala la GitHub App de Branchpoint y elige los repos que quieres
             analizar. Solo pide permiso de lectura.
           </p>
-          <div class="flex flex-wrap items-center gap-2">
+          <OnboardingActions>
+            <Button
+              variant="outline"
+              :disabled="github.connecting.value"
+              @click="github.connect(true)"
+            >
+              Ya instalé la app
+            </Button>
+            <Button variant="link" class="self-end" @click="completeOnboarding">
+              {{
+                github.revoked.value
+                  ? "Continuar a Mis proyectos"
+                  : "Omitir por ahora"
+              }}
+            </Button>
             <Button @click="github.connect()">
               <BrandIcon brand="github" data-icon="inline-start" />
               {{
@@ -175,20 +189,7 @@ async function addDemoRepository() {
                   : "Conectar con GitHub"
               }}
             </Button>
-            <Button variant="ghost" @click="completeOnboarding">{{
-              github.revoked.value
-                ? "Continuar a Mis proyectos"
-                : "Omitir por ahora"
-            }}</Button>
-          </div>
-          <button
-            type="button"
-            class="self-start text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-            :disabled="github.connecting.value"
-            @click="github.connect(true)"
-          >
-            Ya instalé la app
-          </button>
+          </OnboardingActions>
         </template>
 
         <template v-else>
@@ -240,11 +241,6 @@ async function addDemoRepository() {
             </p>
           </div>
 
-          <IngestionCredential
-            v-model:provider="github.provider.value"
-            :disabled="github.running.value"
-            @usable="credentialUsable = $event"
-          />
           <Alert
             v-if="github.ingestion.value?.status === 'failed'"
             variant="destructive"
@@ -254,27 +250,6 @@ async function addDemoRepository() {
               "No se pudo analizar el repo."
             }}</AlertDescription>
           </Alert>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <Button
-              :disabled="
-                github.running.value ||
-                !github.repo.value ||
-                !github.branch.value ||
-                !credentialUsable
-              "
-              @click="github.analyze()"
-            >
-              <Spinner v-if="github.running.value" data-icon="inline-start" />
-              {{ github.running.value ? github.progress.value : "Analizar" }}
-            </Button>
-            <Button
-              v-if="!github.running.value"
-              variant="ghost"
-              @click="completeOnboarding"
-              >Omitir por ahora</Button
-            >
-          </div>
 
           <p
             v-if="github.installHref.value && !github.running.value"
@@ -294,6 +269,27 @@ async function addDemoRepository() {
                 : ""
             }}
           </p>
+          <OnboardingActions>
+            <Button
+              v-if="!github.running.value"
+              variant="link"
+              class="self-end"
+              @click="completeOnboarding"
+            >
+              Omitir por ahora
+            </Button>
+            <Button
+              :disabled="
+                github.running.value ||
+                !github.repo.value ||
+                !github.branch.value
+              "
+              @click="github.analyze({ useBranchpointKey: true })"
+            >
+              <Spinner v-if="github.running.value" data-icon="inline-start" />
+              {{ github.running.value ? github.progress.value : "Analizar" }}
+            </Button>
+          </OnboardingActions>
         </template>
       </div>
 
@@ -323,7 +319,16 @@ async function addDemoRepository() {
           >
         </Alert>
 
-        <div class="flex flex-wrap items-center gap-2">
+        <OnboardingActions>
+          <Button
+            v-if="repositoryState !== 'added'"
+            variant="link"
+            class="self-end"
+            :disabled="busy"
+            @click="completeOnboarding"
+          >
+            Omitir por ahora
+          </Button>
           <Button
             v-if="repositoryState === 'idle'"
             @click="repositoryState = 'choose'"
@@ -337,21 +342,11 @@ async function addDemoRepository() {
           >
             Usar este repo
           </Button>
-          <Button
-            v-if="repositoryState === 'added'"
-            @click="completeOnboarding"
-          >
-            Continuar
+          <Button v-else @click="completeOnboarding">
+            Ir a Mis proyectos
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Button>
-          <Button
-            v-else
-            variant="ghost"
-            :disabled="busy"
-            @click="completeOnboarding"
-            >Omitir por ahora</Button
-          >
-        </div>
+        </OnboardingActions>
       </div>
     </main>
   </div>

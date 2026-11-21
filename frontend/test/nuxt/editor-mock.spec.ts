@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { toComparisonRows } from "@/services/editor-view";
 import { createMockEditorApi } from "../../app/services/editor-mock";
 
 describe("editor de demostración", () => {
@@ -25,6 +26,32 @@ describe("editor de demostración", () => {
     expect(new Set(series.map((second) => second.arrivals))).toEqual(
       new Set([13]),
     );
+  });
+
+  it("expone la simulación y los datos de costos en los resultados de demo", async () => {
+    const api = createMockEditorApi();
+    const id = "fastapi-template";
+    const result = await api.results(id, 1, "cyberday");
+
+    expect(result.run).toEqual(await api.run(id, 1, "cyberday"));
+    expect(result.cost).toEqual(await api.getCosts(id, 1));
+    expect(result.failure).toBeNull();
+    expect(result.failure_missing).toContain("business.conversion");
+  });
+
+  it("compara solo los importes con precio en ambas versiones", async () => {
+    const api = createMockEditorApi();
+    const result = await api.compare("fastapi-template", 1, 1, "cyberday");
+    const rows = toComparisonRows({
+      ...result,
+      cost_delta: { a: 22.15, b: 24.8, missing: ["api"] },
+    });
+
+    expect(rows.at(-1)).toMatchObject({
+      label: "Costo mensual comparable",
+      base: { value: 22.15 },
+      target: { value: 24.8 },
+    });
   });
 
   it("parte de cero si el sessionStorage está corrupto", async () => {

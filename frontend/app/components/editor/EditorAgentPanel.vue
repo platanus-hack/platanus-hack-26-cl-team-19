@@ -7,7 +7,6 @@ import {
   SquarePen,
   X,
 } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -15,6 +14,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
+import AgentMarkdown from "./AgentMarkdown.vue";
 import AgentProposalCard from "./AgentProposalCard.vue";
 import AgentToolCall from "./AgentToolCall.vue";
 import EvidenceRequestCard from "./EvidenceRequestCard.vue";
@@ -33,7 +33,6 @@ const props = withDefaults(
     nextVersion: string;
     thinking?: boolean;
     disabled?: boolean;
-    suggestions?: string[];
     /** Nodo que el agente recibe como contexto, por ejemplo el seleccionado. */
     context?: string;
     /** Adjuntos en el compositor (IA-9). Sin `canAttach`, el botón queda deshabilitado con `attachHint`. */
@@ -46,7 +45,6 @@ const props = withDefaults(
   {
     thinking: false,
     disabled: false,
-    suggestions: () => [],
     context: undefined,
     attachments: () => [],
     canAttach: false,
@@ -116,10 +114,9 @@ const canSend = computed(
     !uploading.value,
 );
 
-function send(text = draft.value) {
-  const message = text.trim();
-  if (!message || props.thinking || props.disabled || uploading.value) return;
-  emit("send", message);
+function send() {
+  if (!canSend.value) return;
+  emit("send", draft.value.trim());
   draft.value = "";
 }
 
@@ -153,7 +150,7 @@ watch(
       role="log"
       aria-live="polite"
       aria-label="Conversación con el agente"
-      class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
+      class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>[data-agent-step]+[data-agent-step]]:-mt-3"
     >
       <template v-if="messages.length">
         <template v-for="message in messages" :key="message.id">
@@ -179,12 +176,10 @@ watch(
               </li>
             </ul>
           </div>
-          <p
+          <AgentMarkdown
             v-else-if="message.role === 'agent'"
-            class="text-sm leading-relaxed whitespace-pre-wrap"
-          >
-            <span class="sr-only">Agente: </span>{{ message.text }}
-          </p>
+            :text="message.text"
+          />
           <AgentToolCall
             v-else-if="message.role === 'tool'"
             :name="message.name"
@@ -217,31 +212,13 @@ watch(
         />
       </template>
 
-      <div v-else class="mt-auto flex flex-col gap-3">
-        <p class="text-sm text-muted-foreground">
+      <div v-else class="mt-auto">
+        <p class="text-xs text-muted-foreground">
           <slot name="intro">
             Pide un cambio en lenguaje natural. El agente lee el código, simula
             el escenario y te propone el cambio antes de aplicarlo.
           </slot>
         </p>
-        <ul
-          v-if="suggestions.length"
-          class="flex flex-col"
-          aria-label="Sugerencias"
-        >
-          <li v-for="suggestion in suggestions" :key="suggestion">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              class="h-auto w-full justify-start py-1.5 text-left font-normal whitespace-normal text-muted-foreground hover:text-foreground"
-              :disabled="disabled"
-              @click="send(suggestion)"
-            >
-              {{ suggestion }}
-            </Button>
-          </li>
-        </ul>
       </div>
     </div>
 
@@ -312,21 +289,21 @@ watch(
           </button>
         </li>
       </ul>
-      <InputGroup>
+      <InputGroup class="rounded-xl bg-background">
         <InputGroupTextarea
           :id="inputId"
           v-model="draft"
-          rows="2"
+          rows="1"
           maxlength="20000"
-          placeholder="Pide un cambio o haz una pregunta…"
+          placeholder="Escribe un mensaje…"
           :disabled="disabled"
-          class="max-h-40 min-h-14 text-sm"
+          class="max-h-40 min-h-8 px-3 pt-2 pb-1"
           @keydown="onKeydown"
           @paste="onPaste"
         />
-        <InputGroupAddon align="block-end">
+        <InputGroupAddon align="block-end" class="px-2 pb-1.5">
           <InputGroupButton
-            size="icon-xs"
+            size="icon-sm"
             :title="canAttach ? 'Adjuntar imagen o log' : attachHint"
             :aria-label="canAttach ? 'Adjuntar imagen o log' : attachHint"
             :disabled="!canAttach || disabled"
@@ -344,7 +321,7 @@ watch(
           </span>
           <InputGroupButton
             v-if="messages.length"
-            size="icon-xs"
+            size="icon-sm"
             class="ms-auto"
             title="Nueva conversación"
             aria-label="Nueva conversación"
@@ -354,12 +331,12 @@ watch(
             <SquarePen aria-hidden="true" />
           </InputGroupButton>
           <InputGroupButton
-            size="icon-xs"
+            size="icon-sm"
             variant="default"
+            type="submit"
             :class="messages.length ? undefined : 'ms-auto'"
             aria-label="Enviar mensaje"
             :disabled="!canSend"
-            @click="send()"
           >
             <ArrowUp aria-hidden="true" />
           </InputGroupButton>

@@ -11,6 +11,7 @@ export type ChatTurn = {
 type ToolResult = {
   error?: unknown;
   p95_ms?: number;
+  scenario?: string;
   bottleneck?: { resource?: string };
   // analyze_log y apply_log_traffic (IA-7)
   peak_rps?: { value: number; unit: string };

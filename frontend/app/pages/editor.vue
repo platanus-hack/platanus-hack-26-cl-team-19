@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
-import { Loader2, Play } from "@lucide/vue";
+import { Ellipsis, Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
+import EditorFailureCost from "@/components/editor/EditorFailureCost.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
@@ -29,15 +30,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  costComponentLabel,
   simulationProvenance,
   toBottleneck,
   toComparisonRows,
@@ -64,6 +69,7 @@ const {
   graph,
   scenario,
   run,
+  results,
   costs,
   costsError,
   comparison,
@@ -130,6 +136,7 @@ const inspected = computed(() => {
     toInspectedNode(node, run.value, provenance)
   );
 });
+const displayedCosts = computed(() => results.value?.cost ?? costs.value);
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
 const rows = computed(() =>
   comparison.value ? toComparisonRows(comparison.value, provenance) : [],
@@ -403,6 +410,40 @@ async function saveVersion() {
             El backend devolvió solo los primeros 100 cambios.
           </p>
         </div>
+        <template v-if="comparison" #results>
+          <p
+            v-if="comparison.cost_delta.missing.length"
+            class="text-sm text-muted-foreground"
+          >
+            La diferencia de costo incluye solo los componentes con precio en
+            ambas versiones. Quedan fuera:
+            {{
+              comparison.cost_delta.missing.map(costComponentLabel).join(", ")
+            }}.
+          </p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <section
+              class="flex min-w-0 flex-col gap-4 rounded-md border border-border p-4"
+            >
+              <h3 class="font-mono text-sm font-semibold">v{{ base }}</h3>
+              <EditorVersionCosts :costs="comparison.cost_a" />
+              <EditorFailureCost
+                :failure="comparison.failure_a"
+                :missing="comparison.failure_missing_a"
+              />
+            </section>
+            <section
+              class="flex min-w-0 flex-col gap-4 rounded-md border border-border p-4"
+            >
+              <h3 class="font-mono text-sm font-semibold">v{{ target }}</h3>
+              <EditorVersionCosts :costs="comparison.cost_b" />
+              <EditorFailureCost
+                :failure="comparison.failure_b"
+                :missing="comparison.failure_missing_b"
+              />
+            </section>
+          </div>
+        </template>
       </VersionCompare>
     </template>
 
@@ -508,44 +549,88 @@ async function saveVersion() {
 
     <template v-if="project && !isMock" #agent>
       <section aria-label="Chat" class="flex min-h-0 flex-1 flex-col">
-        <h2 class="border-b border-border px-4 py-3 text-sm font-semibold">
-          Chat
-        </h2>
-        <div class="flex shrink-0 flex-col gap-2 p-3">
-          <Label for="editor-chat-provider">Proveedor</Label>
-          <Select v-model="chatProvider" :disabled="thinking">
-            <SelectTrigger id="editor-chat-provider" class="w-full"
-              ><SelectValue
-            /></SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="anthropic">Claude (Anthropic)</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <p v-if="savedKeysEnabled" class="text-xs text-muted-foreground">
-            <template v-if="savedKeysLoaded">
-              {{
-                usingPersonalKey
-                  ? "Usando tu API key."
-                  : chatProvider === "openai"
-                    ? "Agrega tu API key de OpenAI."
-                    : chatSettings?.team.includes("anthropic")
-                      ? `Cuota de Branchpoint · ${chatSettings.remaining} mensajes disponibles hoy.`
-                      : "Cuota de Branchpoint no disponible."
-              }}
-            </template>
-            <NuxtLink
-              to="/settings#api-keys"
-              class="underline underline-offset-4"
-            >
-              Gestionar API keys
-            </NuxtLink>
-          </p>
-          <p v-else class="text-xs text-muted-foreground">
-            Inicia sesión con GitHub para usar el chat.
-          </p>
+        <header
+          class="flex shrink-0 items-center justify-between border-b border-border px-4 py-2"
+        >
+          <h2 class="text-sm font-semibold">Chat</h2>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Opciones del chat"
+              >
+                <Ellipsis aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-60">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Proveedor</DropdownMenuLabel>
+                <DropdownMenuRadioGroup v-model="chatProvider">
+                  <DropdownMenuRadioItem value="anthropic" :disabled="thinking">
+                    Claude (Anthropic)
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="openai" :disabled="thinking">
+                    OpenAI
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+                <p
+                  v-if="usingPersonalKey"
+                  class="px-2 py-1 text-xs text-muted-foreground"
+                >
+                  Usando tu API key.
+                </p>
+                <p
+                  v-else-if="
+                    chatSettings && !chatSettings.team.includes(chatProvider)
+                  "
+                  class="px-2 py-1 text-xs text-muted-foreground"
+                >
+                  Agrega una API key para este proveedor.
+                </p>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Uso diario de Branchpoint</DropdownMenuLabel>
+                <div
+                  v-if="chatSettings && chatSettings.team.length"
+                  class="flex flex-col gap-1.5 px-2 pt-1 pb-2 text-xs text-muted-foreground"
+                >
+                  <progress
+                    v-if="chatSettings.limit > 0"
+                    :value="chatSettings.limit - chatSettings.remaining"
+                    :max="chatSettings.limit"
+                    aria-label="Mensajes de Branchpoint usados hoy"
+                    class="h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary"
+                  />
+                  <span
+                    >{{ chatSettings.limit - chatSettings.remaining }} de
+                    {{ chatSettings.limit }} mensajes usados</span
+                  >
+                </div>
+                <p v-else class="px-2 py-1 text-xs text-muted-foreground">
+                  {{
+                    !savedKeysEnabled
+                      ? "Inicia sesión con GitHub para usar el chat."
+                      : chatSettingsError || savedKeysLoaded
+                        ? "Cuota no disponible."
+                        : "Cargando el uso…"
+                  }}
+                </p>
+                <DropdownMenuItem v-if="savedKeysEnabled" as-child>
+                  <NuxtLink to="/settings#api-keys"
+                    >Gestionar API keys</NuxtLink
+                  >
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
+        <div
+          v-if="attachNotice || chatError || chatSettingsError"
+          class="flex shrink-0 flex-col gap-2 p-3"
+        >
           <p v-if="attachNotice" class="text-xs text-muted-foreground">
             {{ attachNotice }}
           </p>
@@ -562,7 +647,6 @@ async function saveVersion() {
           :attachments="chatAttachments.drafts.value"
           :can-attach="chatAttachments.enabled"
           :evidence="evidence"
-          :suggestions="['Simula CyberDay para este proyecto']"
           :next-version="''"
           @attach="attachFiles"
           @remove-attachment="chatAttachments.remove"
@@ -578,35 +662,48 @@ async function saveVersion() {
     </template>
 
     <template #metrics>
-      <Tabs v-model="panel" class="gap-0">
-        <TabsList variant="line" aria-label="Panel de análisis" class="mx-4">
+      <Tabs v-model="panel" class="min-h-0 flex-1 gap-0">
+        <TabsList
+          variant="line"
+          aria-label="Panel de análisis"
+          class="mx-4 shrink-0"
+        >
           <TabsTrigger value="simulation">Simulación</TabsTrigger>
           <TabsTrigger value="costs">Costos</TabsTrigger>
         </TabsList>
-        <TabsContent value="simulation" class="flex flex-col gap-3 p-4">
-          <SimulationPanel
-            v-if="playback"
-            v-model:minute="cursor"
-            v-model:playing="playing"
-            :frames="playback.frames"
-            :phases="playback.phases"
-            :provenance="provenance"
-            time-unit="second"
-          />
-          <p v-else class="text-sm text-muted-foreground">
-            Elige un escenario y pulsa Simular para reproducir el resultado.
-          </p>
-          <ul
-            v-if="run?.warnings.length"
-            class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
-          >
-            <li v-for="warning in run.warnings" :key="warning">
-              {{ warning }}
-            </li>
-          </ul>
+        <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
+          <div class="flex flex-col gap-3">
+            <SimulationPanel
+              v-if="playback"
+              v-model:minute="cursor"
+              v-model:playing="playing"
+              :frames="playback.frames"
+              :phases="playback.phases"
+              :provenance="provenance"
+              time-unit="second"
+            />
+            <p v-else class="text-sm text-muted-foreground">
+              Elige un escenario y pulsa Simular para reproducir el resultado.
+            </p>
+            <ul
+              v-if="run?.warnings.length"
+              class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+            >
+              <li v-for="warning in run.warnings" :key="warning">
+                {{ warning }}
+              </li>
+            </ul>
+          </div>
         </TabsContent>
-        <TabsContent value="costs" class="p-4">
-          <EditorVersionCosts v-if="costs" :costs="costs" />
+        <TabsContent value="costs" class="min-h-0 overflow-y-auto p-4">
+          <div v-if="displayedCosts" class="flex flex-col gap-4">
+            <EditorVersionCosts :costs="displayedCosts" />
+            <EditorFailureCost
+              v-if="results"
+              :failure="results.failure"
+              :missing="results.failure_missing"
+            />
+          </div>
           <div v-else-if="costsError" class="flex flex-col items-start gap-3">
             <p class="text-sm text-muted-foreground">{{ costsError }}</p>
             <Button variant="outline" @click="loadCosts">Reintentar</Button>

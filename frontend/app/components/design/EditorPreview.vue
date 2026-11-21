@@ -33,7 +33,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
-  agentSuggestions,
+  chatPreview,
   changesBetween,
   replyTo,
   repositories,
@@ -78,7 +78,9 @@ const scenarioId = ref(
     : "pico",
 );
 const selectedNode = ref<string | null>("orders");
-const conversations = ref<Record<string, ChatMessage[]>>({});
+const conversations = ref<Record<string, ChatMessage[]>>({
+  "tienda-api": chatPreview.map((message) => ({ ...message })),
+});
 const thinking = ref(false);
 const sampleProposals = new Map<string, SampleProposal>();
 const appliedByRepository = ref<Record<string, SampleProposal[]>>({});
@@ -417,16 +419,14 @@ function reset() {
     </template>
 
     <template #metrics>
-      <Tabs v-model="panelTab" class="gap-0">
-        <div
-          class="sticky top-0 z-10 flex items-center border-b border-border bg-background px-4"
-        >
+      <Tabs v-model="panelTab" class="min-h-0 flex-1 gap-0">
+        <div class="flex shrink-0 items-center border-b border-border px-4">
           <TabsList variant="line" aria-label="Panel de análisis">
             <TabsTrigger value="simulation">Simulación</TabsTrigger>
             <TabsTrigger value="costs">Costos</TabsTrigger>
           </TabsList>
         </div>
-        <TabsContent value="simulation" class="p-4">
+        <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
           <SimulationPanel
             v-model:minute="minute"
             v-model:playing="playing"
@@ -436,7 +436,7 @@ function reset() {
             :provenance="simulationProvenance"
           />
         </TabsContent>
-        <TabsContent value="costs" class="p-4">
+        <TabsContent value="costs" class="min-h-0 overflow-y-auto p-4">
           <CostBreakdown
             v-model:provider="costProvider"
             v-model:database="costDatabase"
@@ -456,7 +456,6 @@ function reset() {
       <EditorAgentPanel
         :messages="messages"
         :thinking="thinking"
-        :suggestions="agentSuggestions"
         :next-version="nextVersion"
         :context="selectedName"
         @send="send"

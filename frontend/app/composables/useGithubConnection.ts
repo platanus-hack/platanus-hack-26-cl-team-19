@@ -246,7 +246,7 @@ export function useGithubConnection({ immediate = true } = {}) {
     alive = false;
   });
 
-  async function analyze() {
+  async function analyze({ useBranchpointKey = false } = {}) {
     if (!api || selectionError.value || running.value) return;
     error.value = "";
     keyProblem.value = false;
@@ -261,8 +261,14 @@ export function useGithubConnection({ immediate = true } = {}) {
               selection.value,
               primaryRepo.value,
               provider.value,
+              useBranchpointKey,
             )
-          : await api.startIngestion(repo.value, branch.value, provider.value);
+          : await api.startIngestion(
+              repo.value,
+              branch.value,
+              provider.value,
+              useBranchpointKey,
+            );
       } catch (cause) {
         const status = (cause as { statusCode?: number }).statusCode;
         keyProblem.value = status === 422 || status === 429;
