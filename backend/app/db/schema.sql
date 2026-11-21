@@ -1,8 +1,8 @@
 -- Modelo de datos persistente de Branchpoint (JAJ-55).
 --
--- Es la propuesta que documenta README.md, no una migración: JAJ-56 la copia a
--- supabase/migrations/ cuando levante Supabase. Supone Postgres 15+ con el esquema auth de
--- Supabase (auth.users). Las decisiones y el mapeo de ProjectStore están en README.md.
+-- Es la propuesta original que documenta README.md. No se aplica: JAJ-56 la copió a
+-- supabase/migrations/, que es la fuente de verdad del esquema. Un cambio al esquema es una
+-- migración nueva allá (ver docs/supabase-local.md), no una edición de este archivo.
 
 -- ---------------------------------------------------------------------------------------------
 -- Tipos

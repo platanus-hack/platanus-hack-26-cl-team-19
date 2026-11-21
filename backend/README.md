@@ -1,6 +1,6 @@
 # Backend de Branchpoint
 
-Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49, JAJ-52). El modelo de datos persistente está definido en `app/db` (JAJ-55) y lo implementa JAJ-56.
+Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49, JAJ-52). El modelo de datos persistente está definido en `app/db` (JAJ-55) y lo implementa JAJ-56. Para levantar la base de datos local, ver [`docs/supabase-local.md`](../docs/supabase-local.md).
 
 ## Estructura
 

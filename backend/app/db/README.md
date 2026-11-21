@@ -1,6 +1,6 @@
 # `app/db`: modelo de datos persistente
 
-Define qué guarda Branchpoint entre sesiones y cómo (JAJ-55). El esquema completo, listo para copiar a `supabase/migrations/`, está en [`schema.sql`](schema.sql). Las migraciones y el proyecto de Supabase son JAJ-56.
+Define qué guarda Branchpoint entre sesiones y cómo (JAJ-55). La propuesta original del esquema está en [`schema.sql`](schema.sql). El esquema que se aplica vive en [`supabase/migrations/`](../../../supabase/migrations/) (JAJ-56): cómo levantarlo y cambiarlo está en [`docs/supabase-local.md`](../../../docs/supabase-local.md).
 
 El motor (`app/engine`) no depende de esta carpeta: recibe un modelo y devuelve un `Run`, sin guardar nada.
 
