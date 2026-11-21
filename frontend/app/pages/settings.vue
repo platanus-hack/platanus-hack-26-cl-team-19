@@ -126,26 +126,37 @@ const accounts = computed(() =>
 
         <template v-else>
           <p class="text-sm text-muted-foreground">
-            Todavía no conectas GitHub. Instala la GitHub App de Branchpoint y
-            elige los repos que quieres analizar.
+            {{
+              github.awaitingGithub.value
+                ? "Instala la app en la pestaña de GitHub que se abrió, elige los repos y vuelve aquí para ligarla a tu cuenta."
+                : "Todavía no conectas GitHub. Instala la GitHub App de Branchpoint y elige los repos que quieres analizar."
+            }}
           </p>
           <div class="flex flex-wrap items-center gap-2">
             <Button
-              :disabled="github.connecting.value"
+              :variant="github.awaitingGithub.value ? 'outline' : 'default'"
               @click="github.connect()"
+            >
+              {{
+                github.awaitingGithub.value
+                  ? "Volver a abrir GitHub"
+                  : "Conectar con GitHub"
+              }}
+            </Button>
+            <Button
+              :variant="github.awaitingGithub.value ? 'default' : 'ghost'"
+              :disabled="github.connecting.value"
+              @click="github.connect(true)"
             >
               <Spinner
                 v-if="github.connecting.value"
                 data-icon="inline-start"
               />
-              Conectar con GitHub
-            </Button>
-            <Button
-              variant="ghost"
-              :disabled="github.connecting.value"
-              @click="github.connect(true)"
-            >
-              Ya instalé la app
+              {{
+                github.awaitingGithub.value
+                  ? "Listo, ya la instalé"
+                  : "Ya instalé la app"
+              }}
             </Button>
           </div>
         </template>
