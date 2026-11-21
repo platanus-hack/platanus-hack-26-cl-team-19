@@ -16,11 +16,13 @@ from app.api.schemas import (
     CreateVersionRequest,
     OpsVersionDetail,
     ProjectDetail,
+    Region,
     RunParams,
     VersionDetail,
     VersionSummary,
 )
 from app.api.store import Project, ProjectStore, Version
+from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
 from app.models.compare import run_delta
 from app.models.run import Run
 
@@ -138,8 +140,53 @@ def run_version(project_id: str, number: int, req: RunParams, store: ProjectStor
 def compare(project_id: str, req: CompareRequest, store: ProjectStore = Depends(get_store)) -> CompareResponse:
     project = _project(store, project_id)
     va, vb = _version(store, project, req.a), _version(store, project, req.b)
-    params = RunParams(**req.model_dump(exclude={"a", "b"}))
+    params = RunParams(**req.model_dump(exclude={"a", "b", "region"}))
     run_a, run_b = run_model(va.model, params), run_model(vb.model, params)
+    cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
+    delta = cost_delta(cost_a, cost_b)
+    fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)  # JAJ-74
     return CompareResponse(
-        a=_summary(va), b=_summary(vb), run_a=run_a, run_b=run_b, delta=run_delta(run_a, run_b, va.model, vb.model)
+        a=_summary(va),
+        b=_summary(vb),
+        run_a=run_a,
+        run_b=run_b,
+        delta=run_delta(run_a, run_b, va.model, vb.model),
+        cost_a=cost_a,
+        cost_b=cost_b,
+        cost_delta=delta,
+        failure_a=fa,
+        failure_b=fb,
+        summary=compare_summary(va.number, vb.number, delta, fa, fb),
     )
+
+
+def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
+    """'v2 cuesta +US$57,66/mes y evita entre US$X y US$Y por hora en ventas en juego' (JAJ-74).
+
+    La diferencia se calcula con cada cota (piso y techo) y se ordena de menor a mayor: cuando las dos
+    versiones fallan mucho, sus techos se acercan a "si fallara todo" y esa diferencia queda cerca de 0.
+    """
+    sign = "+" if cost.diff >= 0 else "−"
+    text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
+    if fa is None or fb is None:
+        return text + "."
+    if fa.too_short or fb.too_short:
+        return text + ". La simulación es muy corta para ver los timeouts: simula más tiempo para comparar las ventas."
+    lo, hi = sorted(fa.lost_sales_per_hour[k]["value"] - fb.lost_sales_per_hour[k]["value"] for k in ("low", "high"))
+    floor = " (al menos)" if fa.is_floor or fb.is_floor else ""
+    if lo >= 0:
+        return text + f" y evita entre US${lo:,.0f} y US${hi:,.0f} por hora en ventas en juego{floor}."
+    if hi <= 0:
+        return text + f" y suma entre US${-hi:,.0f} y US${-lo:,.0f} por hora en ventas en juego{floor}."
+    return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
+
+
+@router.get(
+    "/{project_id}/versions/{number}/costs",
+    response_model=CostEstimate,
+    summary="Costo mensual de una versión, por componente",
+)
+def version_costs(
+    project_id: str, number: int, region: Region = "us-east-1", store: ProjectStore = Depends(get_store)
+) -> CostEstimate:
+    return estimate_cost(_version(store, _project(store, project_id), number).model, region)

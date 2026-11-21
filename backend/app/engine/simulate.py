@@ -72,11 +72,13 @@ from app.models.run import (
     CacheStats,
     CpuAdjustment,
     EndpointStats,
+    ProfileSegment,
     QueueStats,
     ResourceStats,
     Run,
     SecondSample,
 )
+from app.models.traffic import TrafficProfile
 
 RESOURCE_LABELS = {
     "api_cpu": "CPU de la API",
@@ -120,11 +122,14 @@ def simulate(
     client_timeout_s: float | None = 30.0,
     cache_hit_ratio: float | None = None,
     cpu_credits: str = "sustained",
+    traffic_profile: TrafficProfile | None = None,
 ) -> Run:
     """Simula ``duration_s`` segundos de tráfico y devuelve el ``Run``.
 
     ``rps`` reemplaza la tasa del escenario. ``arrivals``: ``poisson`` (usuarios reales) o
     ``uniform`` (como k6 con tasa constante, útil para comparar con mediciones).
+    ``traffic_profile`` (JAJ-71) hace que la tasa cambie en el tiempo: es la tasa base multiplicada
+    por el perfil en cada instante, y la duración pasa a ser la del perfil.
     ``cache_hit_ratio`` reemplaza la tasa de aciertos de todas las cachés con ``on_miss``.
     ``cpu_credits``: en una DB con créditos de CPU, ``sustained`` (vCPU sostenidos) o ``burst``.
     """
@@ -135,6 +140,8 @@ def simulate(
     if cache_hit_ratio is not None and not 0.0 <= cache_hit_ratio <= 1.0:
         raise ValueError("cache_hit_ratio debe estar entre 0 y 1")
     rate = rps if rps is not None else model.scenario(scenario).rps
+    if traffic_profile is not None:
+        duration_s = traffic_profile.duration_s
     if rate <= 0 or duration_s <= 0:
         raise ValueError("rps y duration_s deben ser mayores que 0")
     wall_start = time.perf_counter()
@@ -253,23 +260,55 @@ def simulate(
     endpoints = model.endpoints
     cumulative = list(accumulate(e.weight for e in endpoints))
 
+    rid = 0
+
+    def arrive() -> None:
+        nonlocal rid
+        i = min(bisect_right(cumulative, sim.rng.random() * cumulative[-1]), len(endpoints) - 1)
+        rid += 1
+        rec.arrival(endpoints[i], sim.now)
+        sim.start(request(endpoints[i], rid))
+
     def source() -> Generator[Any, Any, None]:
-        rid = 0
         while True:
             yield sim.rng.expovariate(rate) if arrivals == "poisson" else 1.0 / rate
             if sim.now >= duration_s:
                 return
-            i = min(bisect_right(cumulative, sim.rng.random() * cumulative[-1]), len(endpoints) - 1)
-            rid += 1
-            rec.arrival(endpoints[i], sim.now)
-            sim.start(request(endpoints[i], rid))
+            arrive()
+
+    def profiled_source(profile: TrafficProfile) -> Generator[Any, Any, None]:
+        """Llegadas con tasa ``rate × perfil(t)`` (JAJ-71).
+
+        Poisson: se generan candidatas a la tasa del pico y se acepta cada una con probabilidad
+        ``perfil(t) / pico`` (thinning, el método estándar para un Poisson con tasa variable).
+        Uniforme: la siguiente llega ``1 / tasa(t)`` segundos después; si eso cruza el borde del tramo,
+        se salta al borde y se vuelve a calcular con la tasa nueva.
+        """
+        peak = profile.peak
+        while sim.now < duration_s:
+            if arrivals == "poisson":
+                yield sim.rng.expovariate(rate * peak)
+                if sim.now >= duration_s:
+                    return
+                if sim.rng.random() * peak < profile.multiplier_at(sim.now):
+                    arrive()
+                continue
+            lam = rate * profile.multiplier_at(sim.now)
+            boundary = profile.next_change(sim.now)
+            if lam <= 0 or sim.now + 1.0 / lam > boundary:
+                yield boundary - sim.now
+                continue
+            yield 1.0 / lam
+            if sim.now >= duration_s:
+                return
+            arrive()
 
     def sampler() -> Generator[Any, Any, None]:
         for _ in range(rec.seconds):
             yield 1.0
             rec.sample()
 
-    sim.start(source())
+    sim.start(source() if traffic_profile is None else profiled_source(traffic_profile))
     sim.start(sampler())
     sim.run(until=duration_s)
 
@@ -312,7 +351,26 @@ def simulate(
         queue_stats,
         cpu,
         usage,
+        traffic_profile,
     )
+
+
+def _profile_segments(profile: TrafficProfile | None, rate: float) -> list[ProfileSegment] | None:
+    """El perfil en req/s, con el segundo de inicio y de fin de cada tramo, para el gráfico."""
+    if profile is None:
+        return None
+    out, start = [], 0.0
+    for seg in profile.segments:
+        out.append(
+            ProfileSegment(
+                start_s=round(start, 3),
+                end_s=round(start + seg.duration_s, 3),
+                from_rps=round(rate * seg.from_multiplier, 3),
+                to_rps=round(rate * seg.to_multiplier, 3),
+            )
+        )
+        start += seg.duration_s
+    return out
 
 
 def _cpu_adjustment(model: ArchitectureModel, cpu_credits: str, warnings: list[str]) -> CpuAdjustment:
@@ -412,6 +470,7 @@ def _build_run(
     queues: list[QueueStats],
     cpu: CpuAdjustment,
     usage: UsageTracker,
+    profile: TrafficProfile | None,
 ) -> Run:
     resource_stats = [
         ResourceStats(
@@ -479,9 +538,11 @@ def _build_run(
                 latency=latency_stats(rec.latencies_ms[i]),
                 queue=rec.queue_samples[i] if i < len(rec.queue_samples) else {},
                 utilization=rec.utilization_samples[i] if i < len(rec.utilization_samples) else {},
+                target_rps=round(rate * (profile.multiplier_at(i + 0.5) if profile else 1.0), 3),
             )
             for i in range(rec.seconds)
         ],
+        traffic_profile=_profile_segments(profile, rate),
         elapsed_ms=round((time.perf_counter() - wall_start) * 1000, 1),
     )
 
