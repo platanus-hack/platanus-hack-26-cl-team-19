@@ -106,7 +106,7 @@ export interface Comparison {
   summary: string | null;
 }
 
-function runParams(scenario: string) {
+export function editorRunParams(scenario: string) {
   return {
     scenario,
     seed: 0,
@@ -142,12 +142,12 @@ export function createEditorApi(baseURL: string) {
         origin: "manual",
       }),
     run: (id: string, version: number, scenario: string) =>
-      post<Run>(`${versionPath(id, version)}/runs`, runParams(scenario)),
+      post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),
     compare: (id: string, base: number, target: number, scenario: string) =>
       post<Comparison>(`${projectPath(id)}/compare`, {
-        ...runParams(scenario),
+        ...editorRunParams(scenario),
         a: base,
         b: target,
       }),

@@ -1,3 +1,4 @@
+import { editorRunParams } from "./editor-api";
 import type {
   ArchitectureModel,
   CostEstimate,
@@ -41,27 +42,54 @@ function mockGraph(model: ArchitectureModel): Graph {
   };
 }
 
-function mockMetrics(model: ArchitectureModel, scenario: string) {
-  const rps = model.traffic.scenarios[scenario]?.rps;
-  const traffic = typeof rps === "number" ? rps : (rps?.value ?? 0);
-  const capacity = model.deployment.api.replicas.value * 125;
-  const ok = Math.min(traffic, capacity);
-  const errors = traffic - ok;
-  const utilization = Math.min(traffic / capacity, 1);
+function peakMultiplier(progress: number) {
+  if (progress < 0.25) return 0.35 + (0.65 * progress) / 0.25;
+  if (progress < 0.7) return 1;
+  return 1 - (0.5 * (progress - 0.7)) / 0.3;
+}
+
+function mockSecond(arrivals: number, capacity: number): Run["series"][number] {
+  const ok = Math.min(arrivals, capacity);
+  const utilization = ok / capacity;
   return {
-    traffic,
+    arrivals,
     ok,
-    errors,
-    utilization,
-    p95: 40 + Math.round(utilization * 160),
+    errors: arrivals - ok,
+    latency: { p95_ms: 40 + Math.round(utilization * 160) },
+    queue: {},
+    utilization: { api_cpu: utilization },
+  };
+}
+
+function mockSeries(model: ArchitectureModel, scenario: string) {
+  const params = editorRunParams(scenario);
+  const rps = model.traffic.scenarios[scenario]?.rps;
+  const peak = typeof rps === "number" ? rps : (rps?.value ?? 0);
+  const capacity = model.deployment.api.replicas.value * 125;
+  return Array.from({ length: params.duration_s }, (_, index) => {
+    const progress = (index + 0.5) / params.duration_s;
+    const multiplier =
+      params.traffic_profile === "pico" ? peakMultiplier(progress) : 1;
+    return mockSecond(Math.round(peak * multiplier), capacity);
+  });
+}
+
+function summarizeMockSeries(series: Run["series"]) {
+  const sum = (read: (second: Run["series"][number]) => number) =>
+    series.reduce((total, second) => total + read(second), 0);
+  return {
+    utilization:
+      sum((second) => second.utilization.api_cpu ?? 0) / series.length,
+    ok: sum((second) => second.ok) / series.length,
+    errorRate:
+      sum((second) => second.errors) / (sum((second) => second.arrivals) || 1),
+    p95: Math.max(...series.map((second) => second.latency.p95_ms ?? 0)),
   };
 }
 
 function mockRun(model: ArchitectureModel, scenario: string): Run {
-  const { traffic, ok, errors, utilization, p95 } = mockMetrics(
-    model,
-    scenario,
-  );
+  const series = mockSeries(model, scenario);
+  const { utilization } = summarizeMockSeries(series);
   return {
     bottleneck: {
       resource: "api_cpu",
@@ -73,14 +101,7 @@ function mockRun(model: ArchitectureModel, scenario: string): Run {
     resources: [
       { name: "api_cpu", label: "CPU de la API", utilization, by_line: [] },
     ],
-    series: Array.from({ length: 60 }, () => ({
-      arrivals: traffic,
-      ok,
-      errors,
-      latency: { p95_ms: p95 },
-      queue: {},
-      utilization: { api_cpu: utilization },
-    })),
+    series,
     warnings: [],
   };
 }
@@ -160,8 +181,8 @@ export function createMockEditorApi(): ReturnType<typeof createEditorApi> {
     compare: async (id, base, target, scenario) => {
       const a = getVersion(id, base).model;
       const b = getVersion(id, target).model;
-      const before = mockMetrics(a, scenario);
-      const after = mockMetrics(b, scenario);
+      const before = summarizeMockSeries(mockSeries(a, scenario));
+      const after = summarizeMockSeries(mockSeries(b, scenario));
       const replicas = {
         path: "deployment.api.replicas",
         a: a.deployment.api.replicas.value,
@@ -171,8 +192,8 @@ export function createMockEditorApi(): ReturnType<typeof createEditorApi> {
         delta: {
           p95_ms: { a: before.p95, b: after.p95 },
           error_rate: {
-            a: before.errors / before.traffic,
-            b: after.errors / after.traffic,
+            a: before.errorRate,
+            b: after.errorRate,
           },
           throughput_rps: { a: before.ok, b: after.ok },
           model_changes: replicas.a === replicas.b ? [] : [replicas],
