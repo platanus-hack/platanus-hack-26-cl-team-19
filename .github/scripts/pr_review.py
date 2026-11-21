@@ -6,11 +6,13 @@ crear otro, y el comentario guarda el commit revisado: un push nuevo es lo únic
 
 Corre de dos formas, con el mismo código:
 
-  * **En tu laptop** (la key nunca sale de tu máquina). Usa tu sesión de `gh` para leer y comentar:
+  * **En tu laptop**, con tu sesión de la CLI `ant` (`ant auth login`, sin key) o una key en el entorno.
+    Usa tu sesión de `gh` para leer y comentar:
       python .github/scripts/pr_review.py --pr 34     # revisa una PR
       python .github/scripts/pr_review.py --watch     # revisa cada PR abierta con un push nuevo
-  * **En GitHub Actions** (`.github/workflows/pr-review.yml`), si algún día existe el secret
-    ANTHROPIC_API_KEY en el repo. Usa GITHUB_TOKEN, PR_NUMBER y GITHUB_REPOSITORY.
+  * **En GitHub Actions** (`.github/workflows/pr-review.yml`), sin secrets: se autentica con Workload
+    Identity Federation (el token OIDC de GitHub se cambia por uno de Anthropic). Usa GITHUB_TOKEN,
+    PR_NUMBER y GITHUB_REPOSITORY.
 
 Contexto que recibe Claude:
   * La PR: título, descripción, rama, commits y el diff (sin lockfiles ni JSON generados).
@@ -18,10 +20,11 @@ Contexto que recibe Claude:
   * La issue de Linear enlazada (JAJ-NN en la rama, el título o la descripción) y el overview del
     proyecto, si está LINEAR_API_KEY.
 
-Nunca bloquea una PR: sin ANTHROPIC_API_KEY, o si falla la API de Claude, Linear o GitHub, avisa y sigue.
+Nunca bloquea una PR: sin credenciales de Claude, o si falla la API de Claude, Linear o GitHub, avisa y sigue.
 
-Variables de entorno: ANTHROPIC_API_KEY y, opcionales, LINEAR_API_KEY y REVIEW_MODEL (por defecto
-claude-opus-5-5). Para ver el prompt sin llamar a la API ni comentar: --dry-run --pr 32.
+Credenciales de Claude: las resuelve el SDK (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, las variables
+ANTHROPIC_FEDERATION_* de Workload Identity Federation o el perfil de `ant auth login`). Opcionales:
+LINEAR_API_KEY y REVIEW_MODEL (por defecto claude-opus-5-5). Para ver el prompt sin llamar a la API ni comentar: --dry-run --pr 32.
 """
 
 from __future__ import annotations
@@ -278,7 +281,8 @@ def build_prompt(pr: dict, diff: str, skipped: list[str], truncated: bool, issue
 def review(context: str, prompt: str) -> tuple[str, dict]:
     import anthropic  # solo hace falta cuando se llama a la API
 
-    client = anthropic.Anthropic(max_retries=3, timeout=240.0)  # lee ANTHROPIC_API_KEY del entorno
+    # Sin argumentos el SDK busca las credenciales: key, federación (CI) o el perfil de `ant auth login`
+    client = anthropic.Anthropic(max_retries=3, timeout=240.0)
     with client.messages.stream(
         model=MODEL,
         max_tokens=16000,
@@ -368,6 +372,14 @@ def upsert_comment(repo: str, number: int, body: str, existing: dict | None) -> 
 # ---------- una PR ----------
 
 
+def explain(e: Exception) -> str:
+    """El error, con el paso que falta cuando es de credenciales."""
+    msg = f"{type(e).__name__}: {e}"
+    if type(e).__name__ in ("AuthenticationError", "CredentialsError") or "authentication method" in str(e):
+        msg += ". En tu laptop: `ant auth login` (ver docs/bot-reviewer.md)"
+    return msg
+
+
 def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = False) -> None:
     """Revisa una PR. Si ya hay una revisión del mismo commit, no hace nada (salvo --force)."""
     pr = get_pr(repo, number)
@@ -411,8 +423,16 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="arma el prompt y lo imprime; no llama a la API ni comenta")
     args = ap.parse_args()
 
-    if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
-        warn("Falta ANTHROPIC_API_KEY: no hay revisión automática (no bloquea ninguna PR).")
+    # En Actions, sin key ni federación configurada no hay cómo autenticarse: se avisa y se termina en verde.
+    # En local no se revisa aquí: el SDK puede usar el perfil de `ant auth login`.
+    if (
+        IN_ACTIONS
+        and not args.dry_run
+        and not any(
+            os.environ.get(v) for v in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_FEDERATION_RULE_ID")
+        )
+    ):
+        warn("Sin credenciales de Claude (ver docs/bot-reviewer.md): no hay revisión automática; no bloquea la PR.")
         return 0
     try:
         repo = repo_name()
@@ -434,7 +454,7 @@ def main() -> int:
                 try:
                     review_pr(repo, n, force=args.force)
                 except Exception as e:  # noqa: BLE001 - una PR que falla no detiene a las demás
-                    warn(f"#{n}: la revisión falló ({type(e).__name__}: {e}); se reintenta en la próxima vuelta.")
+                    warn(f"#{n}: la revisión falló ({explain(e)}); se reintenta en la próxima vuelta.")
             args.force = False
             try:
                 time.sleep(args.interval)
@@ -447,7 +467,7 @@ def main() -> int:
     try:
         review_pr(repo, number, dry_run=args.dry_run, force=args.force or IN_ACTIONS)
     except Exception as e:  # noqa: BLE001 - cualquier falla no debe bloquear la PR
-        warn(f"#{number}: la revisión falló ({type(e).__name__}: {e}). La PR no queda bloqueada.")
+        warn(f"#{number}: la revisión falló ({explain(e)}). La PR no queda bloqueada.")
     return 0
 
 

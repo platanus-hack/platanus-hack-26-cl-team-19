@@ -6,7 +6,7 @@ El bot le pide a Claude una revisión de cada PR abierta hacia `dev` o `main` qu
 - ¿Qué le falta?
 - ¿Está bien para mergear?
 
-El veredicto es uno de tres: ✅ listo para mergear, 🟡 con cambios menores o ⛔ no listo. Un push nuevo edita ese mismo comentario. El comentario guarda el commit que revisó, así que el bot no repite una revisión que ya hizo. No aprueba ni mergea.
+El veredicto es uno de tres: ✅ listo para mergear, 🟡 con cambios menores o ⛔ no listo. Un push nuevo edita ese mismo comentario. El comentario guarda el commit que revisó, así que no se repiten revisiones. No aprueba ni mergea.
 
 Claude recibe como contexto:
 
@@ -14,54 +14,76 @@ Claude recibe como contexto:
 - **Las reglas del repo, tal como están en la rama base:** `AGENTS.md`, `README.md` y los ADR de `docs/adr/`.
 - **Linear (opcional):** la issue enlazada (`JAJ-NN` en la rama, el título o la descripción) y el overview del proyecto.
 
-**Costo.** Una PR mediana manda unos 15.000 a 30.000 tokens a `claude-opus-5-5`, del orden de US$0,10 a 0,30 por push revisado. Cada comentario dice cuánto costó, calculado con `backend/app/costs/prices/manual.json`. Para usar otro modelo, define `REVIEW_MODEL`.
+**Costo.** Una PR mediana manda unos 15.000 a 30.000 tokens a `claude-opus-5-5`, del orden de US$0,10 a 0,30 por push revisado. Se cobra a la organización de Anthropic de quien configura el bot. Cada comentario dice cuánto costó, calculado con `backend/app/costs/prices/manual.json`. Conviene ponerle un límite de gasto mensual a esa organización en la Claude Console.
 
-## Dónde corre: en una laptop del equipo
+**Nunca bloquea una PR.** Si faltan las credenciales, o si falla la API de Claude, la de Linear o la de GitHub, avisa y termina en verde.
 
-Para guardar la key como secret del repo hace falta ser admin, y nadie del equipo lo es. Por eso el bot corre en la laptop de quien tenga la key:
+Hay dos formas de correrlo, sin guardar ninguna API key en GitHub.
 
-- **La key no sale de la laptop:** se lee del llavero de macOS.
-- **Comenta con la sesión de `gh` de esa persona:** basta con permiso `write`, y los comentarios aparecen a su nombre.
-- **Solo revisa mientras el watcher corre:** si nadie lo tiene prendido, las PRs no reciben revisión hasta que alguien lo prenda. Al prenderlo revisa de una vez todo lo pendiente.
+## A. En GitHub Actions, sin secrets (recomendado)
 
-El workflow `.github/workflows/pr-review.yml` queda en el repo por si algún día la organización crea el secret `ANTHROPIC_API_KEY`. Mientras no exista, avisa y termina en verde.
+`.github/workflows/pr-review.yml` usa **Workload Identity Federation**:
 
-## Configuración (una vez, en tu laptop)
+- GitHub le da al job un token OIDC que dice "soy un PR del repo `platanus-hack/platanus-hack-26-cl-team-19`".
+- Anthropic lo cambia por un token propio que dura pocos minutos.
+- No hay key que guardar, así que no hace falta ser admin del repo.
+- La configuración se hace en **tu organización de Anthropic**, donde sí eres admin.
 
-1. **Conseguir la API key.**
-   1. Entra a <https://console.anthropic.com/>.
-   2. En **Settings → Billing**, carga créditos. Conviene ponerle un límite de gasto mensual en **Settings → Limits**.
-   3. En **Settings → API Keys**, aprieta **Create Key**. Ponle un nombre como `branchpoint-pr-review` y cópiala. Empieza con `sk-ant-` y se muestra una sola vez.
-2. **Guardarla en el llavero de macOS.** Este comando te pide la key sin mostrarla; pégala y aprieta Enter:
+### Configuración en la Claude Console (una vez)
+
+1. Entra a <https://platform.claude.com/settings/workload-identity-federation>, aprieta **Connect workload** y elige **GitHub Actions**. Necesitas el rol admin en tu organización de Anthropic.
+2. El asistente crea tres cosas. Configúralas así:
+   - **Issuer:** `https://token.actions.githubusercontent.com`. El asistente lo pone solo.
+   - **Service account:** una cuenta para el bot, por ejemplo `branchpoint-pr-review`, agregada al workspace que quieras usar.
+   - **Federation rule:**
+     - Audience: `https://api.anthropic.com`.
+     - Subject: el de las PRs de este repo, `repo:platanus-hack/platanus-hack-26-cl-team-19:pull_request`. Ojo: si se fija a `ref:refs/heads/main`, no calza con las PRs.
+     - Claim `repository_owner`: `platanus-hack`.
+     - Scope: `workspace:inference`, que solo permite Messages y Models y basta para el bot.
+3. Copia los cuatro IDs que muestra el asistente: el de la regla (`fdrl_...`), el de la organización (un UUID), el de la service account (`svac_...`) y el del workspace (`wrkspc_...`). **No son secretos.** Van en el bloque `env:` de `.github/workflows/pr-review.yml`, en `CLAUDE_FEDERATION_RULE_ID`, `CLAUDE_ORGANIZATION_ID`, `CLAUDE_SERVICE_ACCOUNT_ID` y `CLAUDE_WORKSPACE_ID`.
+4. Haz un push a una PR. El asistente de la Console detecta el primer intercambio exitoso, y en la PR aparece el comentario del bot. Si falla, la pestaña **History** de esa página dice por qué se rechazó.
+
+Mientras los IDs estén vacíos, el workflow avisa y termina en verde.
+
+Quien puede empujar ramas a este repo puede gastar los créditos de la organización a través de este workflow. Las PRs desde forks no reciben token. Por eso conviene el límite de gasto.
+
+## B. En tu laptop, con tu sesión de Anthropic
+
+Sirve para probar, o si no quieres configurar la federación. Los comentarios salen a tu nombre y solo se revisa mientras el watcher está prendido.
+
+1. Instala la CLI de Anthropic e inicia sesión una vez. Se abre el navegador; no hace falta crear una key:
 
    ```bash
-   security add-generic-password -a "$USER" -s branchpoint-anthropic-api-key -w
+   brew install anthropics/tap/ant
    ```
 
-   Si después necesitas cambiarla, agrega `-U` al mismo comando.
-3. **Tener `gh` con sesión iniciada** (`gh auth status`). Es la misma sesión con la que abres PRs.
-4. **(Opcional) Linear.**
-   1. En Linear, ve a **Settings → Security & access → Personal API keys** y crea una key.
-   2. Guárdala igual, con `-s branchpoint-linear-api-key`.
+   ```bash
+   ant auth login
+   ```
 
-Nunca pegues la key en un archivo del repo, en un issue o en un chat.
+2. Ten `gh` con sesión iniciada (`gh auth status`). Es la misma con la que abres PRs.
+3. Desde la raíz del repo:
 
-## Uso
+   ```bash
+   .github/scripts/review-bot.sh --pr 34
+   ```
 
-Desde la raíz del repo:
+   ```bash
+   .github/scripts/review-bot.sh --watch
+   ```
 
-```bash
-.github/scripts/review-bot.sh --watch
-```
+   `--pr N` revisa una PR. `--watch` revisa cada 2 minutos las PRs abiertas con un push nuevo, y se corta con Ctrl+C. Para repetir la revisión del mismo commit, agrega `--force`. Para ver el prompt sin gastar tokens, usa `--dry-run --pr N`.
 
-Revisa cada 2 minutos las PRs abiertas que tengan un push nuevo. Se corta con Ctrl+C. La primera vez crea su entorno de Python en `~/.cache/branchpoint-review-bot` y tarda un poco más.
+La primera vez el lanzador crea su entorno de Python en `~/.cache/branchpoint-review-bot`. Si en tu terminal hay una `ANTHROPIC_API_KEY` exportada, se usa esa en vez de tu sesión.
 
-Otras formas:
+## Linear (opcional, en las dos formas)
 
-```bash
-.github/scripts/review-bot.sh --pr 34             # revisa una PR
-.github/scripts/review-bot.sh --pr 34 --force     # repite la revisión del mismo commit
-.github/scripts/review-bot.sh --dry-run --pr 34   # muestra el prompt; no gasta tokens ni comenta
-```
+Para que el bot lea la issue enlazada y el overview del proyecto, necesita una key personal de Linear (**Settings → Security & access → Personal API keys**):
 
-**Nunca bloquea una PR.** Si falta la key, o si falla la API de Claude, la de Linear o la de GitHub, muestra un aviso y sigue. En `--watch`, una PR que falla se reintenta en la siguiente vuelta.
+- **En tu laptop:** guárdala en el llavero de macOS con el comando de abajo, que la pide sin mostrarla.
+
+  ```bash
+  security add-generic-password -a "$USER" -s branchpoint-linear-api-key -w
+  ```
+
+- **En GitHub Actions:** tendría que ser el secret `LINEAR_API_KEY`, que también requiere admin del repo. Sin ese secret, el bot revisa sin la issue.
