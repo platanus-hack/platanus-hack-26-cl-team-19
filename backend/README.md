@@ -279,6 +279,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/projects/{id}/scenarios/{name}` | Un escenario. 404 si el proyecto no lo tiene. |
 | `PUT` | `/projects/{id}/scenarios/{name}` | Crea o reemplaza el escenario. Body: `{"multiplier": 20}` (× el pico de cada versión) o `{"rps": 300}` (req/s fijas), y `description` opcional. |
 | `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
+| `POST` | `/projects/{id}/versions/{n}/results` | Lo que necesita la pantalla de resultados, en una llamada (JAJ-128): el `run` (el mismo de `…/runs`, del guardado si ya existe), el `cost` (el de `…/costs`) y el `failure` (ventas en juego por hora, antes solo en `compare`), con `failure_missing` y `summary`. Body: el de `…/runs` más `region`. Ver "Resultados de una versión" abajo. |
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
@@ -573,7 +574,28 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 
 El rango es amplio porque las dos versiones fallan mucho: la v1 con 75 % de errores y la v2 con 46 %. Con esas tasas, el techo de las dos se acerca a "si fallara todo". La diferencia de los pisos es lo que la v2 evita con seguridad.
 
-Los tests están en `tests/costs/test_failure.py` y `tests/api/test_costs.py`:
+### Resultados de una versión (JAJ-128)
+
+`POST /projects/{id}/versions/{n}/results` junta, para una sola versión, lo que antes había que pedir por separado o solo venía en `compare`. Body: el de `…/runs` (`scenario`, `seed`, `duration_s`, `traffic_profile`…) más `region` (`us-east-1` por defecto, o `sa-east-1`).
+
+| Campo | Qué es | Para mostrar |
+| -- | -- | -- |
+| `version` | número, origen y nota de la versión | — |
+| `run` | el `Run` del motor, el mismo de `…/runs`. Con los mismos parámetros sale del guardado (header `X-Branchpoint-Run-Cache: hit`) | métricas, serie, cuello de botella, `saturation` (JAJ-89) |
+| `cost` | el `CostEstimate` de `…/costs` en esa región | `total` y `lines[].usd_month` traen `value`, `unit` (`US$/mes`), `label`, `source` y `date`; `cost.region`. **Si `cost.missing` no está vacío, el total es parcial**: faltan esos componentes (JAJ-88) |
+| `failure` | ventas en juego por hora según la tasa de error del `run` (JAJ-74), o `null` | `lost_sales_per_hour.low/high`, `is_floor` ("al menos"), `too_short` ("simula más tiempo"), `message` |
+| `failure_missing` | si `failure` es `null`, qué datos de negocio le faltan al modelo (`traffic.requests_per_session`, `business.conversion`, `business.ticket_usd`) | "Agrega conversión y ticket para ver el costo de fallar" |
+| `summary` | todo lo anterior en una o dos frases, para mostrar tal cual | — |
+
+Ejemplos de `summary` con el template:
+
+> v1 cuesta US$148.67/mes en us-east-1. Con 74.7% de errores, al menos US$24,543 a US$32,868 por hora en ventas en juego (US$32,868/hora si fallara todo). Ojo: v1 no alcanza a atender este tráfico (v1 deja 22 % de las requests sin respuesta al terminar): su tasa de error es un piso.
+
+> v1 cuesta US$99.81/mes en us-east-1 sin contar la DB, que no tiene precio (despliegue local o proveedor sin precios). El costo de fallar no se calcula: al modelo le falta la tasa de conversión y el ticket promedio (business.conversion, business.ticket_usd).
+
+`compare` también trae `failure_missing_a` y `failure_missing_b`, con el mismo sentido. Los tests están en `tests/api/test_results.py`: que el `run` sea el de `…/runs` y el `cost` el de `…/costs`, que `failure` calce con el de `compare`, el total parcial, la versión saturada y el modelo sin datos de negocio.
+
+Los tests del costo de fallar están en `tests/costs/test_failure.py` y `tests/api/test_costs.py`:
 - la versión con más errores muestra más ventas en juego;
 - la fórmula sale del `Run`;
 - "si fallara todo" calza con `build_model` (±0,2 % con llegadas uniformes);

@@ -32,10 +32,21 @@ from app.api.schemas import (
     ScenarioIn,
     ScenarioOut,
     VersionDetail,
+    VersionResults,
+    VersionResultsRequest,
     VersionSummary,
 )
 from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
-from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
+from app.costs import (
+    CostDelta,
+    CostEstimate,
+    FailureCost,
+    cost_delta,
+    describe_failure_missing,
+    estimate_cost,
+    failure_cost,
+    failure_missing,
+)
 from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
@@ -174,6 +185,52 @@ def run_version(
     return run
 
 
+@router.post(
+    "/{project_id}/versions/{number}/results",
+    response_model=VersionResults,
+    summary="Resultados de una versión: simulación, costo mensual y costo de fallar (JAJ-128)",
+)
+def version_results(
+    project_id: str,
+    number: int,
+    req: VersionResultsRequest,
+    response: Response,
+    store: ProjectStore = Depends(get_store),
+) -> VersionResults:
+    """Lo que necesita la pantalla de resultados en una llamada. El ``Run`` es el mismo de
+    ``…/runs`` (con los mismos parámetros sale del guardado, JAJ-75); el costo, el de ``…/costs``; y el
+    costo de fallar, el que antes solo traía ``compare`` (JAJ-74)."""
+    version = _version(store, _project(store, project_id), number)
+    params = _with_scenario_rate(store, project_id, version.model, RunParams(**req.model_dump(exclude={"region"})))
+    run, hit = cached_run(store, project_id, number, version.model, params, _label(req))
+    _cache_header(response, hit)
+    cost = estimate_cost(version.model, req.region)
+    failure = failure_cost(version.model, run)
+    missing = failure_missing(version.model)
+    return VersionResults(
+        version=_summary(version),
+        run=run,
+        cost=cost,
+        failure=failure,
+        failure_missing=missing,
+        summary=results_summary(version.number, cost, failure, missing, run),
+    )
+
+
+def results_summary(
+    number: int, cost: CostEstimate, failure: FailureCost | None, missing: list[str], run: Run | None = None
+) -> str:
+    """'v2 cuesta US$148.67/mes en us-east-1. Con 3.2 % de errores, US$1,200 a US$9,800 por hora en
+    ventas en juego…' (JAJ-128). Dice cuándo el total es parcial (componentes sin precio, JAJ-88), por
+    qué no hay costo de fallar, y si la versión no alcanza a atender el tráfico (JAJ-89)."""
+    text = f"v{number} cuesta US${cost.total['value']:,.2f}/mes en {cost.region}"
+    if cost.missing:
+        text += f" sin contar {describe_missing(cost.missing)} (despliegue local o proveedor sin precios)"
+    text += "."
+    text += " " + (failure.message if failure is not None else describe_failure_missing(missing))
+    return text + _saturation_sentence(number, number, run, None)
+
+
 def _label(req: RunParams) -> str | None:
     """Con la tasa sacada de la tabla, el ``Run`` se llama como el escenario ("cyberday") y no como
     una tasa a mano ("cyberday (262.4 req/s)", lo que pone el motor cuando recibe ``rps``)."""
@@ -278,6 +335,8 @@ def compare(
         cost_delta=delta,
         failure_a=fa,
         failure_b=fb,
+        failure_missing_a=failure_missing(va.model),
+        failure_missing_b=failure_missing(vb.model),
         summary=compare_summary(va.number, vb.number, delta, fa, fb, run_a, run_b),
     )
 
