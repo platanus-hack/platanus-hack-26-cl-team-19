@@ -36,6 +36,7 @@ class Project:
     sample: str | None  # id del modelo de ejemplo del que salió, si salió de uno
     created_at: str
     versions: list[Version] = field(default_factory=list)
+    owner: str | None = None  # auth.users.id de quien lo creó; None sin login (JAJ-78)
 
     def version(self, number: int) -> Version | None:
         return self.versions[number - 1] if 1 <= number <= len(self.versions) else None
@@ -87,17 +88,28 @@ def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
 
 
 class ProjectStore(Protocol):
-    def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project: ...
+    """Proyectos, versiones, escenarios y runs.
 
-    def get(self, project_id: str) -> Project | None:
-        """El proyecto con el historial de versiones. Las versiones pueden venir sin ``model``."""
+    **Dueños (JAJ-78).** ``create``, ``get`` y ``list`` reciben el ``owner`` (el id del usuario, o
+    ``None`` sin login), y ``get`` devuelve ``None`` si el proyecto es de otro. Los demás métodos
+    reciben un ``project_id`` que la ruta ya validó con ``get``: toda ruta de un proyecto pasa
+    primero por ``get(project_id, owner)``.
+    """
+
+    def create(self, name: str, model: dict[str, Any], sample: str | None, owner: str | None = None) -> Project: ...
+
+    def get(self, project_id: str, owner: str | None = None) -> Project | None:
+        """El proyecto con el historial de versiones, si es de ``owner``. Las versiones pueden venir
+        sin ``model``."""
         ...
 
     def get_version(self, project_id: str, number: int) -> Version | None:
         """Una versión con su ``model``."""
         ...
 
-    def list(self) -> list[Project]: ...
+    def list(self, owner: str | None = None) -> list[Project]:
+        """Los proyectos de ``owner``, del más nuevo al más viejo."""
+        ...
 
     def add_version(
         self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
@@ -128,6 +140,28 @@ class ProjectStore(Protocol):
         ...
 
 
+class OwnedStore:
+    """El store visto por un usuario (JAJ-78): ``create``, ``get`` y ``list`` llevan su ``owner``
+    puesto, y el resto pasa directo. Lo arma ``get_store`` en cada request, así ninguna ruta de
+    proyectos puede olvidarse de filtrar por dueño."""
+
+    def __init__(self, store: ProjectStore, owner: str | None) -> None:
+        self._store = store
+        self.owner = owner
+
+    def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project:
+        return self._store.create(name, model, sample, self.owner)
+
+    def get(self, project_id: str) -> Project | None:
+        return self._store.get(project_id, self.owner)
+
+    def list(self) -> list[Project]:
+        return self._store.list(self.owner)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -141,23 +175,25 @@ class InMemoryProjectStore:
         self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project:
-        project = Project(id=uuid.uuid4().hex[:12], name=name, sample=sample, created_at=_now())
+    def create(self, name: str, model: dict[str, Any], sample: str | None, owner: str | None = None) -> Project:
+        project = Project(id=uuid.uuid4().hex[:12], name=name, sample=sample, created_at=_now(), owner=owner)
         project.versions.append(Version(1, "repo", None, "Extraída del repo", project.created_at, copy.deepcopy(model)))
         with self._lock:
             self._projects[project.id] = project
             self._scenarios[project.id] = {s.name: s for s in scenarios_from_model(model)}
         return project
 
-    def get(self, project_id: str) -> Project | None:
-        return self._projects.get(project_id)
+    def get(self, project_id: str, owner: str | None = None) -> Project | None:
+        project = self._projects.get(project_id)
+        return project if project is not None and project.owner == owner else None
 
     def get_version(self, project_id: str, number: int) -> Version | None:
         project = self._projects.get(project_id)
         return project.version(number) if project is not None else None
 
-    def list(self) -> list[Project]:
-        return sorted(self._projects.values(), key=lambda p: p.created_at, reverse=True)
+    def list(self, owner: str | None = None) -> list[Project]:
+        mine = [p for p in self._projects.values() if p.owner == owner]
+        return sorted(mine, key=lambda p: p.created_at, reverse=True)
 
     def add_version(
         self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None

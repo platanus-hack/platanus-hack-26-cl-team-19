@@ -93,10 +93,10 @@ erDiagram
 
 | Método | SQL |
 | -- | -- |
-| `create(name, model, sample)` | `insert into projects (name, sample_id, version_count) values (…, 1) returning id`; `insert into model_versions (project_id, number, origin, note, model) values (id, 1, 'repo', 'Extraída del repo', model)`; `insert into scenarios` con los escenarios de `traffic.scenarios` del modelo (`pico_normal` ×1 y `cyberday` ×20), guardando el multiplicador. |
-| `get(project_id)` | `select … from projects where id = $1`; `select number, origin, parent_number, note, created_at from model_versions where project_id = $1 order by number` (sin la columna `model`). |
+| `create(name, model, sample, owner)` | `insert into projects (name, sample_id, version_count, owner_id) values (…, 1, owner) returning id`; `insert into model_versions (project_id, number, origin, note, model) values (id, 1, 'repo', 'Extraída del repo', model)`; `insert into scenarios` con los escenarios de `traffic.scenarios` del modelo (`pico_normal` ×1 y `cyberday` ×20), guardando el multiplicador. |
+| `get(project_id, owner)` | `select … from projects where id = $1 and owner_id is not distinct from $owner` (el de otro usuario da `None`, JAJ-78); `select number, origin, parent_number, note, created_at from model_versions where project_id = $1 order by number` (sin la columna `model`). |
 | `get_version(project_id, number)` | `select number, origin, parent_number, note, created_at, model from model_versions where project_id = $1 and number = $2`. |
-| `list()` | `select … from projects where owner_id = $user order by created_at desc` (sin login: `owner_id is null`). |
+| `list(owner)` | `select … from projects where owner_id is not distinct from $owner order by created_at desc` (sin login, `owner` es `None`: los de `owner_id` nulo). |
 | `add_version(project_id, model, origin, parent, note)` | `update projects set version_count = version_count + 1, updated_at = now() where id = $1 returning version_count` → `n`; `insert into model_versions (project_id, number, parent_number, origin, note, model) values ($1, n, parent, origin, note, model)`. La FK compuesta rechaza una antecesora que no existe. |
 | `list_scenarios(project_id)` | `select name, multiplier, rps, description from scenarios where project_id = $1 order by name`. |
 | `upsert_scenario(project_id, scenario)` | `insert into scenarios (project_id, name, multiplier, rps, description) values (…) on conflict (project_id, name) do update set multiplier = excluded.multiplier, rps = excluded.rps, description = excluded.description`. El check `scenarios_one_rate` exige una sola tasa. |

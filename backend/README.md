@@ -242,6 +242,15 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
 
+**Login y proyectos por usuario (JAJ-78):** con `SUPABASE_URL` en el entorno, todas las rutas de `/projects` piden el token de sesión de Supabase Auth: `Authorization: Bearer <access_token>`, el que entrega `supabase.auth.getSession()` en el frontend.
+- **Cómo se valida** (`app/api/auth.py`): la firma se revisa con las claves públicas del proyecto (JWKS, en `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`), que se bajan una vez y se vuelven a bajar si aparece una clave nueva. También se revisan `exp`, `aud = authenticated` e `iss = {SUPABASE_URL}/auth/v1`. Para un proyecto que todavía firma con el secreto compartido (HS256), va `SUPABASE_JWT_SECRET`.
+- **Errores:** sin token, o con uno vencido o inválido, 401 `unauthorized`, con el motivo en español. Si no se pueden bajar las claves, 503 `auth_unavailable`.
+- **Cada usuario ve solo lo suyo.** El proyecto guarda `owner_id`, que es el `sub` del token (el id de `auth.users`). El de otro usuario responde 404, como si no existiera: no se puede listar, abrir, simular, comparar, costear ni escribirle versiones u operaciones. Los runs guardados y los escenarios cuelgan del proyecto, así que quedan aislados con él. Todas las rutas de proyectos sacan el store de `get_store`, que exige la sesión y filtra por dueño, así que una ruta nueva no puede saltarse el filtro.
+- **Proyectos anónimos de antes de JAJ-78:** no son de nadie, y con login no se ven.
+- **Sin login** siguen `GET /health`, `GET /models`, `POST /graph`, `POST /runs` y `POST /costs`, que no guardan nada. Con ellas se puede ver el catálogo de templates sin cuenta.
+- **`BRANCHPOINT_AUTH=off`** (o no tener `SUPABASE_URL`) apaga el login: los proyectos quedan sin dueño, como antes. Sirve para usar el editor en local mientras no tenga login (JAJ-77). En producción no se pone.
+- **Postgres:** el backend entra con el rol `postgres`, que se salta RLS, así que el aislamiento lo hace `PostgresProjectStore`, filtrando por `owner_id`.
+
 **Escenarios del proyecto (JAJ-76):** los escenarios son del proyecto, no de una versión. Así se compara cualquier par de versiones con el mismo escenario.
 - **Al crear el proyecto** se cargan los de `traffic.scenarios` de la v1 (`pico_normal` ×1 y `cyberday` ×20), con su multiplicador.
 - **`multiplier`** se multiplica por el pico del modelo de cada versión (`traffic.peak_rps`). CyberDay ×20 da 262,4 req/s en el template y 100 req/s en una v2 con pico 5. **`rps`** son req/s fijas, iguales en todas las versiones.
