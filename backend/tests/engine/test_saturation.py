@@ -54,6 +54,21 @@ def test_ceiling_includes_real_errors(model):
     assert s.error_rate_if_unanswered_fail >= run.error_rate  # nunca por debajo de lo que ya se veía
 
 
+@pytest.mark.parametrize("duration_s", [60, 120])
+def test_long_collapse_stays_saturated_when_wait_hits_the_timeout(model, duration_s):
+    """En simulaciones largas la espera deja de crecer (las que vencen pasan a error), pero sigue colapsado."""
+    s = simulate(model, "cyberday", seed=1, duration_s=duration_s).saturation
+    assert s.saturated
+    assert s.wait_end_s >= 0.8 * 30
+    if s.wait_end_s < 1.5 * s.wait_mid_s + 0.25:  # no creció: lo marcó el timeout, y el mensaje lo dice
+        assert "cerca del timeout del cliente" in s.message
+
+
+def test_saturation_carries_its_provenance(model):
+    s = simulate(model, "pico_normal", seed=1, duration_s=5).saturation
+    assert s.label == "SUPUESTO" and "5 %" in s.source and "×1,5" in s.source and "80 %" in s.source
+
+
 def with_slow_call(raw, ms):
     """El template con una llamada externa de ``ms`` en cada endpoint: lento pero sin recurso que saturar."""
     out = copy.deepcopy(raw)
@@ -66,7 +81,7 @@ def with_slow_call(raw, ms):
     "ms, rps, duration_s, profile",
     [
         (3000, 2, 30, None),  # una llamada a un LLM de 3 s: ~10 % sigue en curso al terminar, y está sana
-        (600, 20, 6, None),  # simulación corta: ~10 % en curso, lejos del umbral
+        (600, 20, 6, None),  # simulación corta: ~10 % en curso (el doble del 5 %, para no depender del azar)
         (3000, 2, 30, "subida"),  # tasa que sube: la fila crece, pero la espera no
     ],
 )
@@ -152,6 +167,12 @@ def test_agent_goals_fail_when_saturated(model):
     assert check["errors"]["basis"].startswith("techo por saturación") and check["errors"]["error_rate"] == 0
     assert check["errors"]["value"] == run.saturation.error_rate_if_unanswered_fail
     assert "saturación" in check["p95"]["basis"]
+    assert check["p95"]["saturated_provenance"]["label"] == "SUPUESTO"
+    assert check["errors"]["saturated_provenance"]["source"] == run.saturation.source
+    # sin meta de errores: el SUPUESTO del piso del 1 % y la procedencia de la saturación no se pisan
+    no_goal = _goal_check(ProjectGoals(slo_p95_ms=1_000_000), run, None)["errors"]
+    assert no_goal["ok"] is False and no_goal["label"] == "SUPUESTO" and "Sin meta de errores" in no_goal["source"]
+    assert no_goal["saturated_provenance"]["source"] == run.saturation.source
     fine = simulate(model, "pico_normal", seed=1, duration_s=20)
     assert _goal_check(ProjectGoals(slo_p95_ms=1_000_000, slo_error_rate=0.01), fine, None)["meets_all"]
 

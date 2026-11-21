@@ -179,6 +179,10 @@ class Saturation:
     # Sana se estabiliza en la latencia; saturada crece. 0 en simulaciones de menos de 4 s.
     wait_mid_s: float = 0.0
     wait_end_s: float = 0.0
+    # procedencia de "saturated": los umbrales los eligió el equipo (no salen de una medición). El resto
+    # de los campos sí salen del motor. Así el editor y el agente pueden mostrar la etiqueta.
+    label: str = "SUPUESTO"
+    source: str | None = None
 
 
 @dataclass
