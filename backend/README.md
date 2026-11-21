@@ -1,6 +1,6 @@
 # Backend de Branchpoint
 
-Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49, JAJ-52). El modelo de datos persistente está definido en `app/db` (JAJ-55) y lo implementa JAJ-56.
+Contiene el **motor de simulación** (JAJ-14), la **API** que lo expone al editor (JAJ-49, JAJ-52) y el **costo mensual** de cada arquitectura (JAJ-72). El modelo de datos persistente está definido en `app/db` (JAJ-55) y lo implementa JAJ-56.
 
 ## Estructura
 
@@ -26,6 +26,9 @@ backend/
 │   ├── agent/               # lo que usa el agente de IA (ADR 0001)
 │   │   └── ops.py           #   operaciones tipadas que proponen versiones (JAJ-68)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
+│   ├── costs/               # costo mensual por componente (JAJ-72)
+│   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
+│   │   └── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos persistente (JAJ-55): README.md y schema.sql
 │   └── cli.py               # correr una simulación desde la terminal
@@ -33,6 +36,7 @@ backend/
     ├── fixtures/            # versión fija del modelo del template (anterior a JAJ-47) para los tests del motor
     ├── engine/              # tests del kernel y del motor
     ├── agent/               # tests de las operaciones
+    ├── costs/               # tests de los precios y del costo (contra el spike de JAJ-11)
     └── api/                 # tests de la API
 ```
 
@@ -172,7 +176,9 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. |
 | `POST` | `/projects/{id}/versions/{n}/ops` | Aplica `{"ops": [...], "note"}` a la versión `n` y guarda el resultado como versión nueva (`origin: agente`, antecesora `n`). Devuelve la versión con `changes` (una línea por operación) y `warnings`. Ver "Operaciones" abajo. |
-| `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). |
+| `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente). `region` opcional para los costos. |
+| `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
+| `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Proyectos en memoria:** se pierden al reiniciar la API. `ProjectStore` (`app/api/store.py`) es la interfaz que va a implementar la persistencia (JAJ-56) sin cambiar las rutas.
 
@@ -238,6 +244,55 @@ Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran 
 # v2 propuesta: 3 réplicas + pooler, y compararla con v1 en CyberDay
 curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "replicas": 3}, {"op": "add_pooler"}]}' localhost:8000/projects/$P/versions/1/ops
 curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "scenario": "cyberday"}' localhost:8000/projects/$P/compare
+```
+
+### Costos (JAJ-72)
+
+`estimate_cost(modelo, region)` (`app/costs/estimate.py`) devuelve el costo mensual de una arquitectura, por componente. Las fórmulas son las del spike de JAJ-11 (`spikes/jaj-11-costos/costs.py`) y los precios son sus snapshots fechados (`app/costs/prices/`). La diferencia es que se aplican a lo que dice el modelo, no a un escenario genérico:
+
+| Componente | Fórmula | Cuándo aparece |
+| -- | -- | -- |
+| API (Fargate ARM) | réplicas × (vCPU × US$/vCPU-h + GB × US$/GB-h) × 730 h | `deployment.api.provider` es `fargate` |
+| DB Supabase | 25 + max(0, compute − 10) + disco y egreso sobre lo incluido (1 MB de DB y 4 MB de egreso por usuario) | `deployment.db.provider` es `supabase` |
+| DB RDS PostgreSQL | US$/h × 730 + max(20 GB, 1 MB por usuario) × US$/GB-mes de gp3 | `deployment.db.provider` es `rds_postgres` |
+| Balanceador (ALB) | (US$/h + LCU × US$/LCU-h) × 730; LCU según conexiones nuevas y GB | la API está en Fargate |
+| Transferencia de la API | respuestas de 50 KB, sobre los 100 GB gratis del mes, por tramos | el modelo trae usuarios mensuales y perfil de uso |
+| Caché (Valkey serverless) | (1 GB + 1 KB por usuario) × US$/GB-h × 730 + operaciones × US$/ECPU | algún endpoint tiene un paso de caché |
+
+**Qué trae cada línea:**
+- **El costo con procedencia** (`label`, `source` y `date`). La fuente lleva el SKU y la URL del archivo de AWS, o la página del proveedor con su fecha de lectura.
+- **La fórmula** que se usó.
+- **Los números** que entraron en la fórmula (`inputs`).
+- **El nodo del grafo** al que corresponde (`node`), para el `CostBreakdown` del editor.
+
+**Etiqueta:** es la más débil entre el precio (`ESTIMADO`, precio de lista) y los datos del modelo. Como el template tiene usuarios y réplicas `SUPUESTO`, su costo también queda `SUPUESTO`.
+
+**Lo que no tiene precio** queda en `unpriced`, con el motivo:
+- los workers de las colas, porque el modelo no dice en qué máquina corren;
+- un plan que no está en los precios;
+- el tráfico, si el modelo no trae usuarios mensuales.
+
+Los estáticos del frontend (CDN y S3) no se incluyen, porque el modelo describe la API.
+
+**El template coincide con el spike** (`tests/costs/test_estimate.py` importa su `costs.py` y compara componente por componente):
+
+| Componente | US$/mes | Spike |
+| -- | --: | -- |
+| API: 1 × (1 vCPU, 2 GB) | 28,84 | igual |
+| DB: Supabase Micro, 100.000 MAU | 48,86 | igual (`supabase_mes`) |
+| ALB | 21,61 | igual |
+| Transferencia: 13,6 M de requests, 648 GB | 49,36 | 58,36 (ver abajo) |
+| **Total** | **148,67** | |
+
+La única diferencia es buscada. `por_tramos` del spike cobra la transferencia desde el primer GB, pero AWS regala los primeros 100 GB del mes (*"first 10 TB / month data transfer out beyond the global free tier"*). Aquí el primer tramo pagado empieza después de esos 100 GB: son US$9 menos.
+
+Los precios son copias de `spikes/jaj-11-costos/prices`, y `tests/costs/test_prices.py` falla si se separan. Para actualizarlos, hay que correr `extract_aws_prices.py` en el spike y copiar los archivos.
+
+```bash
+# costo de la v1 y de una v2 con 3 réplicas, y la diferencia en compare
+curl -s localhost:8000/projects/$P/versions/1/costs
+curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "replicas": 3}]}' localhost:8000/projects/$P/versions/1/ops
+curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 10}' localhost:8000/projects/$P/compare | python -c 'import json,sys; print(json.load(sys.stdin)["cost_delta"])'
 ```
 
 Desde Python:
