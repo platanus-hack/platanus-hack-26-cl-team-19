@@ -12,7 +12,7 @@ Los dos servicios despliegan la rama `main` del espejo cada vez que cambia.
 
 ## Publicar una versión
 
-1. Mergear la PR de `dev` a `main` en el repo de la org (AGENTS.md).
+1. Mergear la PR de `dev` a `main` en el repo de la org (AGENTS.md) con **"Create a merge commit"**, nunca con squash. Con squash, `main` recibe un commit que `dev` no tiene, y la próxima release vuelve a mostrar todos los commits viejos y choca en los archivos que cambiaron (pasó con la #41).
 2. Si la release trae migraciones nuevas, aplicarlas a producción **antes** de empujar (ver "Producción" en `docs/supabase-local.md`).
 3. Empujar `main` al espejo. Desde una laptop con el doble push del README configurado:
 
