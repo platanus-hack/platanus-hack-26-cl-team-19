@@ -191,6 +191,21 @@ def llm_key(
             INVALID_PARAMETERS,
             f"Ingresa tu API key de {name} ({header}) para {_ASK[purpose]}.{_MCP_HINT[purpose]}",
         )
+    if not isinstance(request.app.state.store, PostgresProjectStore):
+        # Sin Postgres no hay keys personales ni cuota persistente: solo la key de Branchpoint, sin descontar.
+        if expected_source and expected_source != "team":
+            raise ApiError(
+                409, "chat_key_changed", "Cambió tu API key activa. Revisa la opción antes de volver a enviar."
+            )
+        key = team_key(provider)
+        if not key:
+            raise ApiError(
+                422,
+                INVALID_PARAMETERS,
+                f"Branchpoint no tiene una key de {name} configurada. Guarda tu API key en Configuración."
+                + _MCP_HINT[purpose],
+            )
+        return LlmKey(key, "team")
     store = _store(request)
     try:
         require_selected = provider not in _always_personal()
