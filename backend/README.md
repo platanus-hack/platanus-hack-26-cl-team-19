@@ -101,6 +101,33 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
 - **Cuentas a mano:** el uso de CPU sube exactamente en el factor, y el punto de saturación baja en el factor.
 - **Contra los `checks` de `build_model.py`, que ya aplican el factor y la base de créditos:** en los dos modelos de ejemplo, el motor da el mismo uso de CPU (±5 %) en los escenarios bajo saturación, y el mismo cuello de botella en CyberDay.
 
+### Quién causa el cuello de botella (JAJ-69)
+
+Cada vez que una request suelta un recurso, el motor anota cuánto tiempo lo tuvo, a nombre de su endpoint y de la línea de código del paso que lo ocupó (el `at` del paso):
+
+| Recurso | Línea a la que se anota |
+| -- | -- |
+| CPU de la API | la del paso de CPU (ej. el hash de contraseña). La CPU propia del framework no tiene línea |
+| CPU de la DB | la de cada consulta |
+| Pool de conexiones | la de la consulta que tomó la conexión, que se retiene hasta el final de la request |
+| Hilos de la API | ninguna: se toman por toda la request (endpoints `def`) |
+| Workers de una cola | ninguna. El dueño es `cola <nombre>` |
+
+Con eso, el `Run` dice quién ocupa cada recurso:
+
+- **`resources[].by_endpoint`:** cada endpoint, con su fracción del tiempo ocupado (`share`, entre todos suman 1) y sus líneas en ese recurso (`refs`).
+- **`resources[].by_line`:** cada línea, sumando todos los endpoints que pasan por ella. Sirve cuando el problema está en código compartido, por ejemplo una función que usan muchos endpoints.
+- **`bottleneck.line`, `line_share` y `line_endpoints`:** la línea que más ocupa el recurso saturado. Es lo que muestra el banner del editor.
+- **`bottleneck.endpoint`, `endpoint_share` y `refs`:** el endpoint que más ocupa el recurso saturado, y sus líneas.
+- **`bottleneck.message`:** nombra las dos cosas. Ejemplo con el template en CyberDay: *"CPU de la API al 100 %… El 58 % se va en `backend/app/core/security.py:36` (6 endpoints). El endpoint que más lo ocupa es `PATCH /users/me/password` (18 %)."*
+
+Los tests están en `tests/engine/test_attribution.py`:
+- **Reparto:** con 8 ms contra 2 ms de CPU, el reparto es 80 % y 20 %.
+- **Línea compartida:** se suma entre los endpoints que la usan.
+- **Pool:** se anota a la primera consulta de la request.
+- **Hilos y colas:** se anotan a la request completa y a la cola.
+- **Template:** en CyberDay, el cuello de botella apunta a una línea de hash de contraseña con más del 50 % de la CPU.
+
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
 ## Cómo usarlo

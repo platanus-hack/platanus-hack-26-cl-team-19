@@ -28,6 +28,12 @@ créditos de CPU (``db.t4g.*``) se simula con sus vCPU sostenidos (``cpu_credits
 base de créditos con carga sostenida) o con todos sus vCPU (``"burst"``: solo mientras duren los
 créditos o pagando el exceso). Los trabajos de las colas usan sus tiempos tal cual.
 
+Quién causa el cuello de botella (JAJ-69): cada vez que una request suelta un recurso, el motor
+anota cuánto lo tuvo, a nombre de su endpoint y de la línea del paso que lo ocupó (``at``). El pool
+se anota a la consulta que tomó la conexión, y los hilos a la request completa. Con eso, cada
+recurso del ``Run`` dice quién lo ocupa (``by_endpoint``) y el cuello de botella apunta al endpoint
+y al ``archivo:línea`` que más lo usan.
+
 Validado en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Cerca o sobre la capacidad el modelo es optimista
 (JAJ-44), así que en esos casos el Run lo advierte.
 """
@@ -42,7 +48,14 @@ from itertools import accumulate
 from typing import Any
 
 from app.engine.kernel import Resource, Sim
-from app.engine.metrics import ERROR_DB_REFUSED, ERROR_POOL_TIMEOUT, ERROR_QUEUE_FULL, Recorder, latency_stats
+from app.engine.metrics import (
+    ERROR_DB_REFUSED,
+    ERROR_POOL_TIMEOUT,
+    ERROR_QUEUE_FULL,
+    Recorder,
+    UsageTracker,
+    latency_stats,
+)
 from app.models.architecture import (
     RESOURCE_API_CPU,
     RESOURCE_BACKGROUND,
@@ -146,18 +159,22 @@ def simulate(
         warnings.append("Se pidió una tasa de aciertos de caché, pero ningún endpoint tiene caché con on_miss.")
     cache = [0, 0]  # aciertos, fallos
     rec = Recorder(duration_s, model.endpoints, resources)
+    usage = UsageTracker()
     in_flight: dict[int, tuple[Endpoint, float]] = {}
     api_latency_s = model.api.latency_ms / 1000
     pool_timeout_s = model.db.pool_timeout_s
 
-    def hold(res: Resource, scale: float, ms: float) -> Generator[Any, Any, None]:
+    def hold(res: Resource, scale: float, ms: float, owner: str, at: str | None) -> Generator[Any, Any, None]:
         yield res.acquire()
-        yield ms * scale / 1000
+        seconds = ms * scale / 1000
+        yield seconds
         res.release()
+        usage.add(res.name, owner, at, seconds)
 
-    def run_steps(steps: tuple[Step, ...], conn: list[bool] | None) -> Generator[Any, Any, str | None]:
-        """Recorre los pasos y devuelve el error, si hubo. ``conn``: [tiene conexión] de la request;
-        ``None`` en un trabajo de una cola (usa su propia conexión y su propia CPU)."""
+    def run_steps(steps: tuple[Step, ...], conn: list[Any] | None, owner: str) -> Generator[Any, Any, str | None]:
+        """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, desde cuándo,
+        línea que la tomó]`` de la request; ``None`` en un trabajo de una cola (usa su propia conexión
+        y su propia CPU). ``owner``: a nombre de quién se anota el uso de cada recurso."""
         for step in steps:
             res, ms = step.resource, step.time_ms
             for _ in range(step.repeat):
@@ -167,12 +184,12 @@ def simulate(
                             return ERROR_DB_REFUSED
                         if not (yield pool.acquire(pool_timeout_s)):
                             return ERROR_POOL_TIMEOUT
-                        conn[0] = True
+                        conn[:] = [True, sim.now, step.at]
                     if ms > 0:
-                        yield from hold(db_cpu, db_scale, ms)
+                        yield from hold(db_cpu, db_scale, ms, owner, step.at)
                 elif res == RESOURCE_API_CPU and conn is not None:
                     if ms > 0:
-                        yield from hold(api_cpu, api_scale, ms)
+                        yield from hold(api_cpu, api_scale, ms, owner, step.at)
                 elif res == RESOURCE_CACHE and step.on_miss is not None:
                     if ms > 0:
                         yield ms / 1000  # GET
@@ -181,7 +198,7 @@ def simulate(
                         cache[0] += 1
                         continue
                     cache[1] += 1
-                    error = yield from run_steps(step.on_miss, conn)
+                    error = yield from run_steps(step.on_miss, conn, owner)
                     if error:
                         return error
                     if ms > 0:
@@ -203,9 +220,12 @@ def simulate(
         return True
 
     def job(q: _QueueCounters, t0: float) -> Generator[Any, Any, None]:
+        owner = f"cola {q.config.name}"
         yield q.resource.acquire()
-        yield from run_steps(q.config.job_steps, None)
+        started = sim.now
+        yield from run_steps(q.config.job_steps, None, owner)
         q.resource.release()
+        usage.add(q.resource.name, owner, None, sim.now - started)
         q.processed += 1
         q.latencies_ms.append((sim.now - t0) * 1000)
 
@@ -216,14 +236,17 @@ def simulate(
             yield api_latency_s
         if not ep.is_async:
             yield threads.acquire()
+            thread_since = sim.now
         if ep.base_cpu_ms > 0:
-            yield from hold(api_cpu, api_scale, ep.base_cpu_ms)
-        conn = [False]
-        error = yield from run_steps(ep.steps, conn)
+            yield from hold(api_cpu, api_scale, ep.base_cpu_ms, ep.id, None)
+        conn: list[Any] = [False, 0.0, None]
+        error = yield from run_steps(ep.steps, conn, ep.id)
         if conn[0]:
             pool.release()
+            usage.add(pool.name, ep.id, conn[2], sim.now - conn[1])
         if not ep.is_async:
             threads.release()
+            usage.add(threads.name, ep.id, None, sim.now - thread_since)
         del in_flight[rid]
         rec.finish(ep, t0, sim.now, error, client_timeout_s)
 
@@ -288,6 +311,7 @@ def simulate(
         cache_stats,
         queue_stats,
         cpu,
+        usage,
     )
 
 
@@ -387,6 +411,7 @@ def _build_run(
     cache: CacheStats,
     queues: list[QueueStats],
     cpu: CpuAdjustment,
+    usage: UsageTracker,
 ) -> Run:
     resource_stats = [
         ResourceStats(
@@ -398,6 +423,8 @@ def _build_run(
             final_queue=r.waiting,
             timeouts=r.timeouts,
             mean_wait_ms=round(r.wait_total / r.grants * 1000, 3) if r.grants else 0.0,
+            by_endpoint=usage.by_endpoint(r.name),
+            by_line=usage.by_line(r.name),
         )
         for r in resources
     ]
@@ -472,4 +499,25 @@ def _bottleneck(stats: list[ResourceStats]) -> Bottleneck:
         message += f", con {top.final_queue} requests esperando al final (la cola crece)"
     elif top.max_queue:
         message += f", con hasta {top.max_queue} requests esperando"
-    return Bottleneck(top.name, top.utilization, message + ".")
+    message += "."
+    if not top.by_endpoint:
+        return Bottleneck(top.name, top.utilization, message)
+    # JAJ-69: qué código ocupa el recurso, para el banner del editor. Se nombra la línea que más lo
+    # ocupa (sumando endpoints) y el endpoint que más lo ocupa.
+    culprit = top.by_endpoint[0]
+    line = top.by_line[0] if top.by_line else None
+    if line:
+        n = len(line.endpoints)
+        message += f" El {line.share:.0%} se va en {line.at} ({n} endpoint{'s' if n != 1 else ''})."
+    message += f" El endpoint que más lo ocupa es {culprit.endpoint} ({culprit.share:.0%})."
+    return Bottleneck(
+        top.name,
+        top.utilization,
+        message,
+        line=line.at if line else None,
+        line_share=line.share if line else None,
+        line_endpoints=line.endpoints if line else [],
+        endpoint=culprit.endpoint,
+        endpoint_share=culprit.share,
+        refs=culprit.refs,
+    )
