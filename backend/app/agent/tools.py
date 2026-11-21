@@ -1,9 +1,10 @@
 """Las tools del agente (ADR 0001, JAJ-67), sobre los proyectos reales de un usuario.
 
-Se implementan una vez y se exponen dos veces (JAJ-54):
+Se implementan una vez y se exponen dos veces (ADR 0001):
 
-* por **MCP** (``app/agent/mcp.py``), para la CLI de IA del usuario (modo principal);
-* en el **loop del chat** del editor (``app/agent/loop.py``), con la key del usuario o la de demo.
+* en el **loop del chat** del editor (``app/agent/loop.py``): el modo principal, con la cuota de Branchpoint o
+  la key del usuario;
+* por **MCP** (``app/agent/mcp.py``): la vía secundaria, para una CLI de IA.
 
 Reglas, iguales en los dos modos:
 

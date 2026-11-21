@@ -1,8 +1,8 @@
-"""El loop del agente para el chat del editor (JAJ-67, modo secundario según JAJ-54).
+"""El loop del agente para el chat del editor (JAJ-67): el modo principal (ADR 0001, JAJ-123).
 
-El modo principal es MCP: el loop corre en la CLI del usuario. Este loop es para quien no tiene una CLI
-o para la demo: mensaje del usuario → modelo → tool calls (``AgentTools``) → resultados → modelo, con un
-máximo de iteraciones, y cada paso se transmite al editor como un evento.
+Mensaje del usuario → modelo → tool calls (``AgentTools``) → resultados → modelo, con un máximo de
+iteraciones, y cada paso se transmite al editor como un evento. ``/mcp`` expone las mismas tools como vía
+secundaria, para una CLI de IA.
 
 La credencial la selecciona el backend antes de iniciar el loop. Claude y OpenAI comparten las tools.
 
