@@ -2,9 +2,12 @@
 
 import json
 
+import httpx
+import openai
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agent import openai_llm
 from app.agent.loop import Turn, run_agent
 from app.agent.tools import AgentTools
 from app.api.main import create_app
@@ -118,7 +121,7 @@ def test_llm_failure_is_an_event(setup):
     assert events == [{"type": "error", "message": "El LLM falló (RuntimeError): sin crédito"}]
 
 
-def test_chat_endpoint_streams_ndjson(setup, monkeypatch):
+def test_chat_endpoint_streams_ndjson(setup):
     store, project = setup
     app = create_app(store=store, auth=None, github_app=None)
     keys = []
@@ -130,7 +133,6 @@ def test_chat_endpoint_streams_ndjson(setup, monkeypatch):
     app.state.llm_factory = factory
     body = {"messages": [{"role": "user", "content": QUOTE}]}
     with TestClient(app) as client:
-        monkeypatch.delenv("BRANCHPOINT_CHAT_DEMO", raising=False)
         r = client.post(f"/projects/{project.id}/chat", json=body)
         assert r.status_code == 422 and "X-Anthropic-Api-Key" in r.json()["error"]["message"]
         r = client.post(
@@ -141,7 +143,97 @@ def test_chat_endpoint_streams_ndjson(setup, monkeypatch):
         assert [e["type"] for e in events][-1] == "done"
         assert "sk-ant-del-usuario" not in r.text  # la key no vuelve en la respuesta
         assert keys == ["sk-ant-del-usuario"]
-        monkeypatch.setenv("BRANCHPOINT_CHAT_DEMO", "on")
-        r = client.post(f"/projects/{project.id}/chat", json=body)
-        assert r.status_code == 200 and keys[-1] is None  # demo: la credencial la resuelve el SDK
         assert client.post("/projects/nope/chat", json=body).status_code == 404
+
+
+def test_openai_chat_replays_simulation_result(setup, monkeypatch):
+    store, project = setup
+    app = create_app(store=store, auth=None, github_app=None)
+    requests = []
+    call = {
+        "type": "function_call",
+        "call_id": "call_simulate",
+        "name": "simulate",
+        "arguments": json.dumps({"project_id": project.id, "scenario": "cyberday"}),
+    }
+
+    def reply(req):
+        assert req.url.path == "/v1/responses"
+        assert req.headers["Authorization"] == "Bearer fake-openai-key"
+        payload = json.loads(req.content)
+        requests.append(payload)
+        output = [call]
+        if len(requests) == 2:
+            output = [
+                {
+                    "type": "message",
+                    "id": "msg_1",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Simulación completada.", "annotations": []}],
+                }
+            ]
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_test",
+                "object": "response",
+                "status": "completed",
+                "output": output,
+            },
+        )
+
+    real_openai = openai_llm.OpenAI
+    monkeypatch.setattr(
+        openai_llm,
+        "OpenAI",
+        lambda **kwargs: real_openai(http_client=httpx.Client(transport=httpx.MockTransport(reply)), **kwargs),
+    )
+    path = f"/projects/{project.id}/chat"
+    body = {"provider": "openai", "messages": [{"role": "user", "content": "Simula CyberDay"}]}
+    with TestClient(app) as client:
+        monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
+        assert client.post(path, json=body, headers={"X-Anthropic-Api-Key": "wrong-provider"}).status_code == 422
+        response = client.post(path, json=body, headers={"X-OpenAI-Api-Key": "fake-openai-key"})
+
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == ["tool_call", "tool_result", "text", "done"]
+    assert "fake-openai-key" not in response.text
+    assert requests[0]["store"] is False
+    assert any(tool["name"] == "simulate" and tool["type"] == "function" for tool in requests[0]["tools"])
+    assert requests[1]["input"][-2] == call
+    result = requests[1]["input"][-1]
+    assert result["type"] == "function_call_output" and result["call_id"] == call["call_id"]
+    assert json.loads(result["output"]) == events[1]["result"]
+    assert events[1]["result"]["bottleneck"]["line"] == "backend/app/core/security.py:36"
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "expected"),
+    [
+        (400, "invalid_function_parameters", "rechazó los parámetros"),
+        (429, "rate_limit_exceeded", "temporalmente"),
+        (429, "project_spend_limit_exceeded", "proyecto alcanzó su tope de gasto"),
+        (429, "credit_balance_exhausted", "se agotaron los créditos"),
+    ],
+)
+def test_openai_errors_distinguish_billing_and_request_failures(setup, status, code, expected):
+    store, project = setup
+
+    class FailingLLM:
+        model = "gpt-4.1-mini"
+
+        def complete(self, system, history, tools):
+            response = httpx.Response(
+                status,
+                headers={"x-request-id": "req_test123"},
+                request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+            )
+            error = openai.RateLimitError if status == 429 else openai.BadRequestError
+            raise error("Mensaje con sk-test-private", response=response, body={"code": code})
+
+    events = list(run_agent(AgentTools(store, None), FailingLLM(), project.id, [{"role": "user", "content": "hola"}]))
+    assert len(events) == 1 and events[0]["type"] == "error"
+    message = events[0]["message"]
+    assert expected in message and code in message and f"HTTP {status}" in message and "req_test123" in message
+    assert "sk-test-private" not in message
