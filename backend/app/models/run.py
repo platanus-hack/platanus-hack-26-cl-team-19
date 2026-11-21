@@ -167,13 +167,18 @@ class Saturation:
     muchas, así que un "0 % de errores" puede esconder un colapso. Este bloque lo hace explícito.
     """
 
-    saturated: bool  # unanswered_rate sobre UNANSWERED_SATURATED: el sistema no alcanza a atender
+    # muchas sin respuesta (UNANSWERED_SATURATED) y una espera que crece (WAIT_GROWTH): no alcanza a atender
+    saturated: bool
     offered_rps: float  # req/s que llegaron (requests / duración; con perfil, el promedio)
     unanswered: int  # requests sin respuesta al terminar (= Run.in_flight)
     unanswered_rate: float  # unanswered / requests (0 a 1)
     # tasa de error si las requests sin respuesta terminaran fallando: el techo de error_rate
     error_rate_if_unanswered_fail: float
     message: str | None  # en español, para el editor; None si no está saturado
+    # espera que implica la fila (fila / tasa de llegada, Ley de Little) a la mitad y al final, en s.
+    # Sana se estabiliza en la latencia; saturada crece. 0 en simulaciones de menos de 4 s.
+    wait_mid_s: float = 0.0
+    wait_end_s: float = 0.0
 
 
 @dataclass

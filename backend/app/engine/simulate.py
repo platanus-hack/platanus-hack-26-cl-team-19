@@ -88,10 +88,18 @@ RESOURCE_LABELS = {
     "db_cpu": "CPU de la DB",
 }
 SATURATION_WARNING = 0.9  # JAJ-44: sobre esto, latencia y errores se muestran como piso
-# JAJ-89: sobre esta fracción de requests sin respuesta al terminar, el sistema no alcanza a atender.
-# Sin saturación, las que quedan en curso son tasa × latencia (a 100 req/s y 200 ms, 20 de 6.000:
-# 0,3 %), así que 5 % solo aparece cuando la fila crece sin parar.
+# JAJ-89: cuándo el sistema "no alcanza a atender". Los dos números son SUPUESTO, elegidos por el equipo:
+# * UNANSWERED_SATURATED: fracción mínima de requests sin respuesta al terminar para avisar. Por sí sola
+#   no basta: sin saturación, la fracción en curso es latencia / duración (un endpoint sano de 3 s en
+#   30 s deja 10 %).
+# * WAIT_GROWTH: la espera que implica la fila (Ley de Little: fila / tasa de llegada) tiene que crecer
+#   entre la mitad y el final de la simulación. Sana, la espera se estabiliza en la latencia; saturada,
+#   crece sin parar. WAIT_GROWTH_MIN_S evita que el ruido de esperas de milisegundos cuente como crecer.
 UNANSWERED_SATURATED = 0.05
+WAIT_GROWTH = 1.5
+WAIT_GROWTH_MIN_S = 0.25
+WAIT_WINDOW_S = 3  # segundos para estimar la tasa de llegada en un instante
+MIN_SECONDS_FOR_GROWTH = 4  # con menos, no hay mitad y final que comparar: no se avisa
 BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
 CPU_CREDITS = ("sustained", "burst")
@@ -497,7 +505,7 @@ def _build_run(
     all_latencies = [ms for second in rec.latencies_ms for ms in second]
 
     requests = sum(rec.arrivals)
-    saturation = _saturation(requests, errors, still_running, duration_s, resource_stats)
+    saturation = _saturation(requests, errors, still_running, duration_s, resource_stats, rec)
     if saturation.message:
         warnings.insert(0, saturation.message)  # primero: es lo que cambia cómo leer el resto
     for rs in resource_stats:
@@ -557,34 +565,70 @@ def _build_run(
     )
 
 
-def _saturation(
-    requests: int, errors: int, unanswered: int, duration_s: float, stats: list[ResourceStats]
-) -> Saturation:
-    """Si quedaron muchas requests sin respuesta al terminar, el sistema no alcanzó a atender (JAJ-89).
+def _pct(x: float) -> str:
+    return f"{x * 100:.0f} %"
 
-    ``error_rate`` no las cuenta (no son ok ni error todavía), así que un sistema colapsado puede dar
-    "0 % de errores" con un p95 de decenas de segundos. El mensaje dice cuántas quedaron, dónde se
-    formó la fila y cuál sería la tasa de error si terminaran fallando.
+
+def _secs(x: float) -> str:
+    return f"{x:.1f}".replace(".", ",") + " s"
+
+
+def _implied_wait_s(rec: Recorder, second: int) -> float:
+    """Espera que implica la fila al final del segundo ``second`` (Ley de Little: fila / tasa de llegada).
+
+    La fila es lo que llegó y todavía no termina (ok o error). La tasa de llegada se estima con los
+    últimos ``WAIT_WINDOW_S`` segundos, así un perfil que sube no se confunde con una fila que crece.
+    """
+    backlog = sum(rec.arrivals[: second + 1]) - sum(rec.ok[: second + 1]) - sum(rec.errors[: second + 1])
+    window = rec.arrivals[max(0, second + 1 - WAIT_WINDOW_S) : second + 1]
+    arrival_rate = sum(window) / len(window) if window else 0.0
+    return backlog / arrival_rate if arrival_rate > 0 else 0.0
+
+
+def _saturation(
+    requests: int, errors: int, unanswered: int, duration_s: float, stats: list[ResourceStats], rec: Recorder
+) -> Saturation:
+    """Si la fila crece sin parar y quedan muchas requests sin respuesta, el sistema no alcanza a atender
+    (JAJ-89).
+
+    ``error_rate`` no cuenta las requests sin respuesta (no son ok ni error todavía), así que un sistema
+    colapsado puede dar "0 % de errores" con un p95 de decenas de segundos. Pero quedar en curso no basta
+    para decir que está saturado: con un endpoint lento o una simulación corta, una fracción sana queda
+    en curso (latencia / duración). Por eso se exigen las dos cosas: muchas sin respuesta
+    (``UNANSWERED_SATURATED``) y una espera que crece entre la mitad y el final (``WAIT_GROWTH``).
     """
     rate = unanswered / requests if requests else 0.0
     worst = (errors + unanswered) / requests if requests else 0.0
-    saturated = rate >= UNANSWERED_SATURATED
+    wait_mid = wait_end = 0.0
+    growing = False
+    if rec.seconds >= MIN_SECONDS_FOR_GROWTH:
+        wait_mid = _implied_wait_s(rec, rec.seconds // 2 - 1)
+        wait_end = _implied_wait_s(rec, rec.seconds - 1)
+        growing = wait_end >= WAIT_GROWTH * wait_mid + WAIT_GROWTH_MIN_S
+    saturated = rate >= UNANSWERED_SATURATED and growing
     message = None
     if saturated:
-        queued = max(stats, key=lambda s: (s.final_queue, s.utilization))
-        where = f" La fila estaba en {queued.label} ({queued.final_queue} esperando)." if queued.final_queue else ""
+        queued = max(stats, key=lambda s: (s.final_queue, s.utilization), default=None)
+        where = (
+            f" La fila estaba en {queued.label} ({queued.final_queue} esperando)."
+            if queued is not None and queued.final_queue
+            else ""
+        )
         message = (
-            f"El sistema no alcanza a atender este tráfico: {unanswered} de {requests} requests ({rate:.0%}) "
-            f"seguían sin respuesta al terminar y no cuentan como error.{where} Si terminaran fallando, la tasa "
-            f"de error sería {worst:.0%}. Simula más tiempo para ver los timeouts, o toma la tasa de error como piso."
+            f"El sistema no alcanza a atender este tráfico: {unanswered} de {requests} requests ({_pct(rate)}) "
+            f"seguían sin respuesta al terminar y no cuentan como error. La espera crece sin parar: unos "
+            f"{_secs(wait_mid)} a la mitad y {_secs(wait_end)} al final.{where} Si terminaran fallando, la tasa de "
+            f"error sería {_pct(worst)}. Simula más tiempo para ver los timeouts, o toma la tasa de error como piso."
         )
     return Saturation(
         saturated=saturated,
-        offered_rps=round(requests / duration_s, 3),
+        offered_rps=round(requests / duration_s, 3) if duration_s > 0 else 0.0,
         unanswered=unanswered,
         unanswered_rate=round(rate, 4),
         error_rate_if_unanswered_fail=round(worst, 4),
         message=message,
+        wait_mid_s=round(wait_mid, 3),
+        wait_end_s=round(wait_end, 3),
     )
 
 

@@ -48,8 +48,58 @@ def test_ceiling_includes_real_errors(model):
     run = simulate(model, "cyberday", seed=1, duration_s=60)
     s = run.saturation
     errors = sum(run.errors.values())
+    assert errors > 0 and run.in_flight > 0  # a los 60 s ya vencieron timeouts y sigue habiendo fila
     assert s.error_rate_if_unanswered_fail == pytest.approx((errors + run.in_flight) / run.requests, abs=1e-4)
-    assert s.error_rate_if_unanswered_fail >= run.error_rate * (run.ok + errors) / run.requests
+    assert s.error_rate_if_unanswered_fail > errors / run.requests  # suma las sin respuesta a los errores
+    assert s.error_rate_if_unanswered_fail >= run.error_rate  # nunca por debajo de lo que ya se veía
+
+
+def with_slow_call(raw, ms):
+    """El template con una llamada externa de ``ms`` en cada endpoint: lento pero sin recurso que saturar."""
+    out = copy.deepcopy(raw)
+    for e in out["endpoints"]:
+        e["steps"] = [{"kind": "external", "resource": None, "at": "slow.py:1", "time": {"value": ms}}, *e["steps"]]
+    return load_model(out)
+
+
+@pytest.mark.parametrize(
+    "ms, rps, duration_s, profile",
+    [
+        (3000, 2, 30, None),  # una llamada a un LLM de 3 s: ~10 % sigue en curso al terminar, y está sana
+        (300, 20, 6, None),  # simulación corta: ~8 % en curso
+        (3000, 2, 30, "subida"),  # tasa que sube: la fila crece, pero la espera no
+    ],
+)
+def test_slow_but_healthy_is_not_saturated(raw, ms, rps, duration_s, profile):
+    """Lo que señaló la revisión: quedar en curso no basta; tiene que crecer la espera (Ley de Little)."""
+    from app.models.traffic import TrafficProfile, TrafficSegment
+
+    tp = TrafficProfile((TrafficSegment(duration_s, 0.2, 1.0),)) if profile == "subida" else None
+    run = simulate(with_slow_call(raw, ms), "x", seed=1, duration_s=duration_s, rps=rps, traffic_profile=tp)
+    s = run.saturation
+    assert s.unanswered_rate >= 0.05  # el umbral solo lo habría marcado como saturado
+    assert not s.saturated and s.message is None
+    assert s.wait_end_s < 1.5 * s.wait_mid_s + 0.25
+
+
+def test_wait_grows_when_overloaded(model):
+    s = simulate(model, "cyberday", seed=1, duration_s=20).saturation
+    assert s.wait_end_s > 1.5 * s.wait_mid_s
+    assert "La espera crece sin parar" in s.message and "%" in s.message and " %" in s.message
+
+
+def test_very_short_simulation_is_not_judged(model):
+    s = simulate(model, "cyberday", seed=1, duration_s=3).saturation
+    assert not s.saturated and s.wait_mid_s == s.wait_end_s == 0.0
+
+
+def test_old_saved_run_without_saturation_still_loads(model):
+    """Un Run guardado antes de JAJ-89 no trae saturation: se lee igual (queda en None)."""
+    from app.api.run_cache import run_from_json, run_to_json
+
+    data = run_to_json(simulate(model, "pico_normal", seed=1, duration_s=5))
+    del data["saturation"]
+    assert run_from_json(data).saturation is None
 
 
 def test_agent_goals_fail_when_saturated(model):
@@ -61,6 +111,10 @@ def test_agent_goals_fail_when_saturated(model):
     assert run.error_rate == 0 and run.saturation.saturated
     check = _goal_check(ProjectGoals(slo_p95_ms=1_000_000, slo_error_rate=0.01), run, None)
     assert check["errors"]["ok"] is False and check["p95"]["ok"] is False and check["meets_all"] is False
+    # dice con qué tasa juzgó, para que el agente pueda explicar el "no cumple" con 0 % de errores
+    assert check["errors"]["basis"].startswith("techo por saturación") and check["errors"]["error_rate"] == 0
+    assert check["errors"]["value"] == run.saturation.error_rate_if_unanswered_fail
+    assert "saturación" in check["p95"]["basis"]
     fine = simulate(model, "pico_normal", seed=1, duration_s=20)
     assert _goal_check(ProjectGoals(slo_p95_ms=1_000_000, slo_error_rate=0.01), fine, None)["meets_all"]
 
