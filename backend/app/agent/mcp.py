@@ -44,7 +44,12 @@ INSTRUCTIONS = (
     "todavía no lo simula. No lo aproximes con otra operación sin avisar. "
     "Si el usuario quiere analizar un repo que tienes en local, léelo tú, sea del framework que sea: busca las "
     "rutas, sigue cada handler y clasifica sus accesos a la DB, caché, servicios externos y colas, con "
-    "archivo:línea; después mándalo con submit_architecture. No pongas tiempos ni números: los pone el catálogo."
+    "archivo:línea; después mándalo con submit_architecture. No pongas tiempos ni números: los pone el catálogo. "
+    "Si la versión tiene supuestos por revisar (needs_review) sobre el tráfico, el peso de los endpoints o las "
+    "latencias, pide un log de acceso o una captura de sus métricas antes de dar una conclusión: di qué número "
+    "respaldaría, y vuelve a pedirlo al final de cada respuesta mientras falte. Si el usuario dice que no lo tiene, "
+    "deja de pedirlo y avisa que el resultado se apoya en supuestos. Un número que leas en una imagen no lo guardes "
+    "hasta que el usuario lo confirme con su frase: va en quote, como cualquier dato suyo."
 )
 DEFAULT_ALLOWED_HOSTS = "localhost:*,127.0.0.1:*,[::1]:*,testserver"
 
