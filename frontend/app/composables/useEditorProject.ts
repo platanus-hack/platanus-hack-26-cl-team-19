@@ -1,20 +1,21 @@
-import {
-  createEditorApi,
-  type Comparison,
-  type CostEstimate,
-  type Graph,
-  type ModelSummary,
-  type Project,
-  type Run,
-  type VersionDetail,
+import type {
+  Comparison,
+  CostEstimate,
+  Graph,
+  ModelSummary,
+  Project,
+  Run,
+  VersionDetail,
 } from "@/services/editor-api";
-import { createMockEditorApi } from "@/services/editor-mock";
 import { toScenarios, toVersionEntry } from "@/services/editor-view";
 
 function errorMessage(error: unknown): string {
   const response = error as { data?: { error?: { message?: string } } };
   return (
     response?.data?.error?.message ??
+    (error instanceof Error && !("data" in error)
+      ? error.message
+      : undefined) ??
     "No se pudo completar la solicitud. Revisa que el backend esté activo e inténtalo de nuevo."
   );
 }
@@ -36,15 +37,15 @@ function changeReplicas(version: VersionDetail, replicas: number) {
 }
 
 export function useEditorProject() {
-  const baseURL = useRuntimeConfig().public.apiBase.trim();
-  const isMock = !baseURL;
-  const api = isMock ? createMockEditorApi() : createEditorApi(baseURL);
+  const { api, isMock } = useProjectApi();
   const models = shallowRef<ModelSummary[]>([]);
   const project = shallowRef<Project | null>(null);
+  const projectGroup = shallowRef<Project | null>(null);
   const version = shallowRef<VersionDetail | null>(null);
   const graph = shallowRef<Graph | null>(null);
   const run = shallowRef<Run | null>(null);
   const costs = shallowRef<CostEstimate | null>(null);
+  const costsError = ref("");
   const comparison = shallowRef<Comparison | null>(null);
   const scenario = ref("");
   const pending = ref("");
@@ -73,6 +74,7 @@ export function useEditorProject() {
   function resetResults() {
     run.value = null;
     costs.value = null;
+    costsError.value = "";
     comparison.value = null;
   }
 
@@ -86,7 +88,27 @@ export function useEditorProject() {
         scenarios.value[0]?.id ??
         "";
     }
-    graph.value = await api.getGraph(detail.model);
+    // Los costos dependen solo de la versión: se estiman junto al diagrama.
+    const [nextGraph] = await Promise.all([
+      api.getGraph(detail.model),
+      fetchCosts(detail),
+    ]);
+    graph.value = nextGraph;
+  }
+
+  async function fetchCosts(detail: VersionDetail) {
+    const id = project.value?.id;
+    if (!id) {
+      costsError.value = "No hay un proyecto abierto para estimar costos.";
+      return;
+    }
+    costsError.value = "";
+    try {
+      const estimate = await api.getCosts(id, detail.number);
+      if (version.value === detail) costs.value = estimate;
+    } catch (cause) {
+      if (version.value === detail) costsError.value = errorMessage(cause);
+    }
   }
 
   async function loadModels() {
@@ -98,15 +120,25 @@ export function useEditorProject() {
   async function openSample(sample: string) {
     await request("Abriendo proyecto…", async () => {
       project.value = await api.createProject(sample);
-      await displayVersion(await api.getVersion(project.value.id, 1));
     });
   }
 
-  async function openProject(id: string) {
+  async function openProject(id: string, repoId?: string) {
     await request("Abriendo proyecto…", async () => {
-      project.value = await api.getProject(id);
-      const latest = project.value.versions.at(-1)?.number ?? 1;
-      await displayVersion(await api.getVersion(id, latest));
+      const group = await api.getProject(id);
+      projectGroup.value = group;
+      const selected =
+        group.repositories?.find((repo) => repo.id === repoId) ??
+        group.repositories?.[0];
+      project.value =
+        selected && selected.id !== group.id
+          ? await api.getProject(selected.id)
+          : group;
+      const latest = versions.value[0];
+      if (!latest) throw new Error("El proyecto todavía no tiene una versión.");
+      await displayVersion(
+        await api.getVersion(project.value.id, Number(latest.id)),
+      );
     });
   }
 
@@ -154,12 +186,7 @@ export function useEditorProject() {
   }
 
   async function loadCosts() {
-    const id = project.value?.id;
-    const number = version.value?.number;
-    if (!id || number === undefined) return;
-    await request("Estimando costos…", async () => {
-      costs.value = await api.getCosts(id, number);
-    });
+    if (version.value) await fetchCosts(version.value);
   }
 
   async function compare(base: string, target: string) {
@@ -175,15 +202,6 @@ export function useEditorProject() {
     });
   }
 
-  function closeProject() {
-    project.value = null;
-    version.value = null;
-    graph.value = null;
-    scenario.value = "";
-    error.value = "";
-    resetResults();
-  }
-
   watch(
     scenario,
     () => {
@@ -197,10 +215,12 @@ export function useEditorProject() {
     isMock,
     models,
     project,
+    projectGroup,
     version,
     graph,
     run,
     costs,
+    costsError,
     comparison,
     scenario,
     scenarios,
@@ -215,6 +235,5 @@ export function useEditorProject() {
     simulate,
     loadCosts,
     compare,
-    closeProject,
   };
 }

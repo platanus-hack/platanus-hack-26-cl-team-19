@@ -31,12 +31,12 @@ withDefaults(
         class="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3"
       >
         <SidebarTrigger v-if="$slots.sidebar" />
-        <h1 class="flex min-w-0 items-center gap-1.5 text-sm">
+        <h1 class="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
           <span v-if="repositoryName" class="truncate text-muted-foreground">{{
             repositoryName
           }}</span>
           <span
-            v-if="repositoryName"
+            v-if="repositoryName && !$slots.nav"
             class="text-muted-foreground"
             aria-hidden="true"
             >/</span
@@ -45,13 +45,15 @@ withDefaults(
             title
           }}</span>
         </h1>
-        <slot name="nav" />
-        <span
-          v-if="version"
-          class="ms-auto font-mono text-sm text-muted-foreground tabular-nums"
-          >{{ version }}</span
-        >
-        <slot name="actions" />
+        <div class="flex shrink-0 items-center gap-2">
+          <span
+            v-if="version"
+            class="font-mono text-sm text-muted-foreground tabular-nums"
+            >{{ version }}</span
+          >
+          <slot name="actions" />
+          <slot name="nav" />
+        </div>
       </header>
       <slot name="status" />
 
@@ -91,7 +93,7 @@ withDefaults(
           <template v-if="$slots.metrics">
             <Separator />
             <div
-              class="@container/canvas min-h-0 @3xl:max-h-[55%] @3xl:shrink-0 @3xl:overflow-y-auto"
+              class="@container/canvas min-h-0 @3xl:h-[40%] @3xl:shrink-0 @3xl:overflow-y-auto"
             >
               <slot name="metrics" />
             </div>

@@ -86,43 +86,60 @@ const formatTime = (index: number) =>
 
 <template>
   <section aria-label="Simulación" class="flex flex-col gap-4">
-    <div class="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        size="sm"
-        :aria-label="playing ? 'Pausar simulación' : 'Reproducir simulación'"
-        @click="playing = !playing"
-      >
-        <component
-          :is="playing ? Pause : Play"
-          data-icon="inline-start"
-          aria-hidden="true"
-        />
-        {{
-          playing
-            ? "Pausar"
-            : minute >= last
-              ? "Repetir"
-              : isSecond
-                ? "Reproducir"
-                : "Simular"
-        }}
-      </Button>
+    <div class="flex items-start gap-3">
       <Button
         type="button"
         size="icon-sm"
-        variant="ghost"
-        aria-label="Volver al inicio"
-        :disabled="minute === 0"
-        @click="
-          playing = false;
-          minute = 0;
+        variant="outline"
+        class="shrink-0"
+        :aria-label="
+          playing
+            ? 'Pausar reproducción'
+            : minute >= last
+              ? 'Repetir reproducción'
+              : 'Reanudar reproducción'
         "
+        :title="playing ? 'Pausar' : minute >= last ? 'Repetir' : 'Reanudar'"
+        @click="playing = !playing"
       >
-        <RotateCcw aria-hidden="true" />
+        <component
+          :is="playing ? Pause : minute >= last ? RotateCcw : Play"
+          aria-hidden="true"
+        />
       </Button>
+
+      <div class="flex min-w-0 flex-1 flex-col gap-1.5 pt-2">
+        <Slider
+          v-model="slider"
+          :min="0"
+          :max="last"
+          :step="1"
+          :aria-label="
+            isSecond ? 'Segundo de la simulación' : 'Minuto de la simulación'
+          "
+        />
+        <ol class="flex h-5 gap-px" aria-label="Fases de la simulación">
+          <li
+            v-for="item in phases"
+            :key="item.from"
+            class="flex min-w-0 items-center overflow-hidden rounded-sm border px-1.5 text-[0.625rem]"
+            :class="phaseTone[item.status]"
+            :style="{ flexGrow: item.to - item.from + 1 }"
+            :title="`${phaseLabel[item.status]}: ${isSecond ? 'segundos' : 'minutos'} ${item.from + 1}–${item.to + 1}`"
+          >
+            <span class="truncate">{{ phaseLabel[item.status] }}</span>
+          </li>
+        </ol>
+      </div>
+
+      <span
+        class="shrink-0 pt-1.5 font-mono text-xs tabular-nums text-muted-foreground"
+        >{{ minute + 1 }} / {{ frames.length }}
+        {{ isSecond ? "s" : "min" }}</span
+      >
+
       <div
-        class="flex items-center rounded-md border border-border"
+        class="flex shrink-0 items-center rounded-md border border-border"
         role="group"
         aria-label="Velocidad"
       >
@@ -139,39 +156,11 @@ const formatTime = (index: number) =>
           {{ option }}×
         </Button>
       </div>
-      <span
-        class="ms-auto flex items-center gap-2 text-xs text-muted-foreground"
-      >
-        <SaturationBadge v-if="phase" :status="phase.status" plain />
-        <span class="font-mono tabular-nums"
-          >{{ minute + 1 }} / {{ frames.length }}
-          {{ isSecond ? "s" : "min" }}</span
-        >
-      </span>
     </div>
 
-    <div class="flex flex-col gap-1.5">
-      <Slider
-        v-model="slider"
-        :min="0"
-        :max="last"
-        :step="1"
-        :aria-label="
-          isSecond ? 'Segundo de la simulación' : 'Minuto de la simulación'
-        "
-      />
-      <ol class="flex h-5 gap-px" aria-label="Fases de la simulación">
-        <li
-          v-for="item in phases"
-          :key="item.from"
-          class="flex min-w-0 items-center overflow-hidden rounded-sm border px-1.5 text-[0.625rem]"
-          :class="phaseTone[item.status]"
-          :style="{ flexGrow: item.to - item.from + 1 }"
-          :title="`${phaseLabel[item.status]}: ${isSecond ? 'segundos' : 'minutos'} ${item.from + 1}–${item.to + 1}`"
-        >
-          <span class="truncate">{{ phaseLabel[item.status] }}</span>
-        </li>
-      </ol>
+    <div v-if="phase" class="-mt-1 flex items-center gap-2 text-xs">
+      <SaturationBadge :status="phase.status" plain />
+      <span class="text-muted-foreground">{{ formatTime(minute) }}</span>
     </div>
 
     <dl

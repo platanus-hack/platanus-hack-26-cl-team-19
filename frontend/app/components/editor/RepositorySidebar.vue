@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import {
+  ArrowLeft,
   BookMarked,
   ChevronsUpDown,
-  GitBranch,
   LogOut,
   Monitor,
   Moon,
   Plus,
   Sun,
 } from "@lucide/vue";
+import AppWordmark from "@/components/AppWordmark.vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -45,10 +46,19 @@ const props = withDefaults(
   defineProps<{
     repositories: Repository[];
     activeId?: string;
-    user: SessionUser;
+    user?: SessionUser;
+    projectsLink?: string;
+    canConnect?: boolean;
+    disabled?: boolean;
     variant?: "sidebar" | "inset" | "floating";
   }>(),
-  { activeId: undefined, variant: "inset" },
+  {
+    activeId: undefined,
+    user: undefined,
+    projectsLink: undefined,
+    canConnect: true,
+    variant: "inset",
+  },
 );
 
 const emit = defineEmits<{
@@ -66,7 +76,7 @@ const themes = [
 ] as const;
 
 const initials = computed(() =>
-  props.user.name
+  (props.user?.name ?? "")
     .split(/\s+/)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
@@ -79,13 +89,18 @@ const initials = computed(() =>
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" as="div" class="pointer-events-none">
-            <span
-              class="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground"
-            >
-              <GitBranch class="size-4" aria-hidden="true" />
-            </span>
-            <span class="font-semibold">Branchpoint</span>
+          <SidebarMenuButton
+            size="lg"
+            as-child
+            class="group-data-[collapsible=icon]:justify-center"
+          >
+            <NuxtLink to="/" aria-label="branchpoint">
+              <AppWordmark class="group-data-[collapsible=icon]:hidden" />
+              <AppWordmark
+                compact
+                class="hidden group-data-[collapsible=icon]:inline"
+              />
+            </NuxtLink>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
@@ -95,6 +110,7 @@ const initials = computed(() =>
       <SidebarGroup>
         <SidebarGroupLabel>Repositorios</SidebarGroupLabel>
         <SidebarGroupAction
+          v-if="canConnect"
           title="Conectar repositorio"
           @click="emit('connect')"
         >
@@ -108,6 +124,7 @@ const initials = computed(() =>
               :key="repository.id"
             >
               <SidebarMenuButton
+                :disabled="disabled"
                 :is-active="repository.id === activeId"
                 :aria-current="repository.id === activeId ? 'page' : undefined"
                 :tooltip="repository.name"
@@ -117,7 +134,7 @@ const initials = computed(() =>
                 <span>{{ repository.name }}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem v-if="!repositories.length">
+            <SidebarMenuItem v-if="canConnect && !repositories.length">
               <SidebarMenuButton
                 tooltip="Conectar repositorio"
                 @click="emit('connect')"
@@ -133,7 +150,15 @@ const initials = computed(() =>
 
     <SidebarFooter>
       <SidebarMenu>
-        <SidebarMenuItem>
+        <SidebarMenuItem v-if="projectsLink">
+          <SidebarMenuButton as-child tooltip="Mis proyectos">
+            <NuxtLink :to="projectsLink">
+              <ArrowLeft aria-hidden="true" />
+              <span>Mis proyectos</span>
+            </NuxtLink>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem v-if="user">
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <SidebarMenuButton
@@ -185,8 +210,13 @@ const initials = computed(() =>
                     >
                       {{ repository.name }}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator v-if="repositories.length" />
-                    <DropdownMenuItem @select="emit('connect')">
+                    <DropdownMenuSeparator
+                      v-if="canConnect && repositories.length"
+                    />
+                    <DropdownMenuItem
+                      v-if="canConnect"
+                      @select="emit('connect')"
+                    >
                       <Plus aria-hidden="true" />
                       Conectar repositorio
                     </DropdownMenuItem>
