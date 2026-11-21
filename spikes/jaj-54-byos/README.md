@@ -102,7 +102,7 @@ Es para quien no tiene una CLI o para la demo. Usa el mismo conjunto de tools, a
 - un `rps` inventado;
 - la procedencia del costo.
 
-Solo usa código que ya está en `dev`: `app.agent.ops` (JAJ-68), `app.costs.estimate` (JAJ-72), `app.models.compare` y `app.samples`.
+Solo usa código que ya está en `dev`: `app.agent.ops` (JAJ-68), `app.costs.estimate` (JAJ-72), `app.engine`, `app.models` (`compare`, `graph`, `run`) y `app.samples`.
 
 ```bash
 pip install -e "./backend[dev]" "mcp>=2,<3"   # el spike usa la API de mcp 2.x (MCPServer)
@@ -169,8 +169,8 @@ Lo anotó el bot reviewer sobre el spike, y aplica al servidor MCP del backend:
 
 - **Ningún número libre del LLM.** El tráfico entra solo por `set_traffic(..., quote)` y las metas por `set_goals(..., quote)`. `simulate` elige un escenario del proyecto y no recibe `rps` ni duración. En `propose`, `apply_ops` (JAJ-68) rechaza un `hit_ratio` sin la `quote` del usuario, y los números de diseño, como las réplicas, quedan `SUPUESTO` con la fuente "Propuesta del agente". El spike ya lo cumple, y `check_client.py` prueba las dos cosas: el `rps` inventado se descarta y el `add_cache` sin `quote` se rechaza.
 - **Procedencia en cada resultado.** Etiqueta (`SUPUESTO` o `ESTIMADO`), fuente (motor, escenario, semilla y duración) y cantidad de supuestos, para que el agente pueda citarlos. Todas las advertencias, sin recortar. El spike ya lo cumple.
-- **Límites por token.** En modo CLI, Branchpoint no controla el loop, así que el servidor pone un rate limit de llamadas por minuto y un tope de simulaciones por propuesta. La duración ya es fija en el servidor.
-- **Errores con una sola forma** (`{"error": ...}`), también para un ejemplo o un escenario que no existen. Así el LLM corrige igual en todos los casos. El spike ya lo cumple.
+- **Límites por token de Branchpoint** (el que conecta la CLI). En modo CLI, Branchpoint no controla el loop, así que el servidor pone un rate limit de llamadas por minuto y un tope de simulaciones por token y por día. Cada `propose` cuenta como 2 simulaciones. La duración ya es fija en el servidor.
+- **Errores con una sola forma** (`{"error": ...}`), también para un ejemplo o un escenario que no existen, y para errores internos. Así el LLM corrige igual en todos los casos. En el spike lo cumplen `simulate` y `propose`; `list_examples` no recibe argumentos. En JAJ-67 hay que sumar que los argumentos desconocidos se rechacen con `{"error": ...}` en vez de descartarse en silencio, como hoy el `rps`.
 - **El cuello de botella con `line` como campo propio,** no solo dentro de `message`. El spike ya lo cumple.
 - **`check_client.py` pasa a ser un test** que corre en CI.
 - **Credenciales fuera de los logs.** "No se registra en logs" cubre también los middlewares de request, las trazas de error y el token de Branchpoint.

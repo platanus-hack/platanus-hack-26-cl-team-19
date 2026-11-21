@@ -119,6 +119,8 @@ def simulate(example: str, scenario: str = "cyberday", seed: int = 0) -> dict[st
         return _summary(_simulate(raw, scenario, seed), raw)
     except ToolError as e:
         return {"error": str(e)}
+    except Exception as e:  # noqa: BLE001 - todo error llega al LLM con la misma forma
+        return {"error": f"Error interno de Branchpoint ({type(e).__name__}): {e}"}
 
 
 @server.tool()
@@ -141,6 +143,8 @@ def propose(example: str, ops: list[dict[str, Any]], scenario: str = "cyberday",
         cost_a, cost_b = estimate_cost(raw), estimate_cost(result.model)
     except (ToolError, OpError) as e:
         return {"error": str(e)}  # el LLM lo lee y corrige
+    except Exception as e:  # noqa: BLE001 - todo error llega al LLM con la misma forma
+        return {"error": f"Error interno de Branchpoint ({type(e).__name__}): {e}"}
     return {
         "changes": result.changes,
         "warnings": result.warnings,
