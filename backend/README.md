@@ -31,6 +31,7 @@ backend/
 │   │   ├── mcp.py           #   /mcp: las tools para la CLI de IA del usuario (JAJ-54, JAJ-67)
 │   │   └── loop.py          #   el loop del chat del editor con Claude (JAJ-67)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
+│   ├── reports/             # reportes de simulación: armado, comparación y Markdown (JAJ-127)
 │   ├── costs/               # costo mensual por componente (JAJ-72)
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
@@ -580,6 +581,33 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 - **Proveedores con precio:** lo que falta se detecta de las mismas funciones que calculan el precio. `PRICED_API` y `PRICED_DB` solo arman el aviso, y un test comprueba que coinciden.
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
 - **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Si lo que tiene precio ya supera el presupuesto, queda en `false`, porque lo que falta solo puede sumar. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
+
+### Reportes de simulación (JAJ-127)
+
+Cada simulación guarda su reporte (`branchpoint.report/v1`, tabla `reports`): una foto congelada de la corrida. El PDF (que imprime el navegador desde la página del reporte) y el Markdown salen de esa foto, así que no hace falta volver a simular, y el reporte no cambia aunque después se edite la versión o cambien los precios.
+
+| Ruta | Qué hace |
+| -- | -- |
+| `POST /projects/{id}/versions/{n}/reports` | Simula con una semilla nueva (o la que venga) y guarda el reporte. Con `rps`, el escenario queda "personalizado" |
+| `GET /projects/{id}/reports` | La lista, del más nuevo al más viejo |
+| `GET /projects/{id}/reports/{rid}` | El reporte completo |
+| `GET /projects/{id}/reports/{rid}/markdown` | El mismo reporte en Markdown |
+| `POST /projects/{id}/reports/compare` | Compara dos reportes guardados, sin simular, y guarda la comparación |
+| `DELETE /projects/{id}/reports/{rid}` | Lo borra |
+
+- **Contenido:**
+  - **Identificación:** proyecto, versión, escenario (o req/s), semilla y motor.
+  - **Resultados:** latencias, throughput, errores, requests sin respuesta y saturación, con su procedencia.
+  - **Cuello de botella:** el recurso, su `archivo:línea` y el endpoint que más lo ocupa.
+  - **Costos y supuestos:** el costo por línea, el costo de fallar y los supuestos principales.
+  - **Conclusión:** escrita con una plantilla, sin LLM.
+- **Diagnóstico por componente** (API, DB, colas): uso promedio y pico del recurso más ocupado, costo mensual y estado.
+  - **Estados:** `overloaded` (uso promedio de 80 % o más, o el cuello de botella con requests sin atender), `idle` (bajo 30 % incluso en el pico y con costo) u `ok`. Los umbrales van en `thresholds`, con etiqueta `SUPUESTO`.
+  - **Margen hasta saturar:** req/s ÷ uso promedio. Es una aproximación lineal (`ESTIMADO`) y se omite si el recurso ya está saturado.
+  - **Propósito:** son datos estructurados, pensados para decidir más adelante cambios de arquitectura por costo o por riesgo de caída.
+- **Comparación:** métricas, costo y estado de cada componente en A y B, más los cambios del modelo entre las dos versiones. Si los escenarios son distintos, lo avisa.
+- **El chat:** la tool `simulate` también guarda su reporte y devuelve `report_id`.
+- **El editor:** cada vez que pulsas Simular, se crea el reporte. Luego se pide el `Run` con la misma semilla, que ya está guardado (`X-Branchpoint-Run-Cache: hit`). La sección "Reportes" lista los reportes y compara dos. La página `/reports/{proyecto}/{reporte}` tiene "Descargar PDF" y "Copiar Markdown". En el modo demo, sin backend, no hay reportes.
 
 ### Costo de fallar (JAJ-74)
 

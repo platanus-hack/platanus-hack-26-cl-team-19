@@ -13,7 +13,7 @@ export interface Repository {
   version: string;
 }
 
-export type EditorSection = "scenarios" | "components" | "versions";
+export type EditorSection = "scenarios" | "components" | "versions" | "reports";
 
 export interface Scenario {
   id: string;

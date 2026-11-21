@@ -9,6 +9,7 @@ import EditorFailureCost from "@/components/editor/EditorFailureCost.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
+import EditorReportsPanel from "@/components/editor/EditorReportsPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
 import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
@@ -42,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { reportPath } from "@/services/reports-api";
 import {
   costComponentLabel,
   simulationProvenance,
@@ -91,6 +93,8 @@ const {
   simulate,
   loadCosts,
   compare,
+  lastReport,
+  reportsVersion,
 } = useEditorProject();
 
 const section = ref<EditorSection>("scenarios");
@@ -98,6 +102,7 @@ const sectionTitles = {
   scenarios: "Escenarios",
   components: "Componentes",
   versions: "Versiones",
+  reports: "Reportes",
 };
 const view = ref<"editor" | "compare">("editor");
 const selectedNode = ref<string | null>(null);
@@ -549,6 +554,11 @@ async function saveVersion() {
             {{ overrideError }}
           </p>
         </template>
+        <EditorReportsPanel
+          v-else-if="section === 'reports'"
+          :project-id="project?.id ?? null"
+          :refresh-key="reportsVersion"
+        />
         <ComponentList
           v-else-if="section === 'components'"
           :nodes="nodes"
@@ -776,6 +786,13 @@ async function saveVersion() {
             <p v-else class="text-sm text-muted-foreground">
               Elige un escenario y pulsa Simular para reproducir el resultado.
             </p>
+            <NuxtLink
+              v-if="lastReport && project"
+              :to="reportPath(project.id, lastReport.id)"
+              class="text-sm font-medium underline underline-offset-4"
+            >
+              Ver el reporte de esta corrida
+            </NuxtLink>
             <section v-if="run?.overrides?.length" class="flex flex-col gap-1">
               <h3 class="text-sm font-semibold">Ajustes aplicados</h3>
               <ul
