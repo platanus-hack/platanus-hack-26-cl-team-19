@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
-import { Ellipsis, Loader2, Play } from "@lucide/vue";
+import { Ellipsis, Loader2, Pause, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
@@ -157,6 +157,19 @@ const overrideError =
 
 const displayedCosts = computed(() => results.value?.cost ?? costs.value);
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
+const simulating = computed(() => pending.value === "Simulando…");
+const lastRunOverrides = ref<string>();
+const canResume = computed(
+  () =>
+    !!playback.value &&
+    cursor.value < playback.value.frames.length - 1 &&
+    lastRunOverrides.value === JSON.stringify(runOverrides.value),
+);
+const simulationLabel = computed(() => {
+  if (simulating.value) return "Simulando…";
+  if (playing.value) return "Pausar";
+  return canResume.value ? "Reanudar" : "Simular";
+});
 const rows = computed(() =>
   comparison.value ? toComparisonRows(comparison.value, provenance) : [],
 );
@@ -206,6 +219,9 @@ watch([base, target], () => {
 watch(run, (value) => {
   cursor.value = 0;
   playing.value = !!value;
+  lastRunOverrides.value = value
+    ? JSON.stringify(runOverrides.value)
+    : undefined;
 });
 watch(version, (detail) => {
   overrideDraft.value = emptyScenarioOverrideDraft();
@@ -222,6 +238,18 @@ function showCompare(baseId?: string) {
       versions.value.find((entry) => entry.id !== target.value)?.id ?? "";
   }
   view.value = "compare";
+}
+
+function toggleSimulation() {
+  if (playing.value) {
+    playing.value = false;
+    return;
+  }
+  if (!runOverrides.value || busy.value) return;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (canResume.value) playing.value = true;
+  else void simulate(runOverrides.value);
 }
 
 async function createExample(sample: string) {
@@ -320,23 +348,23 @@ async function saveVersion() {
       </Tabs>
       <Button
         size="sm"
-        :disabled="busy || !scenario || !graph || !runOverrides"
-        @click="
-          view = 'editor';
-          panel = 'simulation';
-          if (runOverrides) simulate(runOverrides);
-        "
+        class="w-8 sm:w-28"
+        :disabled="busy || (!playing && (!scenario || !graph || !runOverrides))"
+        @click="toggleSimulation"
       >
         <Loader2
-          v-if="pending === 'Simulando…'"
+          v-if="simulating"
           data-icon="inline-start"
           class="animate-spin"
           aria-hidden="true"
         />
+        <Pause
+          v-else-if="playing"
+          data-icon="inline-start"
+          aria-hidden="true"
+        />
         <Play v-else data-icon="inline-start" aria-hidden="true" />
-        <span class="sr-only sm:not-sr-only">
-          {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
-        </span>
+        <span class="sr-only sm:not-sr-only">{{ simulationLabel }}</span>
       </Button>
     </template>
 
@@ -363,7 +391,7 @@ async function saveVersion() {
 
     <template #status>
       <p
-        v-if="pending"
+        v-if="pending && !simulating"
         role="status"
         class="border-b border-border px-4 py-2 text-sm text-muted-foreground"
       >
