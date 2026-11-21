@@ -84,6 +84,8 @@ const switchId = computed(() => `cli-${props.provider.id}`);
       <template v-else-if="state === 'pending'">
         <p class="text-xs text-muted-foreground">
           Pega este comando en tu terminal. El token solo se muestra una vez.
+          Para confirmar, corre
+          <code class="font-mono">{{ provider.checkCommand }}</code>.
         </p>
         <div
           class="flex items-start gap-2 rounded-md border border-border bg-muted/50 py-2 ps-3 pe-1"

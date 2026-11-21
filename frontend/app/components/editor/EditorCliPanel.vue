@@ -79,6 +79,9 @@ const { copy, copied } = useClipboard({ copiedDuring: 1500 });
         class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4"
       >
         <template v-if="activity.length">
+          <p class="text-xs text-muted-foreground">
+            Prueba local en el editor: no viene de tu CLI.
+          </p>
           <template v-for="message in activity" :key="message.id">
             <AgentToolCall
               v-if="message.role === 'tool'"

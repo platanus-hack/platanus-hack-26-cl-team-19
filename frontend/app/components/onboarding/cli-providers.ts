@@ -10,7 +10,6 @@ export interface CliProvider {
   id: CliProviderId;
   name: string;
   plan: string;
-  installCommand: string;
   docsUrl: string;
   // false mientras no se pruebe la conexión de punta a punta (Codex, según JAJ-54)
   verified: boolean;
@@ -25,7 +24,6 @@ export const cliProviders: CliProvider[] = [
     id: "claude",
     name: "Claude Code",
     plan: "Plan Pro o Max, o API key de Anthropic",
-    installCommand: "npm install -g @anthropic-ai/claude-code",
     docsUrl: "https://code.claude.com/docs/en/mcp",
     verified: true,
     connectCommand: (endpoint, token) =>
@@ -36,13 +34,12 @@ export const cliProviders: CliProvider[] = [
     id: "codex",
     name: "Codex CLI",
     plan: "Plan Plus o Pro de ChatGPT, o API key de OpenAI",
-    installCommand: "npm install -g @openai/codex",
     docsUrl: "https://developers.openai.com/codex/mcp",
     verified: false,
     connectCommand: (endpoint, token) =>
       `export BRANCHPOINT_TOKEN=${token}\ncodex mcp add branchpoint --url ${endpoint} \\\n  --bearer-token-env-var BRANCHPOINT_TOKEN`,
     checkCommand: "codex mcp list",
     commandNote:
-      "El export solo dura en esa terminal: agrégalo a tu ~/.zshrc o ~/.bashrc para que Codex lo tenga en las próximas sesiones.",
+      "El export solo dura en esa terminal. Si lo guardas en ~/.zshrc o ~/.bashrc, el token queda en texto plano: mejor usa un gestor de secretos.",
   },
 ];

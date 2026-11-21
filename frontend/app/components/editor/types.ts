@@ -68,7 +68,7 @@ export interface AgentProposal {
 
 export type ProposalState = "idle" | "pending" | "applied" | "discarded";
 
-export type ToolCallStatus = "running" | "done";
+export type ToolCallStatus = "running" | "done" | "error";
 
 export type ChatMessage =
   | { id: string; role: "user"; text: string }

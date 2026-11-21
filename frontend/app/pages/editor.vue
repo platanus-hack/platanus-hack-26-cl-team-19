@@ -187,8 +187,8 @@ function changeView(value: unknown) {
   else if (value === "editor") view.value = "editor";
 }
 
-// Agente en la CLI del usuario (JAJ-81). «Probar conexión» corre una simulación real como la
-// pediría la CLI, para ver la actividad en el panel; el MCP del backend aún no existe (JAJ-67).
+// Agente en la CLI del usuario (JAJ-81). El panel muestra si hay una CLI conectada; la
+// «Simulación de prueba» es local (testSimulation) y no pasa por el MCP.
 const cli = useCliConnections();
 const activity = ref<ChatMessage[]>([]);
 const testing = ref(false);
@@ -218,7 +218,20 @@ async function testSimulation() {
   testing.value = true;
   const id = `${Date.now()}-simulate`;
   try {
-    if (!scenario.value) scenario.value = scenarios.value[0]?.id ?? "";
+    if (!scenario.value) {
+      activity.value = [
+        ...activity.value,
+        {
+          id,
+          role: "tool",
+          name: "simulate",
+          input: "",
+          status: "error",
+          output: "Elige un escenario para simular.",
+        },
+      ];
+      return;
+    }
     activity.value = [
       ...activity.value,
       {
@@ -235,7 +248,7 @@ async function testSimulation() {
     const result = run.value !== before ? run.value : null;
     const bottleneck = result ? toBottleneck(result) : null;
     updateTool(id, {
-      status: "done",
+      status: result ? "done" : "error",
       output: result
         ? (bottleneck?.title ?? "Sin cuello de botella")
         : "La simulación falló.",
@@ -244,7 +257,7 @@ async function testSimulation() {
         : undefined,
     });
   } catch {
-    updateTool(id, { status: "done", output: "La simulación falló." });
+    updateTool(id, { status: "error", output: "La simulación falló." });
   } finally {
     testing.value = false;
   }

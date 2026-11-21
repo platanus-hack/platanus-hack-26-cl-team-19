@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Logos de servicios externos. SVG de lobe-icons (@lobehub/icons-static-svg 1.104.0, licencia MIT);
+// Logos de servicios externos. SVG de lobe-icons (@lobehub/icons-static-svg 1.104.0, licencia MIT, aviso en LICENSE-lobe-icons);
 // las marcas son de sus dueños y se usan solo para indicar con qué servicio se conecta Branchpoint.
 export type Brand = "claude" | "codex" | "github";
 
