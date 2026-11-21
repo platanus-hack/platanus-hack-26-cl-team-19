@@ -21,6 +21,7 @@ from app.api.store import (
     GitHubInstallation,
     Origin,
     Project,
+    ProjectGoals,
     ProjectScenario,
     RepoSource,
     Version,
@@ -73,6 +74,13 @@ def _scenario(row: dict[str, Any]) -> ProjectScenario:
         rps=float(row["rps"]) if row["rps"] is not None else None,
         description=row["description"],
     )
+
+
+def _goals(row: dict[str, Any]) -> ProjectGoals:
+    def num(v: Any) -> float | None:
+        return float(v) if v is not None else None  # numeric de Postgres llega como Decimal
+
+    return ProjectGoals(num(row["slo_p95_ms"]), num(row["slo_error_rate"]), num(row["budget_usd_month"]))
 
 
 class PostgresProjectStore:
@@ -216,6 +224,30 @@ class PostgresProjectStore:
                 (pid, scenario.name, scenario.multiplier, scenario.rps, scenario.description),
             ).fetchone()
         return _scenario(row)
+
+    def get_goals(self, project_id: str) -> ProjectGoals:
+        pid = _uuid(project_id)
+        if pid is None:
+            return ProjectGoals()
+        with self._conn() as conn:
+            row = conn.execute(
+                "select slo_p95_ms, slo_error_rate, budget_usd_month from projects where id = %s", (pid,)
+            ).fetchone()
+        return _goals(row) if row else ProjectGoals()
+
+    def set_goals(self, project_id: str, goals: ProjectGoals) -> ProjectGoals:
+        pid = _uuid(project_id)
+        with self._conn() as conn:
+            row = None
+            if pid is not None:
+                row = conn.execute(
+                    "update projects set slo_p95_ms = %s, slo_error_rate = %s, budget_usd_month = %s,"
+                    " updated_at = now() where id = %s returning slo_p95_ms, slo_error_rate, budget_usd_month",
+                    (goals.slo_p95_ms, goals.slo_error_rate, goals.budget_usd_month, pid),
+                ).fetchone()
+            if row is None:
+                raise KeyError(project_id)
+        return _goals(row)
 
     def find_run(self, cache_key: str) -> dict[str, Any] | None:
         with self._conn() as conn:
