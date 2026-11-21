@@ -73,7 +73,8 @@ class CreateVersionRequest(BaseModel):
 
     model: dict[str, Any] = Field(description="El modelo editado, completo.")
     origin: Literal["repo", "manual", "agente"] = Field(
-        "manual", description="repo: re-sincronizado desde una rama. manual: desde el diagrama. agente: propuesta aplicada."
+        "manual",
+        description="repo: re-sincronizado desde una rama. manual: desde el diagrama. agente: propuesta aplicada.",
     )
     parent: int | None = Field(None, ge=1, description="Versión antecesora. Por defecto, la última.")
     note: str | None = Field(None, max_length=500, description="Qué cambió, para el historial.")

@@ -70,7 +70,7 @@ QUEUE_PREFIX = "queue:"
 
 def resource_label(name: str) -> str:
     if name.startswith(QUEUE_PREFIX):
-        return f"workers de la cola {name[len(QUEUE_PREFIX):]}"
+        return f"workers de la cola {name[len(QUEUE_PREFIX) :]}"
     return RESOURCE_LABELS.get(name, name)
 
 
@@ -126,8 +126,7 @@ def simulate(
         pool_capacity = model.db.max_connections
     pool = Resource(sim, "db_pool", pool_capacity)
     queues = {
-        name: _QueueCounters(q, Resource(sim, QUEUE_PREFIX + name, q.workers))
-        for name, q in model.queues.items()
+        name: _QueueCounters(q, Resource(sim, QUEUE_PREFIX + name, q.workers)) for name, q in model.queues.items()
     }
     resources = [api_cpu, threads, pool, db_cpu, *(q.resource for q in queues.values())]
     if cache_hit_ratio is not None and not any(
@@ -261,9 +260,21 @@ def simulate(
         )
         for name, q in queues.items()
     ]
-    return _build_run(model, scenario if rps is None else f"{scenario} ({rate:g} req/s)", rate, seed,
-                      duration_s, arrivals, rec, resources, still_running, warnings, wall_start,
-                      cache_stats, queue_stats)
+    return _build_run(
+        model,
+        scenario if rps is None else f"{scenario} ({rate:g} req/s)",
+        rate,
+        seed,
+        duration_s,
+        arrivals,
+        rec,
+        resources,
+        still_running,
+        warnings,
+        wall_start,
+        cache_stats,
+        queue_stats,
+    )
 
 
 def _cores(sim: Sim, name: str, vcpu: float) -> tuple[Resource, float]:
@@ -274,10 +285,21 @@ def _cores(sim: Sim, name: str, vcpu: float) -> tuple[Resource, float]:
     return Resource(sim, name, servers), servers / vcpu
 
 
-def _build_run(model: ArchitectureModel, scenario: str, rate: float, seed: int, duration_s: float,
-               arrivals: str, rec: Recorder, resources: list[Resource], still_running: int,
-               warnings: list[str], wall_start: float, cache: CacheStats,
-               queues: list[QueueStats]) -> Run:
+def _build_run(
+    model: ArchitectureModel,
+    scenario: str,
+    rate: float,
+    seed: int,
+    duration_s: float,
+    arrivals: str,
+    rec: Recorder,
+    resources: list[Resource],
+    still_running: int,
+    warnings: list[str],
+    wall_start: float,
+    cache: CacheStats,
+    queues: list[QueueStats],
+) -> Run:
     resource_stats = [
         ResourceStats(
             name=r.name,
@@ -299,7 +321,7 @@ def _build_run(model: ArchitectureModel, scenario: str, rate: float, seed: int, 
         if rs.utilization >= SATURATION_WARNING:
             warnings.append(
                 f"{rs.label} al {rs.utilization:.0%}: cerca o sobre la capacidad el modelo es optimista "
-                f"(JAJ-44). Tomar la latencia y los errores como piso (\"al menos\")."
+                f'(JAJ-44). Tomar la latencia y los errores como piso ("al menos").'
             )
 
     return Run(
@@ -351,8 +373,11 @@ def _build_run(model: ArchitectureModel, scenario: str, rate: float, seed: int, 
 def _bottleneck(stats: list[ResourceStats]) -> Bottleneck:
     top = max(stats, key=lambda s: (s.utilization, s.final_queue))
     if top.utilization < BOTTLENECK_MIN:
-        return Bottleneck(None, top.utilization,
-                          f"Ningún recurso pasa del {BOTTLENECK_MIN:.0%} de uso: el escenario se aguanta con holgura.")
+        return Bottleneck(
+            None,
+            top.utilization,
+            f"Ningún recurso pasa del {BOTTLENECK_MIN:.0%} de uso: el escenario se aguanta con holgura.",
+        )
     message = f"{top.label} al {top.utilization:.0%}"
     if top.final_queue:
         message += f", con {top.final_queue} requests esperando al final (la cola crece)"
