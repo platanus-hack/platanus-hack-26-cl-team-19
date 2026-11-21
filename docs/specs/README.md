@@ -18,6 +18,21 @@ Y dos formas de pagar la IA: la key de Branchpoint, con cuota, y la key del usua
 | Extracción con IA, agnóstica | Factible de construir, **calidad sin medir** | El loop y las tools son simples. No sabemos cuántos endpoints encuentra, cuánto cuesta ni cuánto demora en un repo real. Por eso parte con un spike ([IA-0](ia-00-spike-extractor.md)). |
 | Varios repos en un proyecto | Diagrama sí, simulación parcial | El motor simula una API, una DB, caché y colas. Con varios servicios se simula uno y el resto queda como dependencia externa. |
 
+## Relación con la PR #59
+
+La [PR #59](https://github.com/platanus-hack/platanus-hack-26-cl-team-19/pull/59) (JAJ-85, JAJ-86), abierta y sin mergear, ya implementa la extracción con IA. Estas specs se escribieron sobre `dev`, sin esa PR. Antes de repartir las de extracción hay que conciliarlas:
+
+| Tema | PR #59 | Estas specs |
+|---|---|---|
+| Extractor AST de FastAPI | Lo borra: todo pasa por la IA | Lo conserva y la IA cubre el resto (híbrido) |
+| ADR 0002 | `0002-la-ia-lee-la-arquitectura-del-repo.md` | `0002-extraccion-con-llm-para-repos-no-fastapi.md`: mismo número, decisión distinta |
+| Agente y contrato | `analyzer.py`, `ai_graph.py`, `submit_architecture`, `build_from_graph` | IA-3 e IA-4 describen lo mismo con otros nombres |
+| Credencial de la ingesta | `llm_access.py`, modo demo con 5 análisis al día, solo Anthropic | IA-2: cuota en `credentials.py` (la de la PR #62), Anthropic y OpenAI |
+| Varios repos | No | IA-5 e IA-10 |
+| Medición con un LLM real | Una prueba por CLI sobre un repo Express | IA-0: tres repos, con umbrales |
+
+Si se mergea la PR #59: IA-3 e IA-4 quedan cubiertas, IA-0 se reduce a medir el analizador del servidor, IA-5 se reduce a varios repos y a unificar la cuota, y el ADR 0002 de esta rama se descarta o se reescribe como enmienda. Las specs del chat (IA-1, IA-6, IA-7, IA-8, IA-9) no dependen de esa decisión.
+
 ## Cómo se ve en código
 
 No hace falta LangChain. El repo ya tiene las tres piezas de un harness propio, y son pequeñas:
