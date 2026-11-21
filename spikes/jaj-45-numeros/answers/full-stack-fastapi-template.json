@@ -1,0 +1,10 @@
+{
+  "_doc": "Respuestas de ejemplo a las 3 preguntas. Los valores son ilustrativos: no vienen de un equipo real.",
+  "traffic": {"mode": "mau", "mau": 100000, "profile": "medio"},
+  "deployment": {
+    "db": {"provider": "supabase", "plan": "micro"},
+    "api": {"provider": "fargate", "replicas": 1, "vcpu": 1, "memory_gb": 2}
+  },
+  "business": {"ticket_usd": 30},
+  "overrides": {}
+}

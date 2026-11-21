@@ -1,5 +1,5 @@
 {
-  "repo": "/tmp/claude-1000/-home-dvillasc-progra-uc-platanus-hack-26-cl-team-19/959acd64-48c5-4a5e-86b3-72c7c35b5d30/scratchpad/repos/fastapi-realworld-example-app",
+  "repo": "fastapi-realworld-example-app",
   "stats": {
     "files": 70,
     "functions": 98,
@@ -16,8 +16,8 @@
     "endpoints_with_plugin": 0,
     "endpoints_with_background": 0,
     "risks": 3,
-    "seconds_parse": 0.03,
-    "seconds_total": 0.051
+    "seconds_parse": 0.031,
+    "seconds_total": 0.062
   },
   "endpoints": [
     {
@@ -28,6 +28,7 @@
       "line": 27,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -46,8 +47,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_articles_for_feed(users)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 221,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_common:get_articles_for_user_feed",
             "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed"
@@ -57,8 +61,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -68,8 +75,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": true,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_common:get_articles_for_user_feed",
             "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
@@ -81,8 +91,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": true,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_common:get_articles_for_user_feed",
             "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
@@ -94,8 +107,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": true,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_common:get_articles_for_user_feed",
             "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
@@ -107,8 +123,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": true,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_common:get_articles_for_user_feed",
             "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
@@ -142,6 +166,7 @@
       "line": 52,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -161,8 +186,16 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.add_article_to_favorites(favorites)",
+          "shape": "commit",
           "file": "app/db/repositories/articles.py",
           "line": 276,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/api/routes/articles/articles_common.py:57",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_common:mark_article_as_favorite",
             "app.db.repositories.articles:ArticlesRepository.add_article_into_favorites"
@@ -172,8 +205,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -183,8 +219,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -194,8 +233,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -207,8 +254,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -220,8 +275,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -233,8 +296,20 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -254,6 +329,7 @@
       "line": 82,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -273,8 +349,16 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.remove_article_from_favorites(favorites)",
+          "shape": "commit",
           "file": "app/db/repositories/articles.py",
           "line": 288,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/api/routes/articles/articles_common.py:87",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_common:remove_article_from_favorites",
             "app.db.repositories.articles:ArticlesRepository.remove_article_from_favorites"
@@ -284,8 +368,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -295,8 +382,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -306,8 +396,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -319,8 +417,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -332,8 +438,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -345,8 +459,20 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -366,6 +492,7 @@
       "line": 31,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -384,8 +511,11 @@
           "kind": "db",
           "op": "read",
           "detail": "self.connection.fetch",
+          "shape": "unknown",
           "file": "app/db/repositories/articles.py",
           "line": 202,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:list_articles",
             "app.db.repositories.articles:ArticlesRepository.filter_articles"
@@ -395,8 +525,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -406,8 +539,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": true,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:list_articles",
             "app.db.repositories.articles:ArticlesRepository.filter_articles",
@@ -419,8 +555,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": true,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:list_articles",
             "app.db.repositories.articles:ArticlesRepository.filter_articles",
@@ -432,8 +571,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": true,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:list_articles",
             "app.db.repositories.articles:ArticlesRepository.filter_articles",
@@ -445,8 +587,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": true,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_resource:list_articles",
             "app.db.repositories.articles:ArticlesRepository.filter_articles",
@@ -480,6 +630,7 @@
       "line": 59,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -500,8 +651,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.create_new_article(users)",
+          "shape": "commit",
           "file": "app/db/repositories/articles.py",
           "line": 45,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article"
@@ -511,8 +665,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -522,8 +679,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.services.articles:check_article_exists",
@@ -534,8 +694,16 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.create_new_tags(tags)",
+          "shape": "commit",
           "file": "app/db/repositories/tags.py",
           "line": 13,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:54",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article",
@@ -546,8 +714,16 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.add_tags_to_article(articles_to_tags)",
+          "shape": "commit",
           "file": "app/db/repositories/articles.py",
           "line": 327,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:54",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article",
@@ -558,8 +734,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article",
@@ -571,8 +750,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article",
@@ -584,8 +766,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article",
@@ -597,8 +782,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.articles.articles_resource:create_new_article",
             "app.db.repositories.articles:ArticlesRepository.create_article",
@@ -618,6 +811,7 @@
       "line": 83,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -636,8 +830,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -647,8 +844,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -658,8 +858,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -671,8 +879,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -684,8 +900,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -697,8 +921,20 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -718,6 +954,7 @@
       "line": 95,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -738,8 +975,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.update_article(articles)",
+          "shape": "commit",
           "file": "app/db/repositories/articles.py",
           "line": 81,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:update_article_by_slug",
             "app.db.repositories.articles:ArticlesRepository.update_article"
@@ -749,8 +989,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -760,8 +1003,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -771,8 +1017,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -784,8 +1038,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -797,8 +1059,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -810,8 +1080,20 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -831,6 +1113,7 @@
       "line": 116,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -851,8 +1134,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.delete_article(articles)",
+          "shape": "commit",
           "file": "app/db/repositories/articles.py",
           "line": 95,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.articles.articles_resource:delete_article_by_slug",
             "app.db.repositories.articles:ArticlesRepository.delete_article"
@@ -862,8 +1148,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -873,8 +1162,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -884,8 +1176,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -897,8 +1197,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -910,8 +1218,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -923,8 +1239,20 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -944,6 +1272,7 @@
       "line": 23,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -960,8 +1289,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_email(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 11,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.authentication:login",
             "app.db.repositories.users:UsersRepository.get_user_by_email"
@@ -978,7 +1310,9 @@
       "line": 62,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
+        "cpu",
         "db"
       ],
       "db_in_handler": true,
@@ -995,8 +1329,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.create_new_user(users)",
+          "shape": "commit",
           "file": "app/db/repositories/users.py",
           "line": 40,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.authentication:register",
             "app.db.repositories.users:UsersRepository.create_user"
@@ -1006,8 +1343,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.authentication:register",
             "app.services.authentication:check_username_is_taken",
@@ -1018,12 +1358,31 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_email(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 11,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.authentication:register",
             "app.services.authentication:check_email_is_taken",
             "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "pwd_context.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "app/services/security.py",
+          "line": 16,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.db.repositories.users:UsersRepository.create_user",
+            "app.models.domain.users:UserInDB.change_password",
+            "app.services.security:get_password_hash"
           ]
         }
       ],
@@ -1037,6 +1396,7 @@
       "line": 31,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1055,8 +1415,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_comments_for_article_by_slug(users)",
+          "shape": "range",
           "file": "app/db/repositories/comments.py",
           "line": 48,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.comments:list_comments_for_article",
             "app.db.repositories.comments:CommentsRepository.get_comments_for_article"
@@ -1066,8 +1429,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -1077,8 +1443,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1088,8 +1457,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1101,8 +1478,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1114,8 +1499,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1127,8 +1520,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": true,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.comments:list_comments_for_article",
             "app.db.repositories.comments:CommentsRepository.get_comments_for_article",
@@ -1163,6 +1564,7 @@
       "line": 46,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1182,8 +1584,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.create_new_comment(users)",
+          "shape": "commit",
           "file": "app/db/repositories/comments.py",
           "line": 68,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.comments:create_comment_for_article",
             "app.db.repositories.comments:CommentsRepository.create_comment_for_article"
@@ -1193,8 +1598,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -1204,8 +1612,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1215,8 +1626,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1228,8 +1647,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1241,8 +1668,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1254,8 +1689,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.comments:create_comment_for_article",
             "app.db.repositories.comments:CommentsRepository.create_comment_for_article",
@@ -1275,6 +1718,7 @@
       "line": 67,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1295,8 +1739,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.delete_comment_by_id(commentaries)",
+          "shape": "commit",
           "file": "app/db/repositories/comments.py",
           "line": 81,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.comments:delete_comment_from_article",
             "app.db.repositories.comments:CommentsRepository.delete_comment"
@@ -1306,8 +1753,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_comment_by_id_and_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/comments.py",
           "line": 26,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.comments:get_comment_by_id_from_path",
             "app.db.repositories.comments:CommentsRepository.get_comment_by_id"
@@ -1317,8 +1767,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/articles.py",
           "line": 243,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
@@ -1328,8 +1781,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1339,8 +1795,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
           "file": "app/db/repositories/articles.py",
           "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1352,8 +1816,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1365,8 +1837,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
           "file": "app/db/repositories/articles.py",
           "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.articles:get_article_by_slug_from_path",
             "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
@@ -1378,8 +1858,20 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/comments.py:31",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.comments:get_comment_by_id_from_path",
             "app.db.repositories.comments:CommentsRepository.get_comment_by_id",
@@ -1399,6 +1891,7 @@
       "line": 21,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1415,8 +1908,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1426,8 +1922,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.profiles:get_profile_by_username_from_path",
             "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
@@ -1445,6 +1949,7 @@
       "line": 32,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1463,8 +1968,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.subscribe_user_to_another(followers_to_followings)",
+          "shape": "commit",
           "file": "app/db/repositories/profiles.py",
           "line": 57,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.profiles:follow_for_user",
             "app.db.repositories.profiles:ProfilesRepository.add_user_into_followers"
@@ -1474,8 +1982,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1485,8 +1996,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.profiles:get_profile_by_username_from_path",
             "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
@@ -1504,6 +2023,7 @@
       "line": 62,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1522,8 +2042,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.unsubscribe_user_from_another(followers_to_followings)",
+          "shape": "commit",
           "file": "app/db/repositories/profiles.py",
           "line": 70,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.profiles:unsubscribe_from_user",
             "app.db.repositories.profiles:ProfilesRepository.remove_user_from_followers"
@@ -1533,8 +2056,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1544,8 +2070,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/profiles.py",
           "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.dependencies.profiles:get_profile_by_username_from_path",
             "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
@@ -1563,6 +2097,7 @@
       "line": 11,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1579,8 +2114,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_all_tags(tags)",
+          "shape": "scan",
           "file": "app/db/repositories/tags.py",
           "line": 9,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.tags:get_all_tags",
             "app.db.repositories.tags:TagsRepository.get_all_tags"
@@ -1597,6 +2135,7 @@
       "line": 19,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1613,8 +2152,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1631,6 +2173,7 @@
       "line": 39,
       "rooted": true,
       "path_resolved": true,
+      "async": true,
       "touches": [
         "db"
       ],
@@ -1648,8 +2191,11 @@
           "kind": "db",
           "op": "write",
           "detail": "queries.update_user_by_username(users)",
+          "shape": "commit",
           "file": "app/db/repositories/users.py",
           "line": 70,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.routes.users:update_current_user",
             "app.db.repositories.users:UsersRepository.update_user"
@@ -1659,8 +2205,11 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 18,
+          "in_loop": false,
+          "branch": [],
           "via": [
             "app.api.dependencies.authentication:_get_current_user",
             "app.db.repositories.users:UsersRepository.get_user_by_username"
@@ -1670,8 +2219,16 @@
           "kind": "db",
           "op": "read",
           "detail": "queries.get_user_by_email(users)",
+          "shape": "lookup",
           "file": "app/db/repositories/users.py",
           "line": 11,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/api/routes/users.py:52",
+              "body"
+            ]
+          ],
           "via": [
             "app.api.routes.users:update_current_user",
             "app.services.authentication:check_email_is_taken",

@@ -33,17 +33,29 @@ HTTP_LIBS = {"requests", "httpx", "aiohttp", "urllib3"}
 HTTP_CALLS = {"get", "post", "put", "patch", "delete", "request", "head", "send", "stream"}
 SDK_LIBS = {"boto3", "botocore", "slack_sdk", "slack_bolt", "stripe", "openai", "anthropic", "smtplib",
             "jira", "atlassian", "pdpyras", "googleapiclient", "google", "zoomus", "msal", "sendgrid", "twilio"}
+# Librerías de hashing de contraseñas: gastan decenas o cientos de ms de CPU por llamada.
+CPU_LIBS = {"pwdlib", "passlib", "bcrypt", "argon2"}
+CPU_METHODS = {"hash", "verify", "verify_and_update", "hashpw", "checkpw", "needs_update"}
+
+# Forma de cada query, para asignarle un costo de la tabla de JAJ-8 (ver spikes/jaj-45-numeros).
+FILTER_METHODS = {"where", "filter", "filter_by"}
+ONE_ROW_METHODS = {"first", "one", "one_or_none", "scalar_one", "scalar_one_or_none", "scalar", "fetchrow", "fetchval"}
+LIMIT_METHODS = {"limit", "offset", "slice"}
+STAGE_METHODS = {"add", "add_all", "delete", "merge", "expunge"}  # solo marcan la sesión; el SQL sale en el commit
+COMMIT_METHODS = {"commit", "flush", "executemany", "bulk_save_objects", "bulk_insert_mappings"}
 
 
 @dataclass
 class Effect:
-    kind: str  # db | cache | http | sdk | background
+    kind: str  # db | cache | http | sdk | background | plugin | cpu
     op: str
     detail: str
     file: str
     line: int
     in_loop: bool = False
     awaited: bool = True
+    shape: str = ""  # db: pk | lookup | range | count | count_all | scan | stage | commit | unknown
+    branch: tuple = ()  # ramas if/else que contienen la llamada: (("archivo:línea_del_if", "body"|"else"), ...)
 
 
 @dataclass
@@ -53,7 +65,7 @@ class FuncInfo:
     node: ast.FunctionDef | ast.AsyncFunctionDef
     cls: str | None = None
     effects: list[Effect] = field(default_factory=list)
-    calls: list[tuple[str, int, bool]] = field(default_factory=list)  # (fid, line, in_loop)
+    calls: list[tuple[str, int, bool, tuple]] = field(default_factory=list)  # (fid, line, in_loop, branch)
     unresolved: int = 0
 
 
@@ -109,13 +121,13 @@ class Project:
         self._load_sql_queries()
 
     def _load_sql_queries(self) -> None:
-        """Lee queries nombradas de aiosql (`-- name: x`) para saber si son lectura o escritura y qué tabla tocan."""
-        self.sql_queries: dict[str, tuple[str, str]] = {}
+        """Lee queries nombradas de aiosql (`-- name: x`): si son lectura o escritura, qué tabla tocan y su forma."""
+        self.sql_queries: dict[str, tuple[str, str, str]] = {}
         for path in self.root.rglob("*.sql"):
             if any(p in SKIP_DIRS for p in path.relative_to(self.root).parts):
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-            for m in re.finditer(r"--\s*name:\s*([\w-]+)[^\n]*\n(.*?)(?=--\s*name:|\Z)", text, flags=re.S):
+            for m in re.finditer(r"--\s*name:\s*([\w-]+[!<>*#^$]*)[^\n]*\n(.*?)(?=--\s*name:|\Z)", text, flags=re.S):
                 name = m.group(1).rstrip("!<>*#^$").replace("-", "_")
                 body = re.sub(r"--[^\n]*", "", m.group(2)).strip()
                 verb = body.split(None, 1)[0].upper() if body else ""
@@ -123,7 +135,7 @@ class Project:
                     verb = next((v for v in ("INSERT", "UPDATE", "DELETE") if v in body.upper()), "SELECT")
                 tbl = re.search(r"\b(?:FROM|INTO|UPDATE)\s+([\w.]+)", body, flags=re.I)
                 op = "write" if verb in ("INSERT", "UPDATE", "DELETE") else "read"
-                self.sql_queries[name] = (op, tbl.group(1) if tbl else "")
+                self.sql_queries[name] = (op, tbl.group(1) if tbl else "", _sql_shape(op, body, m.group(1)))
 
     def _index(self, mod: Module) -> None:
         is_pkg = mod.path.name == "__init__.py"
@@ -284,6 +296,24 @@ def _kw(call: ast.Call, name: str) -> ast.AST | None:
     return None
 
 
+def _shape_from(filtered: bool, one_row: bool, limited: bool, counted: bool) -> str:
+    if counted:
+        return "count" if filtered else "count_all"
+    if filtered:
+        return "lookup" if one_row else "range"
+    if limited or one_row:
+        return "range"
+    return "scan"
+
+
+def _sql_shape(op: str, body: str, raw_name: str) -> str:
+    """Forma de una query aiosql a partir de su SQL. `^` y `$` en el nombre devuelven una sola fila."""
+    if op == "write":
+        return "commit"  # asyncpg fuera de una transacción: cada sentencia hace su propio commit
+    up = " ".join(body.upper().split())
+    return _shape_from(" WHERE " in up, raw_name.endswith(("^", "$")), " LIMIT " in up, "COUNT(" in up)
+
+
 # ---------- análisis de cuerpo de funciones ----------
 class BodyVisitor(ast.NodeVisitor):
     def __init__(self, proj: Project, fi: FuncInfo, var_types: dict[str, tuple[str | None, str | None]]):
@@ -294,6 +324,79 @@ class BodyVisitor(ast.NodeVisitor):
         self.is_async = isinstance(fi.node, ast.AsyncFunctionDef)
         self.self_attrs = _self_attr_types(proj, fi) if fi.cls else {}
         self.entity_vars: dict[str, str] = {}  # statement = select(Item) -> "Item"
+        self.stmt_vars: dict[str, ast.AST] = {}  # statement = select(Item).where(...) -> la expresión
+        self.branch: list[tuple[str, str]] = []
+        self.parents: dict[int, ast.AST] = {}
+        for parent in ast.walk(fi.node):
+            for child in ast.iter_child_nodes(parent):
+                self.parents[id(child)] = parent
+
+    def visit_If(self, node):
+        self.visit(node.test)
+        key = f"{self.mod.rel}:{node.lineno}"
+        for side, stmts in (("body", node.body), ("else", node.orelse)):
+            self.branch.append((key, side))
+            for st in stmts:
+                self.visit(st)
+            self.branch.pop()
+
+    def _outer_chain(self, node: ast.AST) -> set[str]:
+        """Métodos encadenados sobre el resultado de una llamada: db.query(M).filter(...).first() -> {filter, first}."""
+        out = set()
+        cur = node
+        while True:
+            par = self.parents.get(id(cur))
+            if isinstance(par, ast.Attribute) and par.value is cur:
+                out.add(par.attr)
+                cur = par
+            elif isinstance(par, ast.Call) and par.func is cur:
+                cur = par
+            else:
+                return out
+
+    def _db_shape(self, node: ast.Call, meth: str) -> str:
+        if meth in ("get", "refresh"):
+            return "pk"  # session.get(Model, id) y session.refresh(obj) leen por clave primaria
+        if meth in STAGE_METHODS:
+            return "stage"
+        if meth in COMMIT_METHODS:
+            return "commit"
+        if meth in ("rollback",):
+            return "stage"
+        stmt = node.args[0] if node.args else None
+        if isinstance(stmt, ast.Name) and stmt.id in self.stmt_vars:
+            stmt = self.stmt_vars[stmt.id]
+        names: set[str] = set(self._outer_chain(node))
+        if meth == "query":  # db.query(Model).filter(...): la forma está en la cadena exterior
+            stmt = node
+        if stmt is None:
+            return "unknown"
+        has_builder = False
+        for sub in ast.walk(stmt):
+            if isinstance(sub, ast.Attribute):
+                names.add(sub.attr)
+            elif isinstance(sub, ast.Name):
+                names.add(sub.id)
+            if isinstance(sub, ast.Call) and _name(sub.func).split(".")[-1] in STMT_BUILDERS:
+                has_builder = True
+        if not has_builder:
+            return "unknown"  # SQL en texto (text("..."), strings) o una variable que no seguimos
+        return _shape_from(bool(names & FILTER_METHODS), bool(names & ONE_ROW_METHODS),
+                           bool(names & LIMIT_METHODS), "count" in names)
+
+    def _cpu_receiver(self, recv: ast.AST) -> bool:
+        """`password_hash.verify(...)` donde password_hash = PasswordHash(...) importado de pwdlib/passlib."""
+        root = _name(recv).split(".")[0]
+        if self.mod.imports.get(root, "").split(".")[0] in CPU_LIBS:
+            return True
+        r = self.p.resolve_symbol(self.mod, root) if root else None
+        if r and r[0] == "assign":
+            amod, _, aname = r[1].partition(":")
+            val = self.p.modules[amod].assigns[aname]
+            if isinstance(val, ast.Call):
+                croot = _name(val.func).split(".")[0]
+                return self.p.modules[amod].imports.get(croot, "").split(".")[0] in CPU_LIBS
+        return False
 
     def _visit_loop(self, node):
         self.loop += 1
@@ -318,6 +421,9 @@ class BodyVisitor(ast.NodeVisitor):
             ent = _stmt_entity(node.value)
             if ent:
                 self.entity_vars[node.targets[0].id] = ent
+            if any(isinstance(sub, ast.Call) and _name(sub.func).split(".")[-1] in STMT_BUILDERS
+                   for sub in ast.walk(node.value)):
+                self.stmt_vars[node.targets[0].id] = node.value
         if isinstance(node.value, ast.Call) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             r = self.p.resolve_expr(self.mod, node.value.func)
             if r and r[0] == "class":
@@ -352,8 +458,9 @@ class BodyVisitor(ast.NodeVisitor):
             return self.self_attrs.get(recv.attr, (None, None))
         return None, None
 
-    def _effect(self, kind, op, detail, node):
-        self.fi.effects.append(Effect(kind, op, detail, self.mod.rel, node.lineno, self.loop > 0, id(node) in self.awaited))
+    def _effect(self, kind, op, detail, node, shape=""):
+        self.fi.effects.append(Effect(kind, op, detail, self.mod.rel, node.lineno, self.loop > 0, id(node) in self.awaited,
+                                      shape, tuple(self.branch)))
 
     def _classify(self, node: ast.Call) -> None:
         func = node.func
@@ -381,7 +488,7 @@ class BodyVisitor(ast.NodeVisitor):
                     r = self.p.resolve_expr(self.mod, func)
                     callee = r[1] if r and r[0] == "func" else None
         if callee:
-            self.fi.calls.append((callee, node.lineno, self.loop > 0))
+            self.fi.calls.append((callee, node.lineno, self.loop > 0, tuple(self.branch)))
             return
 
         if not isinstance(func, ast.Attribute):
@@ -392,6 +499,11 @@ class BodyVisitor(ast.NodeVisitor):
         recv = func.value
         recv_txt = _name(recv).lower()
         _, rtype = self._receiver_type(recv)
+
+        # CPU pesada: hashing de contraseñas
+        if meth in CPU_METHODS and self._cpu_receiver(recv):
+            self._effect("cpu", meth, f"{_name(recv)}.{meth} (hash de contraseña)", node, "password_hash")
+            return
 
         # HTTP externo
         if (imported_root in HTTP_LIBS and meth in HTTP_CALLS | {"Client", "AsyncClient"} and len(fname.split(".")) == 2) \
@@ -424,14 +536,15 @@ class BodyVisitor(ast.NodeVisitor):
         is_db_recv = rtype in DB_TYPES or any(h in recv_txt.split(".")[-1] for h in DB_RECEIVER_HINTS) \
             or recv_txt.endswith("queries")
         if recv_txt.endswith("queries") and meth in self.p.sql_queries:
-            op, table = self.p.sql_queries[meth]
-            self._effect("db", op, f"{fname}({table})" if table else fname, node)
+            op, table, shape = self.p.sql_queries[meth]
+            self._effect("db", op, f"{fname}({table})" if table else fname, node, shape)
             return
         if is_db_recv and (meth in DB_READ | DB_WRITE or recv_txt.endswith("queries")):
             op = "write" if meth in DB_WRITE or recv_txt.endswith("queries") and any(
                 w in meth for w in ("create", "update", "delete", "add", "remove", "insert")) else "read"
             ent = _entity(node, self.entity_vars)
-            self._effect("db", op, f"{fname}({ent})" if ent else fname, node)
+            shape = ("commit" if op == "write" else "unknown") if recv_txt.endswith("queries") else self._db_shape(node, meth)
+            self._effect("db", op, f"{fname}({ent})" if ent else fname, node, shape)
             return
         self.fi.unresolved += 1
 
@@ -442,7 +555,7 @@ STMT_BUILDERS = ("select", "query", "update", "delete", "insert")
 def _stmt_entity(expr: ast.AST) -> str:
     """Busca select(Model)/update(Model)/... en cualquier parte de una expresión encadenada."""
     for sub in ast.walk(expr):
-        if isinstance(sub, ast.Call) and _name(sub.func).split(".")[-1] in STMT_BUILDERS and sub.args:
+        if isinstance(sub, ast.Call) and _name(sub.func).split(".")[-1] in STMT_BUILDERS + ("select_from",) and sub.args:
             a = sub.args[0]
             if isinstance(a, ast.Name) and a.id[:1].isupper():
                 return a.id
@@ -645,11 +758,11 @@ def reachable(proj: Project, start: list[str], max_depth: int = 8):
     """BFS por el grafo de llamadas; devuelve efectos con la cadena de llamadas y patrones de riesgo."""
     effects, risks, visited = [], [], set()
     n1_sites: set[tuple[str, int]] = set()
-    frontier = [(f, [f], None) for f in start]
+    frontier = [(f, [f], None, ()) for f in start]
     depth = 0
     while frontier and depth <= max_depth:
         nxt = []
-        for fid, chain, in_loop_ctx in frontier:
+        for fid, chain, in_loop_ctx, branch_ctx in frontier:
             if fid in visited or fid not in proj.funcs:
                 continue
             visited.add(fid)
@@ -658,7 +771,8 @@ def reachable(proj: Project, start: list[str], max_depth: int = 8):
             for e in fi.effects:
                 # el riesgo se reporta en el loop más externo (la línea que hay que cambiar), una vez por sitio
                 site = in_loop_ctx or ((e.file, e.line) if e.in_loop else None)
-                effects.append({**e.__dict__, "in_loop": bool(site), "via": chain})
+                effects.append({**e.__dict__, "in_loop": bool(site), "via": chain,
+                                "branch": [list(b) for b in branch_ctx + e.branch]})
                 if e.kind == "db" and site and site not in n1_sites:
                     n1_sites.add(site)
                     risks.append({"type": "N+1", "detail": f"{e.detail} se ejecuta una vez por iteración",
@@ -668,8 +782,9 @@ def reachable(proj: Project, start: list[str], max_depth: int = 8):
                 if is_async and not e.awaited and (e.kind == "http" and e.detail.startswith("requests") or
                                                    e.kind == "db" and e.op == "read" and not e.detail.split("(")[0].endswith((".add", ".delete"))):
                     risks.append({"type": "bloqueante-en-async", "detail": e.detail, "file": e.file, "line": e.line, "via": chain})
-            for callee, line, loop in fi.calls:
-                nxt.append((callee, chain + [callee], in_loop_ctx or ((fi.module.rel, line) if loop else None)))
+            for callee, line, loop, branch in fi.calls:
+                nxt.append((callee, chain + [callee], in_loop_ctx or ((fi.module.rel, line) if loop else None),
+                            branch_ctx + branch))
         frontier = nxt
         depth += 1
     return effects, risks, visited
@@ -706,19 +821,21 @@ def run(root: Path) -> dict:
         out_eps.append({
             "method": ",".join(ep["methods"]), "path": ep["path"], "handler": ep["fid"],
             "file": ep["file"], "line": ep["line"], "rooted": ep["rooted"], "path_resolved": ep["path_resolved"],
+            "async": isinstance(fi.node, ast.AsyncFunctionDef),
             "touches": kinds,
             "db_in_handler": any(e["kind"] == "db" and e["via"][0] == ep["fid"] for e in effects),
             "db_ops": sorted({e["op"] for e in effects if e["kind"] == "db"}),
             "entities": sorted({e["detail"].split("(")[1].rstrip(")") for e in effects if e["kind"] == "db" and "(" in e["detail"]}),
             "functions_reached": len(visited),
-            "effects": [{k: e[k] for k in ("kind", "op", "detail", "file", "line", "via")} for e in effects],
+            "effects": [{k: e[k] for k in ("kind", "op", "detail", "shape", "file", "line", "in_loop", "branch", "via")}
+                        for e in effects],
             "risks": risks,
         })
     t_end = time.perf_counter()
     n = len(out_eps)
     with_db = sum(1 for e in out_eps if "db" in e["touches"])
     return {
-        "repo": str(root),
+        "repo": root.name,
         "stats": {
             "files": len(proj.modules), "functions": len(proj.funcs), "parse_errors": len(proj.parse_errors),
             "routers": len(routers), "include_edges": len(edges),
