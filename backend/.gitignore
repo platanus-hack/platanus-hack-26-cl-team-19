@@ -6,3 +6,6 @@ __pycache__/
 # salidas de app.cli --out y body de ejemplo para curl (README)
 run*.json
 req.json
+
+# variables de entorno con secretos (ver .env.example)
+.env

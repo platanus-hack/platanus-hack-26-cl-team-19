@@ -1,0 +1,8 @@
+{
+  "name": "branchpoint",
+  "private": true,
+  "description": "Herramientas del repo. Por ahora solo fija la versión de la CLI de Supabase (ver docs/supabase-local.md).",
+  "devDependencies": {
+    "supabase": "3.2.0"
+  }
+}
