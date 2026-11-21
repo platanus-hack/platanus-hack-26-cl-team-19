@@ -35,6 +35,8 @@ Cada clasificación trae `evidence` (archivo:línea) y queda con etiqueta `ESTIM
 
 ## [4] Tools del agente
 
+> Desde JAJ-54 las mismas tools se exponen de dos formas. En el **modo MCP** (principal), el loop corre en la CLI de IA del usuario, y el máximo de iteraciones y la transmisión al chat de la última parte de esta sección no aplican. Ver Consecuencias. En el **modo chat** del editor, el loop es del backend y aplica todo lo de abajo.
+
 Una tool es una función del backend que el LLM puede pedir ejecutar. El backend valida los argumentos, la ejecuta y le devuelve el resultado.
 
 | Tool | Qué hace | Regla de números |

@@ -53,6 +53,19 @@ async def main() -> None:
             print(" US$/mes:", prop["usd_month"]["before"]["value"], "->", prop["usd_month"]["after"]["value"])
             print(" procedencia:", prop["after"]["provenance"]["label"], "|", prop["after"]["provenance"]["source"])
 
+            no_quote = payload(
+                await session.call_tool(
+                    "propose",
+                    {"example": EXAMPLE, "ops": [{"op": "add_cache", "endpoint": "GET /users/", "hit_ratio": 0.9}]},
+                )
+            )
+            assert "quote" in no_quote.get("error", ""), no_quote
+            print("\npropose add_cache sin quote (dato del usuario):", no_quote["error"])
+
+            bad_scenario = payload(await session.call_tool("simulate", {"example": EXAMPLE, "scenario": "blackfriday"}))
+            assert "error" in bad_scenario, bad_scenario
+            print("simulate con escenario inexistente:", bad_scenario["error"])
+
             # simulate no tiene rps en su schema: un número inventado por el LLM se descarta
             sneaky = payload(await session.call_tool("simulate", {"example": EXAMPLE, "rps": 5000}))
             assert sneaky["rps"] == sim["rps"], "simulate usó un rps que no viene del escenario"

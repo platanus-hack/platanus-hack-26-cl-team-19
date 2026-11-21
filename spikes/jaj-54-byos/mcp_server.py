@@ -50,10 +50,14 @@ server = MCPServer(
 )
 
 
+class ToolError(Exception):
+    """Un error que el LLM tiene que leer y corregir. Todas las tools lo devuelven como {"error": ...}."""
+
+
 def _example(example: str) -> dict[str, Any]:
     raw = load_sample(example)
     if raw is None:
-        raise ValueError(f"No existe el ejemplo '{example}'. Hay: {', '.join(sample_ids())}.")
+        raise ToolError(f"No existe el ejemplo '{example}'. Hay: {', '.join(sample_ids())}.")
     return raw
 
 
@@ -85,7 +89,7 @@ def _summary(run: Run, raw: dict[str, Any]) -> dict[str, Any]:
             "resource": b.resource,
             "utilization": round(b.utilization, 3),
             "message": b.message,
-            "line": getattr(b, "line", None),
+            "line": b.line,  # archivo:línea, como campo propio (además de dentro de message)
         },
         "warnings": run.warnings,  # todas: entre ellas, si el motor es optimista cerca de la capacidad
         "provenance": _provenance(raw, run),
@@ -93,7 +97,10 @@ def _summary(run: Run, raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _simulate(raw: dict[str, Any], scenario: str, seed: int) -> Run:
-    return run_engine(load_model(raw), scenario, seed=seed, duration_s=SIM_SECONDS)
+    model = load_model(raw)
+    if scenario not in model.scenarios:
+        raise ToolError(f"El modelo no tiene el escenario '{scenario}'. Hay: {', '.join(model.scenarios)}.")
+    return run_engine(model, scenario, seed=seed, duration_s=SIM_SECONDS)
 
 
 @server.tool()
@@ -107,8 +114,11 @@ def simulate(example: str, scenario: str = "cyberday", seed: int = 0) -> dict[st
     """Simula un modelo de ejemplo bajo uno de sus escenarios (pico_normal, cyberday) y resume el Run:
     p95, errores, throughput, el cuello de botella con su archivo:línea y la procedencia. La tasa de
     tráfico sale del escenario del modelo, no se pasa a mano."""
-    raw = _example(example)
-    return _summary(_simulate(raw, scenario, seed), raw)
+    try:
+        raw = _example(example)
+        return _summary(_simulate(raw, scenario, seed), raw)
+    except ToolError as e:
+        return {"error": str(e)}
 
 
 @server.tool()
@@ -122,13 +132,13 @@ def ops_schema() -> dict[str, Any]:
 def propose(example: str, ops: list[dict[str, Any]], scenario: str = "cyberday", seed: int = 0) -> dict[str, Any]:
     """Aplica operaciones de arquitectura a un modelo de ejemplo, simula antes y después con el mismo
     escenario y semilla, y devuelve el delta (p95, errores, cuello de botella) y el costo mensual."""
-    raw = _example(example)
     try:
+        raw = _example(example)
         result = apply_ops(raw, ops)
-    except OpError as e:
+        before = _simulate(raw, scenario, seed)
+        after = _simulate(result.model, scenario, seed)
+    except (ToolError, OpError) as e:
         return {"error": str(e)}  # el LLM lo lee y corrige
-    before = _simulate(raw, scenario, seed)
-    after = _simulate(result.model, scenario, seed)
     delta = run_delta(before, after, raw, result.model)
     cost_a, cost_b = estimate_cost(raw), estimate_cost(result.model)
     return {

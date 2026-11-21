@@ -131,6 +131,8 @@ Claude Code 2.1.323 con sesión **Claude Pro**, sin API key. Pregunta: "¿qué p
 | + pooler + DB large | 3.687 ms | 0 % | US$335,17 | CPU de la API al 99 % |
 | **6 réplicas + pooler + DB large** | **287 ms** | **0 %** | **US$392,84** | CPU de la API al 84 % |
 
+Todos los números de la tabla son `SUPUESTO`: salen del motor (CyberDay, semilla 0, 30 s simulados) sobre un modelo con supuestos, y heredan la etiqueta más débil.
+
 - **Límites que respetó:**
   - no inventó números;
   - avisó que con la CPU al 100 % el motor es optimista;
@@ -152,15 +154,18 @@ claude -p "Con la tool simulate de branchpoint, ¿qué pasa en CyberDay en el ej
 - **JAJ-67 (loop del agente):** las tools se implementan una vez y se exponen dos veces, por MCP para el modo CLI (principal) y en el loop del backend para el modo chat. El loop del backend solo corre con la key del usuario o la de demo.
 - **JAJ-81 (vincular la CLI):** emparejar es generar el token de Branchpoint y mostrar el comando `claude mcp add`. La conexión queda verificada con el primer `tools/list` con ese token. La UI distingue tres estados: sin CLI, token sin usar y conectada.
 - **JAJ-66 y JAJ-86 (LLM en la ingesta):** la ingesta corre en el backend, así que su LLM necesita el modo API key o el de demo. Otra opción es exponer la clasificación de huecos como tool, para que la haga la CLI del usuario.
-- **ADR 0001:** no cambia. El proveedor solo decide quién corre el loop.
+- **ADR 0001:** esta PR actualiza sus Consecuencias y la sección [4]. JAJ-54 decidió dónde corre el loop: en el modo principal, en la CLI del usuario. Las reglas de números y las tools no cambian, porque se cumplen en las tools.
 
 ## Requisitos para la versión productiva (JAJ-67)
 
 Lo anotó el bot reviewer sobre el spike, y aplica al servidor MCP del backend:
 
-- **Ningún número libre del LLM.** El tráfico entra solo por `set_traffic(..., quote)` y las metas por `set_goals(..., quote)`. `simulate` elige un escenario del proyecto y no recibe `rps` ni duración. El spike ya lo cumple.
+- **Ningún número libre del LLM.** El tráfico entra solo por `set_traffic(..., quote)` y las metas por `set_goals(..., quote)`. `simulate` elige un escenario del proyecto y no recibe `rps` ni duración. En `propose`, `apply_ops` (JAJ-68) rechaza un `hit_ratio` sin la `quote` del usuario, y los números de diseño, como las réplicas, quedan `SUPUESTO` con la fuente "Propuesta del agente". El spike ya lo cumple, y `check_client.py` prueba las dos cosas: el `rps` inventado se descarta y el `add_cache` sin `quote` se rechaza.
 - **Procedencia en cada resultado.** Etiqueta (`SUPUESTO` o `ESTIMADO`), fuente (motor, escenario, semilla y duración) y cantidad de supuestos, para que el agente pueda citarlos. Todas las advertencias, sin recortar. El spike ya lo cumple.
 - **Límites por token.** En modo CLI, Branchpoint no controla el loop, así que el servidor pone un rate limit de llamadas por minuto y un tope de simulaciones por propuesta. La duración ya es fija en el servidor.
+- **Errores con una sola forma** (`{"error": ...}`), también para un ejemplo o un escenario que no existen. Así el LLM corrige igual en todos los casos. El spike ya lo cumple.
+- **El cuello de botella con `line` como campo propio,** no solo dentro de `message`. El spike ya lo cumple.
+- **`check_client.py` pasa a ser un test** que corre en CI.
 - **Credenciales fuera de los logs.** "No se registra en logs" cubre también los middlewares de request, las trazas de error y el token de Branchpoint.
 
 ## Pendientes
