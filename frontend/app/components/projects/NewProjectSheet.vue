@@ -28,7 +28,7 @@ import type { ModelSummary } from "@/services/editor-api";
 // un modelo de ejemplo.
 const emit = defineEmits<{ created: [projectId: string] }>();
 const { api, isMock } = useProjectApi();
-const github = useGithubConnection();
+const github = useGithubConnection({ immediate: false });
 const repoId = useId();
 const branchId = useId();
 const models = shallowRef<ModelSummary[]>([]);
@@ -58,7 +58,7 @@ function updateOpen(value: boolean) {
   if (pending.value || github.running.value) return;
   open.value = value;
   if (!value) return;
-  if (!isMock) void github.loadRepos(true);
+  if (!isMock) void github.loadRepos();
   else if (!models.value.length && !loading.value) void loadModels();
 }
 

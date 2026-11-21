@@ -11,18 +11,24 @@ import {
   type Ingestion,
 } from "@/services/github-api";
 
-function messageOf(cause: unknown): string {
+export function githubErrorMessage(cause: unknown): string {
   const response = cause as {
+    name?: string;
     data?: { error?: { message?: string } };
     message?: string;
   };
-  return (
-    response?.data?.error?.message ??
-    "No se pudo completar la solicitud. Revisa que el backend esté activo e inténtalo de nuevo."
-  );
+  if (response?.data?.error?.message) return response.data.error.message;
+  // Errores propios del cliente (p. ej. «Tu sesión expiró») ya vienen en español.
+  if (cause instanceof Error && response.name !== "FetchError" && cause.message)
+    return cause.message;
+  return "No se pudo completar la solicitud. Revisa que el backend esté activo e inténtalo de nuevo.";
 }
 
-export function useGithubConnection() {
+/**
+ * `immediate: false` no pide nada a GitHub hasta llamar `loadRepos()`: así una página que quizá
+ * no use la conexión (el sheet de Nuevo proyecto, el onboarding que redirige) no gasta rate limit.
+ */
+export function useGithubConnection({ immediate = true } = {}) {
   const route = useRoute();
   const auth = useSupabaseAuth();
   const baseURL = useRuntimeConfig().public.apiBase.trim();
@@ -36,7 +42,7 @@ export function useGithubConnection() {
   const repo = ref("");
   const branch = ref("");
   const ingestion = shallowRef<Ingestion | null>(null);
-  const loading = ref(!!api);
+  const loading = ref(!!api); // hasta la primera carga no se sabe si hay conexión
   const connecting = ref(false);
   const installHref = ref("");
   const awaitingGithub = ref(false);
@@ -77,7 +83,7 @@ export function useGithubConnection() {
       if (installations.value.length && !installHref.value)
         installHref.value = (await api.installUrl()).url;
     } catch (cause) {
-      error.value = messageOf(cause);
+      error.value = githubErrorMessage(cause);
     } finally {
       loading.value = false;
     }
@@ -93,7 +99,7 @@ export function useGithubConnection() {
         : await api.installUrl();
       window.location.href = url;
     } catch (cause) {
-      error.value = messageOf(cause);
+      error.value = githubErrorMessage(cause);
       connecting.value = false;
     }
   }
@@ -119,7 +125,7 @@ export function useGithubConnection() {
         branches.value[0] ??
         "";
     } catch (cause) {
-      error.value = messageOf(cause);
+      error.value = githubErrorMessage(cause);
     }
   });
 
@@ -138,14 +144,14 @@ export function useGithubConnection() {
         ingestion.value = job;
       }
     } catch (cause) {
-      error.value = messageOf(cause);
+      error.value = githubErrorMessage(cause);
       ingestion.value = null;
     } finally {
       starting.value = false;
     }
   }
 
-  onMounted(() => loadRepos());
+  if (immediate) onMounted(() => loadRepos());
 
   return {
     enabled: !!api,

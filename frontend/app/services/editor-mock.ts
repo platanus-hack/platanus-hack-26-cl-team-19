@@ -160,8 +160,7 @@ export function createMockEditorApi(
   ];
 
   const storeKey = "branchpoint:demo-projects";
-  const saved = storage?.getItem(storeKey);
-  const entries: DemoProject[] = saved ? JSON.parse(saved) : [primary, worker];
+  const entries = readSaved(storage?.getItem(storeKey)) ?? [primary, worker];
   const projects = new Map(entries.map((entry) => [entry.id, entry]));
   const existingPrimary = projects.get(primary.id);
   if (existingPrimary) existingPrimary.repositories = primary.repositories;
@@ -247,4 +246,15 @@ export function createMockEditorApi(
       };
     },
   };
+}
+
+// Un sessionStorage corrupto no debe romper el modo demo: se parte de cero.
+function readSaved(saved: string | null | undefined): DemoProject[] | null {
+  if (!saved) return null;
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    return Array.isArray(parsed) ? (parsed as DemoProject[]) : null;
+  } catch {
+    return null;
+  }
 }

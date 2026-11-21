@@ -63,11 +63,16 @@ Esos tests vacían las tablas, así que solo aceptan una base local. Sin `TEST_D
 
 ## Probar el acceso con GitHub
 
-1. Registra una **OAuth App** de desarrollo en GitHub con
-   `http://localhost:54321/auth/v1/callback` como callback. La GitHub App que
-   importa repos se configura por separado.
-2. Configura Supabase CLI con estas variables en `supabase/.env.local` y
-   reinicia el stack con `npx supabase stop` y `npx supabase start`.
+1. El login usa la misma GitHub App que importa repos (`branchpoint-dev`, de
+   JAJ-57), así el usuario autoriza una sola app. Esa app ya tiene lo que
+   Supabase necesita: la callback `http://localhost:54321/auth/v1/callback`
+   (además de la del backend, `http://localhost:8000/github/callback`) y el
+   permiso de cuenta _Email addresses: Read-only_. Para otra app, agrega ambas
+   cosas en su configuración.
+2. Configura Supabase CLI con el client id y el client secret de la GitHub App
+   (los mismos `GITHUB_APP_CLIENT_ID` y `GITHUB_APP_CLIENT_SECRET` de
+   `backend/.env`) en `supabase/.env.local`, que no se versiona, y reinicia el
+   stack con `npx supabase stop` y `npx supabase start`.
 
    ```dotenv
    SUPABASE_AUTH_EXTERNAL_GITHUB_ENABLED=true

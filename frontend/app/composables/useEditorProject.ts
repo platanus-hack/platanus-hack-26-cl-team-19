@@ -98,7 +98,10 @@ export function useEditorProject() {
 
   async function fetchCosts(detail: VersionDetail) {
     const id = project.value?.id;
-    if (!id) return;
+    if (!id) {
+      costsError.value = "No hay un proyecto abierto para estimar costos.";
+      return;
+    }
     costsError.value = "";
     try {
       const estimate = await api.getCosts(id, detail.number);

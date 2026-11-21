@@ -23,7 +23,10 @@ const route = useRoute();
 // El onboarding es solo para el primer ingreso. Después, las conexiones se cambian en
 // Configuración; si GitHub vuelve aquí tras instalar la app, se reenvía con su resultado.
 onMounted(async () => {
-  if (!(await isOnboardingDone())) return;
+  if (!(await isOnboardingDone())) {
+    if (!isMock) await github.loadRepos();
+    return;
+  }
   await navigateTo(
     route.query.github
       ? { path: "/settings", query: route.query }
@@ -37,7 +40,7 @@ const demoCliConnected = ref(false);
 const busy = ref(false);
 const error = ref(false);
 const demoRepo = "fastapi/full-stack-fastapi-template";
-const github = useGithubConnection();
+const github = useGithubConnection({ immediate: false });
 
 async function addDemoRepository() {
   if (busy.value || repositoryState.value !== "choose") return;
