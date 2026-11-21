@@ -20,7 +20,9 @@ def test_imported_project_lists_its_repository():
     imported = store.create("tienda", load_sample(SAMPLE), None, None, RepoSource("c1", "acme/tienda", "dev", SHA))
 
     listed = client.get("/projects").json()
-    assert listed[0]["repositories"] == [{"id": imported.id, "fullName": "acme/tienda", "branch": "dev"}]
+    assert listed[0]["repositories"] == [
+        {"id": imported.id, "fullName": "acme/tienda", "branch": "dev", "primary": True}
+    ]
     # el id del repo es el del proyecto: el editor abre GET /projects/{id} con él
     one = client.get(f"/projects/{imported.id}").json()
     assert one["repositories"][0]["id"] == imported.id == one["id"]
