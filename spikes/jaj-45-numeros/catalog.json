@@ -100,6 +100,7 @@
       "pesado": {"sessions_per_month": 12, "requests_per_session": 25}
     },
     "k_hour": {"value": 2.5, "unit": "×", "label": "SUPUESTO", "source": "JAJ-11: hora pico sobre el promedio, de guías generales de capacidad", "date": "2026-11-21"},
+    "mau_default": {"value": 10000, "unit": "usuarios/mes", "label": "SUPUESTO", "source": "Valor por defecto mientras el usuario no declare su tráfico: se reemplaza con la respuesta del chat (JAJ-59)", "date": "2026-11-21"},
     "read_share": {"value": 0.85, "unit": "fracción", "label": "SUPUESTO", "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET", "date": "2026-11-21"},
     "scenarios": {
       "pico_normal": {"multiplier": 1,  "label": "SUPUESTO", "source": "Hora pico de un día normal"},
