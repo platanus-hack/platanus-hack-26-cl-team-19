@@ -1,3 +1,4 @@
+import type { ChatKeySource, ChatProvider, ChatTurn } from "./chat-stream";
 export interface ModelSummary {
   id: string;
   name: string;
@@ -150,6 +151,35 @@ export function createEditorApi(
     `${projectPath(id)}/versions/${version}`;
 
   return {
+    async chat(
+      id: string,
+      messages: ChatTurn[],
+      provider: ChatProvider,
+      signal: AbortSignal,
+      expectedSource?: ChatKeySource,
+    ) {
+      const response = await fetchApi.raw<ReadableStream<Uint8Array>>(
+        `${projectPath(id)}/chat`,
+        {
+          method: "POST",
+          body: { messages, provider, expected_source: expectedSource },
+          responseType: "stream",
+          ignoreResponseError: true,
+          signal,
+        },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        const message = data?.error?.message;
+        throw new Error(
+          typeof message === "string"
+            ? message
+            : "No se pudo conectar con el chat.",
+        );
+      }
+      if (!response.body) throw new Error("El chat no devolvió una respuesta.");
+      return response.body;
+    },
     listProjects: () => fetchApi<Project[]>("/projects"),
     getProject: (id: string) => fetchApi<Project>(projectPath(id)),
     listModels: () => fetchApi<ModelSummary[]>("/models"),
