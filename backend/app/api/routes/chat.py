@@ -7,8 +7,8 @@ resultado a medida que ocurren.
 **Credencial.**
 * **Del usuario:** su API key en ``X-Anthropic-Api-Key`` o ``X-OpenAI-Api-Key``, según el proveedor. Se usa solo en esta
   request: no se guarda, no se escribe en logs y no vuelve en la respuesta.
-* **Con sesión:** se usa la clave elegida en Configuración. La key de Claude del equipo
-  tiene cuota diaria por usuario. OpenAI usa la clave personal.
+* **Con sesión:** se usa la clave elegida en Configuración o, si no hay, la key de Branchpoint del
+  proveedor, con cuota diaria por usuario (``llm_key`` en ``app/api/routes/credentials.py``).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from app.agent.loop import LLM, AnthropicLLM, run_agent
 from app.agent.tools import AgentTools
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
-from app.api.routes.credentials import ChatKeySource, Provider, chat_key
+from app.api.routes.credentials import ChatKeySource, Provider, llm_key
 
 router = APIRouter(prefix="/projects", tags=["agent"])
 
@@ -64,7 +64,7 @@ def chat(
         raise ApiError(422, INVALID_PARAMETERS, "El último mensaje tiene que ser del usuario.")
     limiter = request.app.state.limiter
     header = x_openai_api_key if req.provider == "openai" else x_anthropic_api_key
-    key = chat_key(request, user, req.provider, header, req.expected_source)
+    key = llm_key(request, user, req.provider, header, req.expected_source).key
     factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
     llm: LLM = factory(key)
     tools = AgentTools(store, owner, limiter)
