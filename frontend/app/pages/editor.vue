@@ -318,6 +318,26 @@ async function saveVersion() {
           </TabsTrigger>
         </TabsList>
       </Tabs>
+      <Button
+        size="sm"
+        :disabled="busy || !scenario || !graph || !runOverrides"
+        @click="
+          view = 'editor';
+          panel = 'simulation';
+          if (runOverrides) simulate(runOverrides);
+        "
+      >
+        <Loader2
+          v-if="pending === 'Simulando…'"
+          data-icon="inline-start"
+          class="animate-spin"
+          aria-hidden="true"
+        />
+        <Play v-else data-icon="inline-start" aria-hidden="true" />
+        <span class="sr-only sm:not-sr-only">
+          {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
+        </span>
+      </Button>
     </template>
 
     <template v-if="projectId" #sidebar>
@@ -490,22 +510,6 @@ async function saveVersion() {
             :disabled="busy"
             hide-label
           />
-          <Button
-            :disabled="busy || !scenario || !graph || !runOverrides"
-            @click="
-              panel = 'simulation';
-              if (runOverrides) simulate(runOverrides);
-            "
-          >
-            <Loader2
-              v-if="pending === 'Simulando…'"
-              data-icon="inline-start"
-              class="animate-spin"
-              aria-hidden="true"
-            />
-            <Play v-else data-icon="inline-start" aria-hidden="true" />
-            {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
-          </Button>
           <ScenarioOverrideControls
             v-if="!isMock && graph"
             v-model="overrideDraft"
