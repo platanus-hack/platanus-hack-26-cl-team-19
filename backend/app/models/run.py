@@ -22,6 +22,28 @@ class LatencyStats:
 
 
 @dataclass
+class EndpointUsage:
+    """Cuánto ocupa un endpoint un recurso y desde qué líneas de código (JAJ-69)."""
+
+    endpoint: str  # id del endpoint (ej. "POST /login/access-token"), o "cola <nombre>" para sus trabajos
+    share: float  # fracción del tiempo ocupado del recurso (0 a 1); entre todos suman 1
+    refs: list[str]  # archivo:línea de los pasos que lo ocupan, de más a menos tiempo
+
+
+@dataclass
+class LineUsage:
+    """Cuánto ocupa un recurso una línea de código, sumando todos los endpoints que pasan por ella (JAJ-69).
+
+    Ej. el hash de contraseña (``security.py:32``) lo usan login, crear usuario y cambiar contraseña:
+    cada endpoint ocupa poco, pero la línea junta la mayor parte de la CPU.
+    """
+
+    at: str  # archivo:línea
+    share: float  # fracción del tiempo ocupado del recurso (0 a 1)
+    endpoints: list[str]  # endpoints que pasan por esa línea, de más a menos tiempo
+
+
+@dataclass
 class ResourceStats:
     name: str
     label: str  # nombre para mostrar, ej. "CPU de la API"
@@ -31,6 +53,10 @@ class ResourceStats:
     final_queue: int
     timeouts: int
     mean_wait_ms: float
+    # quién ocupa el recurso, de más a menos (JAJ-69); vacío si nadie lo usó
+    by_endpoint: list[EndpointUsage] = field(default_factory=list)
+    # qué líneas de código lo ocupan, sumando endpoints; sin el tiempo que no tiene línea en el modelo
+    by_line: list[LineUsage] = field(default_factory=list)
 
 
 @dataclass
@@ -100,9 +126,23 @@ class CpuAdjustment:
 
 @dataclass
 class Bottleneck:
+    """El recurso más ocupado y, desde JAJ-69, qué código lo ocupa.
+
+    Para el banner del editor: ``line`` es la línea de código que más ocupa el recurso, sumando todos
+    los endpoints que pasan por ella (``line_endpoints``). ``endpoint`` es el endpoint que más lo
+    ocupa, y ``refs``, las líneas de ese endpoint. Quedan en ``None`` o vacíos si el recurso lo ocupa
+    algo sin línea en el modelo (ej. la CPU propia del framework).
+    """
+
     resource: str | None
     utilization: float
     message: str
+    line: str | None = None  # archivo:línea que más ocupa el recurso
+    line_share: float | None = None  # su fracción del tiempo ocupado (0 a 1)
+    line_endpoints: list[str] = field(default_factory=list)  # endpoints que pasan por esa línea
+    endpoint: str | None = None  # el endpoint que más ocupa el recurso
+    endpoint_share: float | None = None  # su fracción del tiempo ocupado (0 a 1)
+    refs: list[str] = field(default_factory=list)  # archivo:línea de sus pasos en ese recurso
 
 
 @dataclass

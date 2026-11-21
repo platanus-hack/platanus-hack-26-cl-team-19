@@ -2,16 +2,20 @@
 
 ``Recorder`` junta llegadas, requests terminadas y errores (en total, por endpoint y por segundo),
 y cada segundo toma una muestra de la cola y el uso de cada recurso.
+
+``UsageTracker`` (JAJ-69) suma cuánto tiempo ocupa cada endpoint cada recurso y desde qué línea de
+código, para que el cuello de botella apunte al endpoint y al ``archivo:línea`` que lo causan.
 """
 
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
 from app.engine.kernel import Resource
 from app.models.architecture import Endpoint
-from app.models.run import LatencyStats
+from app.models.run import EndpointUsage, LatencyStats, LineUsage
 
 ERROR_POOL_TIMEOUT = "pool_timeout"  # esperó una conexión más que el timeout del pool
 ERROR_CLIENT_TIMEOUT = "client_timeout"  # tardó más que el timeout del cliente (el servidor igual hizo el trabajo)
@@ -97,3 +101,63 @@ class Recorder:
             util[r.name] = round((busy - self._busy_last[r.name]) / r.capacity, 4)
             self._busy_last[r.name] = busy
         self.utilization_samples.append(util)
+
+
+class UsageTracker:
+    """Tiempo que cada endpoint ocupa cada recurso, y desde qué línea de código (JAJ-69).
+
+    ``add`` se llama cuando una request (o un trabajo de una cola) suelta un recurso, con el tiempo
+    que lo tuvo. ``at`` es el ``archivo:línea`` del paso que lo ocupó; ``None`` si no tiene línea en
+    el modelo (ej. la CPU propia del framework o los hilos, que se toman por toda la request).
+    """
+
+    def __init__(self) -> None:
+        # recurso -> dueño (endpoint o "cola <nombre>") -> línea (o None) -> segundos
+        self._seconds: dict[str, dict[str, dict[str | None, float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
+
+    def add(self, resource: str, owner: str, at: str | None, seconds: float) -> None:
+        if seconds > 0:
+            self._seconds[resource][owner][at] += seconds
+
+    def by_endpoint(self, resource: str) -> list[EndpointUsage]:
+        """Quién ocupa el recurso, de más a menos. Las fracciones suman 1 (salvo redondeo)."""
+        owners = self._seconds.get(resource, {})
+        total = sum(sum(lines.values()) for lines in owners.values())
+        if total <= 0:
+            return []
+        usage = [
+            EndpointUsage(
+                endpoint=owner,
+                share=round(sum(lines.values()) / total, 4),
+                refs=[at for at, _ in sorted(lines.items(), key=lambda kv: -kv[1]) if at],
+            )
+            for owner, lines in owners.items()
+        ]
+        return sorted(usage, key=lambda u: (-u.share, u.endpoint))
+
+    def by_line(self, resource: str) -> list[LineUsage]:
+        """Qué líneas ocupan el recurso, sumando endpoints, de más a menos.
+
+        La fracción es sobre el tiempo total ocupado, así que el tiempo sin línea (``at=None``) cuenta
+        en el total pero no aparece como línea: las fracciones suman 1 solo si todo tiene línea.
+        """
+        owners = self._seconds.get(resource, {})
+        total = sum(sum(lines.values()) for lines in owners.values())
+        if total <= 0:
+            return []
+        per_line: dict[str, dict[str, float]] = defaultdict(dict)
+        for owner, lines in owners.items():
+            for at, seconds in lines.items():
+                if at:
+                    per_line[at][owner] = seconds
+        usage = [
+            LineUsage(
+                at=at,
+                share=round(sum(by_owner.values()) / total, 4),
+                endpoints=[o for o, _ in sorted(by_owner.items(), key=lambda kv: -kv[1])],
+            )
+            for at, by_owner in per_line.items()
+        ]
+        return sorted(usage, key=lambda u: (-u.share, u.at))
