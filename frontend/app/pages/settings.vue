@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowLeft, ExternalLink, Lock, RefreshCw } from "@lucide/vue";
+import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +13,8 @@ definePageMeta({ middleware: "supabase-session" });
 useSeoMeta({ title: "Configuración · Branchpoint" });
 
 const github = useGithubConnection();
+const cli = useCliConnections();
+const isMock = !useRuntimeConfig().public.apiBase.trim();
 const connected = computed(() => github.installations.value.length > 0);
 const accounts = computed(() =>
   github.installations.value.map((item) => item.account_login).join(", "),
@@ -35,7 +39,13 @@ const accounts = computed(() =>
       <section aria-labelledby="github-title" class="flex flex-col gap-4">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h2 id="github-title" class="text-base font-semibold">GitHub</h2>
+            <h2
+              id="github-title"
+              class="flex items-center gap-2 text-base font-semibold"
+            >
+              <BrandIcon brand="github" class="size-5" />
+              GitHub
+            </h2>
             <p class="mt-1 text-sm text-muted-foreground">
               Los repos a los que Branchpoint puede acceder, con permiso de solo
               lectura.
@@ -137,6 +147,7 @@ const accounts = computed(() =>
               :variant="github.awaitingGithub.value ? 'outline' : 'default'"
               @click="github.connect()"
             >
+              <BrandIcon brand="github" data-icon="inline-start" />
               {{
                 github.awaitingGithub.value
                   ? "Volver a abrir GitHub"
@@ -164,14 +175,17 @@ const accounts = computed(() =>
 
       <Separator />
 
-      <section aria-labelledby="cli-title" class="flex flex-col gap-2">
-        <div class="flex items-start justify-between gap-4">
+      <section aria-labelledby="cli-title" class="flex flex-col gap-4">
+        <div>
           <h2 id="cli-title" class="text-base font-semibold">CLI local</h2>
-          <Badge variant="outline">Próximamente</Badge>
+          <p class="mt-1 text-sm text-muted-foreground">
+            Activa las CLIs de IA que uses para simular y proponer versiones
+            desde tu terminal, con tu propia suscripción.
+          </p>
         </div>
-        <p class="text-sm text-muted-foreground">
-          Conecta tu CLI de IA para simular y proponer versiones del modelo
-          desde tu terminal.
+        <CliConnectionList :connections="cli" />
+        <p v-if="!isMock" class="text-xs text-muted-foreground">
+          Vista previa: el comando todavía no funciona.
         </p>
       </section>
     </main>

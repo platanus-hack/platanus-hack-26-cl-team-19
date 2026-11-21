@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
-import { ArrowLeft, ArrowRight, Check } from "@lucide/vue";
+import { ArrowRight, Check } from "@lucide/vue";
+import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -36,7 +38,7 @@ onMounted(async () => {
 });
 const step = ref<"github" | "cli">("github");
 const repositoryState = ref<"idle" | "choose" | "added">("idle");
-const demoCliConnected = ref(false);
+const cli = useCliConnections();
 const busy = ref(false);
 const error = ref(false);
 const demoRepo = "fastapi/full-stack-fastapi-template";
@@ -62,7 +64,8 @@ async function addDemoRepository() {
     <AppHeader minimal />
 
     <main
-      class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      class="mx-auto flex w-full flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      :class="step === 'cli' ? 'max-w-3xl' : 'max-w-md'"
     >
       <ol
         aria-label="Configuración"
@@ -95,7 +98,7 @@ async function addDemoRepository() {
           {{
             step === "github"
               ? "Trae el código de una rama para analizar su arquitectura."
-              : "Conecta tu CLI de IA para trabajar sobre el modelo desde tu terminal."
+              : "El agente corre en tu propia CLI, con tu suscripción. Elige una o ambas."
           }}
         </p>
       </div>
@@ -172,7 +175,10 @@ async function addDemoRepository() {
             analizar. Solo pide permiso de lectura.
           </p>
           <div class="flex flex-wrap items-center gap-2">
-            <Button @click="github.connect()">Conectar con GitHub</Button>
+            <Button @click="github.connect()">
+              <BrandIcon brand="github" data-icon="inline-start" />
+              Conectar con GitHub
+            </Button>
             <Button variant="ghost" @click="step = 'cli'"
               >Omitir por ahora</Button
             >
@@ -337,31 +343,15 @@ async function addDemoRepository() {
         </div>
       </div>
 
-      <div v-else class="flex flex-col gap-3">
-        <p v-if="!isMock" class="text-sm text-muted-foreground">
-          La conexión con la CLI está pendiente. Puedes seguir usando el editor.
+      <div v-else class="flex flex-col gap-4">
+        <CliConnectionList :connections="cli" />
+        <p v-if="!isMock" class="text-xs text-muted-foreground">
+          Vista previa: el comando todavía no funciona. Puedes seguir y usar el
+          editor sin CLI.
         </p>
-        <Button
-          v-else-if="!demoCliConnected"
-          variant="outline"
-          class="w-fit"
-          @click="demoCliConnected = true"
-        >
-          Simular conexión
-        </Button>
-        <p v-else role="status" class="flex items-center gap-2 text-sm">
-          <Check class="size-4 shrink-0" aria-hidden="true" />
-          Conexión de demo verificada.
-        </p>
-        <div class="flex flex-wrap items-center gap-2">
-          <Button @click="completeOnboarding">
-            Ir a Mis proyectos
-            <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Button>
-          <Button variant="ghost" @click="step = 'github'">
-            <ArrowLeft data-icon="inline-start" aria-hidden="true" />
-            Volver
-          </Button>
+        <div class="mt-2 flex flex-wrap items-center justify-end gap-4">
+          <Button variant="ghost" @click="step = 'github'"> Volver </Button>
+          <Button @click="completeOnboarding"> Ir a Mis proyectos </Button>
         </div>
       </div>
     </main>

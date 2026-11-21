@@ -2,6 +2,7 @@
 import { Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
+import EditorCliPanel from "@/components/editor/EditorCliPanel.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
@@ -12,7 +13,7 @@ import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
-import type { EditorSection } from "@/components/editor/types";
+import type { ChatMessage, EditorSection } from "@/components/editor/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -184,6 +185,82 @@ async function createExample(sample: string) {
 function changeView(value: unknown) {
   if (value === "compare") showCompare();
   else if (value === "editor") view.value = "editor";
+}
+
+// Agente en la CLI del usuario (JAJ-81). El panel muestra si hay una CLI conectada; la
+// «Simulación de prueba» es local (testSimulation) y no pasa por el MCP.
+const cli = useCliConnections();
+const activity = ref<ChatMessage[]>([]);
+const testing = ref(false);
+const agentPrompt = computed(() => {
+  const label =
+    scenarios.value.find((entry) => entry.id === scenario.value)?.label ??
+    scenarios.value[0]?.label ??
+    "el escenario principal";
+  return `Usa branchpoint para simular ${label} en ${project.value?.name ?? "este proyecto"} y propón un cambio.`;
+});
+
+function updateTool(
+  id: string,
+  patch: Partial<Extract<ChatMessage, { role: "tool" }>>,
+) {
+  activity.value = activity.value.map((message) =>
+    message.id === id && message.role === "tool"
+      ? { ...message, ...patch }
+      : message,
+  );
+}
+
+// Simulación local para ver cómo se ve una corrida en el panel. No la pide la CLI: en modo MCP la
+// conversación ocurre en la terminal y al editor solo llegan las versiones que proponga (ADR 0001).
+async function testSimulation() {
+  if (testing.value) return;
+  testing.value = true;
+  const id = `${Date.now()}-simulate`;
+  try {
+    if (!scenario.value) {
+      activity.value = [
+        ...activity.value,
+        {
+          id,
+          role: "tool",
+          name: "simulate",
+          input: "",
+          status: "error",
+          output: "Elige un escenario para simular.",
+        },
+      ];
+      return;
+    }
+    activity.value = [
+      ...activity.value,
+      {
+        id,
+        role: "tool",
+        name: "simulate",
+        input: `scenario="${scenario.value}"`,
+        status: "running",
+      },
+    ];
+    const before = run.value;
+    await simulate();
+    // si la corrida no cambió, la simulación falló: no se reportan datos viejos
+    const result = run.value !== before ? run.value : null;
+    const bottleneck = result ? toBottleneck(result) : null;
+    updateTool(id, {
+      status: result ? "done" : "error",
+      output: result
+        ? (bottleneck?.title ?? "Sin cuello de botella")
+        : "La simulación falló.",
+      detail: result
+        ? `${bottleneck?.description ?? ""} Fuente: ${provenance.source}.`.trim()
+        : undefined,
+    });
+  } catch {
+    updateTool(id, { status: "error", output: "La simulación falló." });
+  } finally {
+    testing.value = false;
+  }
 }
 
 async function saveVersion() {
@@ -422,6 +499,17 @@ async function saveVersion() {
         @click="openVersion(version?.number ?? 1)"
         >Volver a cargar diagrama</Button
       >
+    </template>
+
+    <template v-if="project" #agent>
+      <EditorCliPanel
+        :connections="cli"
+        :activity="activity"
+        :prompt="agentPrompt"
+        :testing="testing"
+        @test="testSimulation"
+        @clear="activity = []"
+      />
     </template>
 
     <template #metrics>

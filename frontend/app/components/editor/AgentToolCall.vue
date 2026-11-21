@@ -21,7 +21,8 @@ defineProps<{
       />
       <span
         v-else
-        class="mt-1 size-1.5 shrink-0 rounded-full bg-foreground"
+        class="mt-1 size-1.5 shrink-0 rounded-full"
+        :class="status === 'error' ? 'bg-destructive' : 'bg-foreground'"
         aria-hidden="true"
       />
       <span class="min-w-0 break-words">
@@ -31,7 +32,11 @@ defineProps<{
         >
       </span>
       <span class="sr-only">{{
-        status === "running" ? "En curso" : "Completada"
+        status === "running"
+          ? "En curso"
+          : status === "error"
+            ? "Falló"
+            : "Completada"
       }}</span>
     </p>
     <details v-if="output" class="group ps-3.5">
