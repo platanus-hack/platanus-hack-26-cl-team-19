@@ -99,6 +99,9 @@ class ApiDeployment:
     workers: int
     threads_per_worker: int
     latency_ms: float
+    # cuántas veces más lento es 1 vCPU del plan que el núcleo de calibración (JAJ-46); 1 = sin ajuste
+    core_factor: float = 1.0
+    processor: str | None = None
 
     @property
     def cores(self) -> float:
@@ -117,6 +120,11 @@ class DbDeployment:
     max_connections: int | None
     pool_per_worker: int  # pool_size + max_overflow de cada worker
     pool_timeout_s: float | None
+    core_factor: float = 1.0  # como en ApiDeployment: multiplica el tiempo de cada consulta
+    processor: str | None = None
+    plan: str | None = None
+    # instancias con créditos de CPU (db.t4g.*): vCPU que aguanta con carga sostenida
+    sustained_vcpu: float | None = None
     # con pooler (``deployment.db.pooler``), conexiones de clientes que acepta; None = sin pooler
     pooler_connections: int | None = None
 
@@ -164,6 +172,8 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         workers=int(value(api_raw["workers"], 1)),
         threads_per_worker=int(value(api_raw.get("threads_per_worker"), 40)),
         latency_ms=float(value(api_raw.get("latency_ms"), 0.0)),
+        core_factor=_core_factor(api_raw, "deployment.api"),
+        processor=_processor(api_raw),
     )
     pool = db_raw.get("pool_per_worker", {})
     db = DbDeployment(
@@ -171,8 +181,16 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         max_connections=_opt_int(value(db_raw.get("max_connections"))),
         pool_per_worker=int(value(pool.get("pool_size"), 5)) + int(value(pool.get("max_overflow"), 0)),
         pool_timeout_s=_opt_float(value(pool.get("pool_timeout_s"))),
+        core_factor=_core_factor(db_raw, "deployment.db"),
+        processor=_processor(db_raw),
+        plan=db_raw.get("plan"),
+        sustained_vcpu=_opt_float(value(db_raw.get("cpu_credits", {}).get("sustained_vcpu"))),
         pooler_connections=_opt_int(value(db_raw["pooler"].get("client_connections"))) if "pooler" in db_raw else None,
     )
+    if db.sustained_vcpu is not None and not 0 < db.sustained_vcpu <= db.vcpu:
+        raise ValueError(
+            f"deployment.db.cpu_credits.sustained_vcpu debe estar entre 0 y los vCPU ({db.vcpu}); es {db.sustained_vcpu}"
+        )
     if "pooler" in db_raw and db.pooler_connections is None:
         raise ValueError("deployment.db.pooler necesita client_connections (conexiones de clientes que acepta)")
 
@@ -273,6 +291,21 @@ def _load_endpoint(e: dict[str, Any], queues: dict[str, QueueDeployment], warnin
         base_cpu_ms=base_cpu,
         steps=tuple(steps),
     )
+
+
+def _core_factor(raw: dict[str, Any], where: str) -> float:
+    """``cpu_core_factor`` del modelo (JAJ-47). Sin él, los tiempos se usan tal cual (factor 1)."""
+    factor = _opt_float(value(raw.get("cpu_core_factor")))
+    if factor is None:
+        return 1.0
+    if factor <= 0:
+        raise ValueError(f"{where}.cpu_core_factor debe ser mayor que 0 (es {factor})")
+    return factor
+
+
+def _processor(raw: dict[str, Any]) -> str | None:
+    f = raw.get("cpu_core_factor")
+    return f.get("processor") if isinstance(f, dict) else None
 
 
 def _opt_int(x: Any) -> int | None:

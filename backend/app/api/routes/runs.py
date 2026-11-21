@@ -56,6 +56,7 @@ def run_model(raw: dict, req: RunParams) -> Run:
             arrivals=req.arrivals,
             client_timeout_s=req.client_timeout_s,
             cache_hit_ratio=req.cache_hit_ratio,
+            cpu_credits=req.cpu_credits,
         )
     except ValueError as e:  # ej. un escenario con 0 req/s o vCPU en 0
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from e

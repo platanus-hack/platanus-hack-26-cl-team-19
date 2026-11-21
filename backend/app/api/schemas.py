@@ -34,6 +34,13 @@ class RunParams(BaseModel):
     cache_hit_ratio: float | None = Field(
         None, ge=0, le=1, description="Reemplaza la tasa de aciertos de todas las cachés con on_miss."
     )
+    cpu_credits: Literal["sustained", "burst"] = Field(
+        "sustained",
+        description=(
+            "DB con créditos de CPU (db.t4g.*): sustained simula sus vCPU sostenidos (la base de créditos con "
+            "carga sostenida); burst, todos sus vCPU (solo mientras duren los créditos o pagando el exceso)."
+        ),
+    )
 
 
 class RunRequest(RunParams):
