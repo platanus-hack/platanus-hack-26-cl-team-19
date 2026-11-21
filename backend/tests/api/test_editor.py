@@ -6,15 +6,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
+from app.api.store import InMemoryProjectStore
 from app.samples import load_sample, sample_ids
 
 SAMPLE = "full-stack-fastapi-template"
 RUN = {"scenario": "cyberday", "seed": 1, "duration_s": 10}
 
 
-@pytest.fixture
-def client():
-    return TestClient(create_app(cors_origins=["http://localhost:3000"]))
+@pytest.fixture(params=["memoria", "postgres"])
+def client(request):
+    # las mismas rutas contra las dos implementaciones de ProjectStore
+    if request.param == "memoria":
+        store = InMemoryProjectStore()
+    else:
+        store = request.getfixturevalue("clean_pg_store")
+    return TestClient(create_app(cors_origins=["http://localhost:3000"], store=store))
 
 
 @pytest.fixture

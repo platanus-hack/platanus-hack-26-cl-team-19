@@ -52,8 +52,8 @@ def _project(store: ProjectStore, project_id: str) -> Project:
     return project
 
 
-def _version(project: Project, number: int) -> Version:
-    version = project.version(number)
+def _version(store: ProjectStore, project: Project, number: int) -> Version:
+    version = store.get_version(project.id, number)
     if version is None:
         raise ApiError(
             404,
@@ -94,7 +94,7 @@ def create_version(
 ) -> VersionDetail:
     project = _project(store, project_id)
     parent = req.parent if req.parent is not None else len(project.versions)
-    _version(project, parent)
+    _version(store, project, parent)
     load_or_422(req.model)
     version = store.add_version(project_id, req.model, req.origin, parent, req.note)
     return VersionDetail(**_summary(version).model_dump(), model=version.model)
@@ -109,7 +109,7 @@ def create_version(
 def apply_version_ops(
     project_id: str, number: int, req: ApplyOpsRequest, store: ProjectStore = Depends(get_store)
 ) -> OpsVersionDetail:
-    base = _version(_project(store, project_id), number)
+    base = _version(store, _project(store, project_id), number)
     try:
         result = apply_ops(base.model, req.ops)
     except OpError as e:
@@ -123,13 +123,13 @@ def apply_version_ops(
 
 @router.get("/{project_id}/versions/{number}", response_model=VersionDetail, summary="Una versión con su modelo")
 def get_version(project_id: str, number: int, store: ProjectStore = Depends(get_store)) -> VersionDetail:
-    version = _version(_project(store, project_id), number)
+    version = _version(store, _project(store, project_id), number)
     return VersionDetail(**_summary(version).model_dump(), model=version.model)
 
 
 @router.post("/{project_id}/versions/{number}/runs", response_model=Run, summary="Simular una versión")
 def run_version(project_id: str, number: int, req: RunParams, store: ProjectStore = Depends(get_store)) -> Run:
-    return run_model(_version(_project(store, project_id), number).model, req)
+    return run_model(_version(store, _project(store, project_id), number).model, req)
 
 
 @router.post(
@@ -139,7 +139,7 @@ def run_version(project_id: str, number: int, req: RunParams, store: ProjectStor
 )
 def compare(project_id: str, req: CompareRequest, store: ProjectStore = Depends(get_store)) -> CompareResponse:
     project = _project(store, project_id)
-    va, vb = _version(project, req.a), _version(project, req.b)
+    va, vb = _version(store, project, req.a), _version(store, project, req.b)
     params = RunParams(**req.model_dump(exclude={"a", "b", "region"}))
     run_a, run_b = run_model(va.model, params), run_model(vb.model, params)
     cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
@@ -189,4 +189,4 @@ def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb:
 def version_costs(
     project_id: str, number: int, region: Region = "us-east-1", store: ProjectStore = Depends(get_store)
 ) -> CostEstimate:
-    return estimate_cost(_version(_project(store, project_id), number).model, region)
+    return estimate_cost(_version(store, _project(store, project_id), number).model, region)

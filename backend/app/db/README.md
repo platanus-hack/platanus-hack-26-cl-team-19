@@ -89,25 +89,26 @@ erDiagram
 
 ## Mapeo de `ProjectStore` (JAJ-52) a las tablas
 
-`ProjectStore` está en `app/api/store.py`. Cada método corre en una transacción.
+`ProjectStore` está en `app/api/store.py` y su implementación sobre Postgres en [`postgres_store.py`](postgres_store.py). Cada método corre en una transacción.
 
 | Método | SQL |
 | -- | -- |
-| `create(name, model, sample)` | `insert into projects (name, sample_id, version_count) values (…, 1) returning id`; `insert into model_versions (project_id, number, origin, note, model) values (id, 1, 'repo', 'Extraída del repo', model)`; `insert into scenarios` con `pico_normal` ×1 y `cyberday` ×20. |
+| `create(name, model, sample)` | `insert into projects (name, sample_id, version_count) values (…, 1) returning id`; `insert into model_versions (project_id, number, origin, note, model) values (id, 1, 'repo', 'Extraída del repo', model)`; `insert into scenarios` con los escenarios de `traffic.scenarios` del modelo (`pico_normal` ×1 y `cyberday` ×20), guardando el multiplicador. |
 | `get(project_id)` | `select … from projects where id = $1`; `select number, origin, parent_number, note, created_at from model_versions where project_id = $1 order by number` (sin la columna `model`). |
+| `get_version(project_id, number)` | `select number, origin, parent_number, note, created_at, model from model_versions where project_id = $1 and number = $2`. |
 | `list()` | `select … from projects where owner_id = $user order by created_at desc` (sin login: `owner_id is null`). |
 | `add_version(project_id, model, origin, parent, note)` | `update projects set version_count = version_count + 1, updated_at = now() where id = $1 returning version_count` → `n`; `insert into model_versions (project_id, number, parent_number, origin, note, model) values ($1, n, parent, origin, note, model)`. La FK compuesta rechaza una antecesora que no existe. |
 
-### Cambios a la interfaz para JAJ-56
+Los ids de proyecto son `uuid`. Un id que no lo es (por ejemplo `nope`) da `None`, y la ruta responde 404.
 
-Con la versión en memoria no importaban. Con Postgres sí:
+### Cambios a la interfaz
 
-- **`get` no debe traer los modelos.** Hoy `Project.versions` incluye cada `model` (unos 100 KB por versión). Conviene que `get` devuelva solo resúmenes y agregar `get_version(project_id, number) -> Version | None`, que lee una fila con su `model`. Las rutas `GET /projects/{id}` y `GET /projects/{id}/versions/{n}` ya separan esas dos cosas.
-- **Guardar runs:**
+- **Hecho: `get` no trae los modelos.** `Project.versions` trae solo resúmenes (`model` es `None`) y `get_version(project_id, number)` lee una fila con su `model`, que pesa unos 100 KB.
+- **Pendiente: guardar runs.**
   - `find_run(cache_key)` y `save_run(...)`.
   - `POST /projects/{id}/versions/{n}/runs` y `POST /projects/{id}/compare` buscan primero por `cache_key` y simulan solo si no está.
   - Comparar no se guarda: es la diferencia entre dos runs guardados.
-- **Escenarios:** `list_scenarios(project_id)` y `upsert_scenario(...)`. Hoy los escenarios salen de `traffic.scenarios` del modelo.
+- **Pendiente: escenarios.** `create` ya los carga, pero las rutas todavía los leen de `traffic.scenarios` del modelo. Falta `list_scenarios(project_id)` y `upsert_scenario(...)`. Hoy los escenarios salen de `traffic.scenarios` del modelo.
 
 ## Depende de otras investigaciones
 
@@ -117,6 +118,5 @@ Con la versión en memoria no importaban. Con Postgres sí:
 
 ## Fuera de alcance
 
-- Migraciones, proyecto de Supabase y la implementación de `ProjectStore` sobre Postgres (JAJ-56).
 - Auth con GitHub (JAJ-57) y Storage del `.zip` (JAJ-58).
 - Feature Studio. Sus alternativas son propuestas del agente: viven en `chat_messages.content` hasta que se aplican como versión.

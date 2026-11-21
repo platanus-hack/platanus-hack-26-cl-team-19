@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - "backend/**"
+      - "supabase/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - "backend/**"
+      - "supabase/**"
       - ".github/workflows/backend-ci.yml"
 
 permissions:
@@ -44,6 +46,20 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      # Postgres de Supabase con las migraciones de supabase/, para los tests de ProjectStore (JAJ-56)
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Start Supabase Postgres
+        working-directory: .
+        run: |
+          npm ci
+          npx supabase db start
+
       - name: Lint
         run: ruff check --output-format=github .
 
@@ -52,6 +68,5 @@ jobs:
 
       - name: Test
         run: python -m pytest -q
-
-      # Cuando exista Supabase (JAJ-56), este job levanta Postgres como service container
-      # (o `supabase start`) para los tests de persistencia.
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres

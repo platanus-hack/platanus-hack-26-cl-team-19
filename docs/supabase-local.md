@@ -45,6 +45,22 @@ npx supabase status -o env
 
 Las keys locales son de desarrollo y son iguales en todas las máquinas, pero igual `backend/.env` no se commitea.
 
+Con eso, la API guarda los proyectos en el Supabase local. Desde `backend/`:
+
+```bash
+uvicorn app.api.main:app --reload --env-file .env
+```
+
+Sin `--env-file` (o sin `DATABASE_URL`), la API guarda los proyectos en memoria y se pierden al reiniciarla.
+
+Para correr también los tests de Postgres, desde `backend/`:
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres python -m pytest -q
+```
+
+Esos tests vacían las tablas, así que solo aceptan una base local. Sin `TEST_DATABASE_URL` se saltan. En el CI corren siempre, con `npx supabase db start`.
+
 ## Día a día
 
 | Para | Comando |
