@@ -17,6 +17,37 @@ pnpm dev
 
 La aplicación queda disponible en `http://localhost:3000`.
 
+## Probar el editor
+
+Desde la home, pulsa **Abrir editor**. Con `pnpm dev` el editor funciona con
+datos de demostración. Para conectar FastAPI, arranca los dos procesos desde la
+raíz del repo, en terminales separadas.
+
+```bash
+cd backend
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m uvicorn app.api.main:app --port 8000
+```
+
+```bash
+cd frontend
+NUXT_PUBLIC_API_BASE=http://127.0.0.1:8000 pnpm dev
+```
+
+1. En [el editor](http://localhost:3000/editor), abre
+   `full-stack-fastapi-template`. FastAPI entrega el modelo de ese repo y crea
+   un proyecto con v1. Puedes probarlo sin conectar GitHub ni Supabase.
+2. En **Escenarios**, elige **CyberDay** y pulsa **Simular**. Revisa la serie por
+   segundo y el cuello de botella. En **Costos** puedes pedir el costo mensual.
+3. En **Versiones**, cambia **Réplicas de la API** de 1 a 3 y pulsa
+   **Guardar versión**. En **Comparar**, ejecuta la comparación entre v1 y v2.
+
+FastAPI guarda los proyectos en memoria por defecto. Para persistirlos en Postgres,
+configura `DATABASE_URL` según la [guía de Supabase](../docs/supabase-local.md).
+Si usas otro puerto para Nuxt, agrega su origen a `BRANCHPOINT_CORS_ORIGINS`
+al iniciar el backend.
+
 ## Sistema de diseño
 
 Abre [`/design`](http://localhost:3000/design) para revisar los tokens en tema

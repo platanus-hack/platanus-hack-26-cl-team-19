@@ -143,6 +143,7 @@ export interface CompareRow {
   label: string;
   unit: string;
   format?: "number" | "currency";
+  deltaUnit?: string;
   /** Palabras para la diferencia; por defecto «mejor» y «peor». */
   verdict?: { lower: string; higher: string };
   base: RunMetric;
@@ -170,15 +171,19 @@ export interface NodeFrame {
   utilization: number;
 }
 
-export interface SimulationFrame {
-  /** Minuto simulado. */
-  minute: number;
+export interface SimulationSample {
   incoming: number;
   successful: number;
   /** `null` cuando la carga está tan cerca del límite que el p95 no es fiable. */
   p95: number | null;
-  failureRate: number;
+  failureRate: number | null;
   queue: number;
+}
+
+export interface SimulationFrame extends SimulationSample {
+  /** Minuto simulado. */
+  minute: number;
+  failureRate: number;
   nodes: Record<string, NodeFrame>;
 }
 

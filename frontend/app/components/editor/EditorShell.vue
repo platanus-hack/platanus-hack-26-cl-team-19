@@ -30,7 +30,7 @@ withDefaults(
       <header
         class="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3"
       >
-        <SidebarTrigger />
+        <SidebarTrigger v-if="$slots.sidebar" />
         <h1 class="flex min-w-0 items-center gap-1.5 text-sm">
           <span v-if="repositoryName" class="truncate text-muted-foreground">{{
             repositoryName
@@ -53,13 +53,19 @@ withDefaults(
         >
         <slot name="actions" />
       </header>
+      <slot name="status" />
 
       <div v-if="$slots.view" class="min-h-0 flex-1 overflow-y-auto">
         <slot name="view" />
       </div>
       <div
         v-else
-        class="grid min-h-0 flex-1 overflow-y-auto @3xl:grid-cols-[3rem_14rem_minmax(0,1fr)_18rem] @3xl:overflow-hidden @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)_22rem]"
+        class="grid min-h-0 flex-1 overflow-y-auto @3xl:overflow-hidden"
+        :class="
+          $slots.agent
+            ? '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)_18rem] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)_22rem]'
+            : '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)]'
+        "
       >
         <div class="border-b border-border p-1.5 @3xl:border-r @3xl:border-b-0">
           <slot name="toolbar" />

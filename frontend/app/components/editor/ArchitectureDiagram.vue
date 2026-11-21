@@ -20,6 +20,7 @@ const props = defineProps<{
   edges: DiagramEdge[];
   selectedId?: string | null;
   bottleneck?: Bottleneck | null;
+  canExplain?: boolean;
 }>();
 
 const emit = defineEmits<{ select: [id: string | null]; explain: [] }>();
@@ -339,6 +340,7 @@ const alertOf = (status?: SaturationStatus) =>
           >{{ bottleneck.source.path }}:{{ bottleneck.source.line }}</code
         >
         <Button
+          v-if="canExplain"
           type="button"
           size="xs"
           variant="outline"
