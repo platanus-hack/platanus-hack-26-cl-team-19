@@ -33,7 +33,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
-  agentSuggestions,
+  chatPreview,
   changesBetween,
   replyTo,
   repositories,
@@ -78,7 +78,9 @@ const scenarioId = ref(
     : "pico",
 );
 const selectedNode = ref<string | null>("orders");
-const conversations = ref<Record<string, ChatMessage[]>>({});
+const conversations = ref<Record<string, ChatMessage[]>>({
+  "tienda-api": chatPreview.map((message) => ({ ...message })),
+});
 const thinking = ref(false);
 const sampleProposals = new Map<string, SampleProposal>();
 const appliedByRepository = ref<Record<string, SampleProposal[]>>({});
@@ -456,7 +458,6 @@ function reset() {
       <EditorAgentPanel
         :messages="messages"
         :thinking="thinking"
-        :suggestions="agentSuggestions"
         :next-version="nextVersion"
         :context="selectedName"
         @send="send"

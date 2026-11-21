@@ -32,6 +32,59 @@ const COLUMN_GAP = 104;
 const ROW_GAP = 16;
 const BEND = 20;
 const PADDING = 24;
+const LABEL_LINE_LIMIT = 24;
+const LABEL_LINE_HEIGHT = 13;
+const LABEL_STACK_GAP = 4;
+const LABEL_EDGE_GAP = 7;
+const LABEL_SIDE_GAP = 6;
+
+function wrapLabel(text: string): string[] {
+  const lines: string[] = [];
+  let remaining = text;
+  while (remaining.length > LABEL_LINE_LIMIT) {
+    const prefix = remaining.slice(0, LABEL_LINE_LIMIT + 1);
+    const boundary = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf(" "));
+    const end = boundary >= LABEL_LINE_LIMIT / 2 ? boundary : LABEL_LINE_LIMIT;
+    lines.push(remaining.slice(0, end));
+    remaining = remaining.slice(end).trimStart();
+  }
+  if (remaining) lines.push(remaining);
+  return lines;
+}
+
+const labelsByTarget = computed(() => {
+  const labels = new Map<string, { text: string; lines: string[] }[]>();
+  const nodeIds = new Set(props.nodes.map((node) => node.id));
+  for (const edge of props.edges) {
+    const text = edge.label?.trim();
+    if (!text || !nodeIds.has(edge.from)) continue;
+    const label = { text, lines: wrapLabel(text) };
+    const incoming = labels.get(edge.to);
+    if (incoming) incoming.push(label);
+    else labels.set(edge.to, [label]);
+  }
+  return labels;
+});
+
+function diagramRow(node: DiagramNode) {
+  const labels = labelsByTarget.value.get(node.id) ?? [];
+  const labelHeight = labels.reduce(
+    (height, label) => height + label.lines.length * LABEL_LINE_HEIGHT,
+    Math.max(0, labels.length - 1) * LABEL_STACK_GAP,
+  );
+  const inset = Math.max(0, labelHeight + LABEL_EDGE_GAP - NODE_HEIGHT / 2);
+  return { node, labels, inset, height: NODE_HEIGHT + inset };
+}
+
+function columnGap(rows: ReturnType<typeof diagramRow>[]): number {
+  const lines = rows.flatMap((row) =>
+    row.labels.flatMap((label) => label.lines),
+  );
+  const longestLine = Math.max(0, ...lines.map((line) => line.length));
+  // A 10 px monospace glyph is about 6 px wide. Allow room for the label padding.
+  const labelWidth = Math.ceil(longestLine * 6.25) + 8;
+  return Math.max(COLUMN_GAP, BEND + LABEL_SIDE_GAP * 2 + labelWidth);
+}
 
 /** Columna = camino más largo desde una entrada (el grafo es acíclico). */
 const layout = computed(() => {
@@ -55,29 +108,46 @@ const layout = computed(() => {
     const layer = layers.get(node.id) ?? 0;
     (columns[layer] ??= []).push(node);
   }
-  const columnHeight = (count: number) =>
-    count * NODE_HEIGHT + Math.max(0, count - 1) * ROW_GAP;
-  const height = Math.max(
-    ...columns.map((column) => columnHeight(column.length)),
-    0,
+  const rowsByColumn = Array.from(columns, (column) =>
+    (column ?? []).map(diagramRow),
   );
+  const columnHeights = rowsByColumn.map((rows) =>
+    rows.reduce(
+      (sum, row) => sum + row.height,
+      Math.max(0, rows.length - 1) * ROW_GAP,
+    ),
+  );
+  const height = Math.max(0, ...columnHeights);
 
   const positions = new Map<string, { x: number; y: number }>();
-  columns.forEach((column, layer) => {
-    const top = (height - columnHeight(column.length)) / 2;
-    column.forEach((node, row) => {
-      positions.set(node.id, {
-        x: PADDING + layer * (NODE_WIDTH + COLUMN_GAP),
-        y: PADDING + top + row * (NODE_HEIGHT + ROW_GAP),
-      });
-    });
-  });
+  const labelGroups = [];
+  let x = PADDING;
+  for (const [layer, rows] of rowsByColumn.entries()) {
+    const gap = layer === 0 ? 0 : columnGap(rows);
+    x += gap;
+    let y = PADDING + (height - (columnHeights[layer] ?? 0)) / 2;
+    for (const row of rows) {
+      const nodeY = y + row.inset;
+      positions.set(row.node.id, { x, y: nodeY });
+      if (gap > 0 && row.labels.length) {
+        const width = gap - BEND - LABEL_SIDE_GAP * 2;
+        labelGroups.push({
+          id: row.node.id,
+          labels: row.labels,
+          left: x - LABEL_SIDE_GAP - width,
+          bottom: nodeY + NODE_HEIGHT / 2 - LABEL_EDGE_GAP,
+          width,
+        });
+      }
+      y += row.height + ROW_GAP;
+    }
+    x += NODE_WIDTH;
+  }
 
-  const width =
-    columns.length * NODE_WIDTH + Math.max(0, columns.length - 1) * COLUMN_GAP;
   return {
     positions,
-    width: width + PADDING * 2,
+    labelGroups,
+    width: x + PADDING,
     height: height + PADDING * 2,
   };
 });
@@ -111,8 +181,6 @@ const paths = computed(() =>
         d,
         start: { x: x1, y: y1 },
         end: { x: x2, y: y2 },
-        label: edge.label,
-        labelX: direction === 0 ? (x1 + x2) / 2 : bend + (x2 - bend) / 2,
       },
     ];
   }),
@@ -208,11 +276,11 @@ const alertOf = (status?: SaturationStatus) =>
 
     <div
       ref="viewport"
-      class="flex min-h-0 flex-1 items-center justify-center overflow-auto"
+      class="flex min-h-0 flex-1 overflow-auto"
       @click.self="emit('select', null)"
     >
       <div
-        class="shrink-0"
+        class="m-auto shrink-0 overflow-hidden"
         :style="{
           width: `${layout.width * scale}px`,
           height: `${layout.height * scale}px`,
@@ -251,17 +319,29 @@ const alertOf = (status?: SaturationStatus) =>
                 r="3"
                 class="fill-muted-foreground"
               />
-              <text
-                v-if="path.label"
-                :x="path.labelX"
-                :y="path.end.y - 7"
-                text-anchor="middle"
-                class="fill-muted-foreground font-mono text-[0.625rem]"
-              >
-                {{ path.label }}
-              </text>
             </g>
           </svg>
+
+          <div
+            v-for="group in layout.labelGroups"
+            :key="group.id"
+            class="absolute flex -translate-y-full flex-col items-center text-center"
+            :style="{
+              left: `${group.left}px`,
+              top: `${group.bottom}px`,
+              width: `${group.width}px`,
+              gap: `${LABEL_STACK_GAP}px`,
+            }"
+          >
+            <code
+              v-for="(label, index) in group.labels"
+              :key="index"
+              :title="label.text"
+              class="rounded-sm bg-background px-1 font-mono text-[10px] whitespace-pre text-muted-foreground"
+              :style="{ lineHeight: `${LABEL_LINE_HEIGHT}px` }"
+              >{{ label.lines.join("\n") }}</code
+            >
+          </div>
 
           <ul aria-label="Diagrama de arquitectura">
             <li

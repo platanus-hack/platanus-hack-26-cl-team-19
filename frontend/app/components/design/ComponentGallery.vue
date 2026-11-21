@@ -49,7 +49,6 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import CodeReference from "./CodeReference.vue";
 import {
-  agentSuggestions,
   changesBetween,
   graphEdges,
   graphs,
@@ -642,10 +641,9 @@ const primitiveScenario = ref<string>();
             <EditorAgentPanel
               :messages="agentEmpty ? [] : agentMessages"
               :thinking="agentThinking"
-              :suggestions="agentSuggestions"
               next-version="v4"
-              @send="agentEmpty = false"
               context="Pedidos"
+              @send="agentEmpty = false"
               @apply="agentState = 'pending'"
               @discard="agentState = 'discarded'"
               @reset="agentEmpty = true"
