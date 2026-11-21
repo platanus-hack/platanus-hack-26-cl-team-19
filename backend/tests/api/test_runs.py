@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
+from app.api.store import InMemoryProjectStore
 from app.engine import simulate
 from app.models import load_model
 
@@ -21,7 +22,7 @@ def raw():
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(create_app(cors_origins=["http://localhost:3000"]))
+    return TestClient(create_app(cors_origins=["http://localhost:3000"], store=InMemoryProjectStore()))
 
 
 def without_timing(d):

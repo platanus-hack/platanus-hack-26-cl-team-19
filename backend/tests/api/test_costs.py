@@ -4,12 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
+from app.api.store import InMemoryProjectStore
 from app.samples import load_sample
 
 
 @pytest.fixture
 def client():
-    return TestClient(create_app(cors_origins=["http://localhost:3000"]))
+    return TestClient(create_app(cors_origins=["http://localhost:3000"], store=InMemoryProjectStore()))
 
 
 def test_post_costs(client):

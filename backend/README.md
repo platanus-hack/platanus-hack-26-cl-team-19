@@ -13,6 +13,7 @@ backend/
 │   │   ├── schemas.py       #   lo que recibe y devuelve cada ruta
 │   │   ├── errors.py        #   formato de los errores ({"error": {"code", "message"}})
 │   │   ├── store.py         #   interfaz ProjectStore y su versión en memoria
+│   │   ├── run_cache.py     #   runs guardados por cache_key (JAJ-75)
 │   │   └── routes/          #   rutas por tema: health, runs, models, projects
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
@@ -227,13 +228,20 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos). |
 | `POST` | `/projects/{id}/versions` | Guarda `{"model", "origin", "parent", "note"}` como versión nueva. `origin`: `repo`, `manual` (por defecto) o `agente`; `parent`: por defecto, la última. |
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
-| `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. |
+| `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. Si ya se simuló con los mismos parámetros, devuelve el run guardado (ver "Runs guardados" abajo). |
 | `POST` | `/projects/{id}/versions/{n}/ops` | Aplica `{"ops": [...], "note"}` a la versión `n` y guarda el resultado como versión nueva (`origin: agente`, antecesora `n`). Devuelve la versión con `changes` (una línea por operación) y `warnings`. Ver "Operaciones" abajo. |
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente), `failure_a` y `failure_b` (ventas en juego por hora, JAJ-74) y `summary`, la comparación en una frase. `region` opcional para los costos. |
 | `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
+
+**Runs guardados (JAJ-75):** `POST /projects/{id}/versions/{n}/runs` y `compare` guardan cada `Run` y, si se pide lo mismo otra vez, devuelven el guardado sin simular. Funciona así porque las versiones no se editan y el motor es determinista con la misma semilla.
+- **La clave** (`cache_key`, en `app/api/run_cache.py`) es el sha256 del proyecto, el número de versión, los `RunParams` (escenario, semilla, duración, tasa, perfil, créditos de CPU…) y `ENGINE_VERSION`.
+- **`ENGINE_VERSION`** es el hash del código de `app/engine` y `app/models`. Si cambia el motor, cambia la clave y los runs viejos dejan de usarse, sin subir ningún número a mano.
+- **El header `X-Branchpoint-Run-Cache`** dice `hit` si el run venía guardado y `miss` si se simuló. En `compare` van los dos, de `a` y de `b` (`hit,miss`). El CORS lo expone, así que el editor lo puede leer.
+- **Dónde quedan:** con Postgres, en la tabla `runs`, con el `Run` completo en `result` y sus métricas en columnas (`p95_ms`, `error_rate`, `throughput_rps`, `bottleneck_resource`), y sobreviven a un reinicio. En memoria, se pierden con el resto.
+- **Qué no se guarda:** una simulación que falla (422) y `POST /runs`, que no tiene versión. La comparación tampoco: es la diferencia entre dos runs guardados, y se recalcula.
 
 ```bash
 # abrir el editor con v1, guardar una v2 y comparar

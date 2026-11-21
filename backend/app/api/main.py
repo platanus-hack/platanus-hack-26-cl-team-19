@@ -24,6 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import install_error_handlers
 from app.api.routes import costs, health, models, projects, runs
+from app.api.run_cache import RUN_CACHE_HEADER
 from app.api.store import InMemoryProjectStore, ProjectStore
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -62,6 +63,7 @@ def create_app(cors_origins: list[str] | None = None, store: ProjectStore | None
         allow_origins=cors_origins,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
+        expose_headers=[RUN_CACHE_HEADER],  # para que el editor sepa si el run venía guardado (JAJ-75)
     )
     install_error_handlers(app)
     app.state.store = store

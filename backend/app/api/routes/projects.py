@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, ApiError
 from app.api.routes.models import sample_or_404
-from app.api.routes.runs import load_or_422, run_model
+from app.api.routes.runs import load_or_422
+from app.api.run_cache import RUN_CACHE_HEADER, cached_run
 from app.api.schemas import (
     ApplyOpsRequest,
     CompareRequest,
@@ -127,9 +128,24 @@ def get_version(project_id: str, number: int, store: ProjectStore = Depends(get_
     return VersionDetail(**_summary(version).model_dump(), model=version.model)
 
 
-@router.post("/{project_id}/versions/{number}/runs", response_model=Run, summary="Simular una versión")
-def run_version(project_id: str, number: int, req: RunParams, store: ProjectStore = Depends(get_store)) -> Run:
-    return run_model(_version(store, _project(store, project_id), number).model, req)
+def _cache_header(response: Response, *hits: bool) -> None:
+    """``X-Branchpoint-Run-Cache``: ``hit`` si el run estaba guardado, ``miss`` si se simuló (JAJ-75).
+    En compare van los dos, de a y de b, separados por coma."""
+    response.headers[RUN_CACHE_HEADER] = ",".join("hit" if hit else "miss" for hit in hits)
+
+
+@router.post(
+    "/{project_id}/versions/{number}/runs",
+    response_model=Run,
+    summary="Simular una versión (o devolver el run guardado con los mismos parámetros)",
+)
+def run_version(
+    project_id: str, number: int, req: RunParams, response: Response, store: ProjectStore = Depends(get_store)
+) -> Run:
+    version = _version(store, _project(store, project_id), number)
+    run, hit = cached_run(store, project_id, number, version.model, req)
+    _cache_header(response, hit)
+    return run
 
 
 @router.post(
@@ -137,11 +153,16 @@ def run_version(project_id: str, number: int, req: RunParams, store: ProjectStor
     response_model=CompareResponse,
     summary="Simular dos versiones con el mismo escenario y semilla y comparar",
 )
-def compare(project_id: str, req: CompareRequest, store: ProjectStore = Depends(get_store)) -> CompareResponse:
+def compare(
+    project_id: str, req: CompareRequest, response: Response, store: ProjectStore = Depends(get_store)
+) -> CompareResponse:
     project = _project(store, project_id)
     va, vb = _version(store, project, req.a), _version(store, project, req.b)
     params = RunParams(**req.model_dump(exclude={"a", "b", "region"}))
-    run_a, run_b = run_model(va.model, params), run_model(vb.model, params)
+    # la comparación no se guarda: es la diferencia entre dos runs, que sí se guardan (JAJ-75)
+    run_a, hit_a = cached_run(store, project_id, va.number, va.model, params)
+    run_b, hit_b = cached_run(store, project_id, vb.number, vb.model, params)
+    _cache_header(response, hit_a, hit_b)
     cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
     delta = cost_delta(cost_a, cost_b)
     fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)  # JAJ-74
