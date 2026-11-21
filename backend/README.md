@@ -347,11 +347,12 @@ El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las 
 1. **MCP en `/mcp` (modo principal).** El loop corre en la CLI de IA del usuario, por ejemplo Claude Code con su suscripción, y el backend solo ejecuta las tools. Branchpoint no ve ninguna credencial de IA.
 
    ```bash
-   claude mcp add --transport http branchpoint http://localhost:8000/mcp --header "Authorization: Bearer <token de sesión de Supabase>"
+   claude mcp add --scope user --transport http branchpoint http://localhost:8000/mcp --header "Authorization: Bearer <token de sesión de Supabase>"
    ```
 
    - **Con login:** el token es el mismo que usa el editor (JAJ-78), y cada usuario ve solo sus proyectos. Sin token, `/mcp` responde 401. El token de larga duración para emparejar la CLI llega con JAJ-81.
    - **Sin login** (`BRANCHPOINT_AUTH=off`): no hace falta el header.
+   - **`--scope user`:** así la tool está en cualquier carpeta. Sin eso, Claude Code la carga solo en la carpeta donde se agregó, y no aparece al abrir el repo que se quiere analizar.
 
 2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`), con un máximo de 8 vueltas por mensaje. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage` y `cost` de la tabla de precios) y `error`.
    - **Credencial del usuario:** su API key en el header `X-Anthropic-Api-Key`. Se usa en esa request y no se guarda.

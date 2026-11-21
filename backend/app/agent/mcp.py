@@ -3,7 +3,7 @@
 El loop con el LLM corre en la CLI del usuario (por ejemplo Claude Code con su suscripción) y el
 backend solo ejecuta las tools de ``app/agent/tools.py``. Se monta en la API en ``/mcp``:
 
-    claude mcp add --transport http branchpoint https://<api>/mcp --header "Authorization: Bearer <token>"
+    claude mcp add --scope user --transport http branchpoint https://<api>/mcp --header "Authorization: Bearer <token>"
 
 **Quién llama.** Con login (``SUPABASE_URL``), cada request trae el token de sesión de Supabase, el
 mismo que usa el editor (JAJ-78), y el usuario solo ve sus proyectos. Sin login

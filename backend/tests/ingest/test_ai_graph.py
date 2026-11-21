@@ -141,6 +141,12 @@ def test_express_repo_gets_a_v1_with_ai_provenance():
     assert "(Customer)" in pk["detail"]
     # la CPU base se midió en FastAPI: en Express es un supuesto
     assert orders["api_cpu_ms"]["label"] == "SUPUESTO"
+    # pool y workers: el catálogo describe uvicorn y SQLAlchemy, así que en Express quedan por revisar
+    api, pool = model["deployment"]["api"], model["deployment"]["db"]["pool_per_worker"]
+    assert api["workers"]["needs_review"] and "express" in api["workers"]["source"]
+    assert "uvicorn" not in api["workers"]["source"]
+    assert pool["library"] == "desconocida" and pool["pool_size"]["needs_review"]
+    assert "Prisma" in pool["pool_size"]["source"]
     services = {s["name"]: s for s in model["deployment"]["services"]}
     assert services["uploads"]["at"] == "src/lib/s3.ts:4" and services["uploads"]["origin"]["why"]
 

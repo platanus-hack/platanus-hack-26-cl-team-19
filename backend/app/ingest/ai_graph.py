@@ -233,9 +233,20 @@ def build_from_ai(sub: ArchitectureSubmission, answers: dict | None = None) -> d
     iac["warnings"].append(
         "La arquitectura la propuso la IA del usuario: el servidor no leyó los archivos de despliegue."
     )
+    # El catálogo describe uvicorn y SQLAlchemy; en otro framework solo sirven como valor de partida (JAJ-85).
     workers = bm.from_catalog(bm.CATALOG["api"]["workers_default"])
-    workers = {**workers, "label": "SUPUESTO", "needs_review": True}
-    pool = bm.default_pool(f"La IA del usuario describió el repo ({sub.framework}): no se leyó la config del pool")
+    workers = {
+        **workers,
+        "label": "SUPUESTO",
+        "needs_review": True,
+        "source": f"Valor por defecto: el repo es {sub.framework} y el servidor no leyó cómo se levanta "
+        "(procesos, cluster, PM2, gunicorn...). Confírmalo con el usuario",
+    }
+    pool = bm.default_pool(
+        f"El repo es {sub.framework}: el servidor no leyó el pool de conexiones de su ORM o driver "
+        "(Prisma, Sequelize, Hibernate, pgx...). Se usa el de SQLAlchemy como valor de partida, por revisar",
+        library="desconocida",
+    )
     return bm.build_from_graph(to_graph(sub), sub.repo, answers or {}, iac=iac, workers=workers, pool=pool)
 
 

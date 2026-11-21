@@ -136,11 +136,11 @@ def _resolve_int(proj, mod, expr) -> tuple[int, str, bool] | None:
     return (hit[0], hit[1], True) if hit else None
 
 
-def default_pool(why: str) -> dict:
+def default_pool(why: str, library: str = "sqlalchemy") -> dict:
     """El pool por defecto de SQLAlchemy, como SUPUESTO por revisar, cuando el repo no dice el suyo."""
     cat = CATALOG["pools"]["sqlalchemy"]
     return {
-        "library": "sqlalchemy",
+        "library": library,
         "defined_at": None,
         **{
             k: num(cat[k]["value"], cat[k]["unit"], "SUPUESTO", f"{why}. {cat[k]['source']}", default=True)
