@@ -28,7 +28,11 @@ def spike():
     spec = importlib.util.spec_from_file_location("jaj11_costs", SPIKE_COSTS)
     module = importlib.util.module_from_spec(spec)
     sys.modules["jaj11_costs"] = module
-    spec.loader.exec_module(module)
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no dejar __pycache__ en spikes/
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
