@@ -10,6 +10,7 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",  # ProjectStore sobre Postgres (app/db), con DATABASE_URL
     "python-dotenv>=1.0",  # uvicorn --env-file .env
     "pyjwt[crypto]>=2.10",  # validar los tokens de sesión de Supabase Auth (app/api/auth.py, JAJ-78)
+    "pyyaml>=6.0",  # app/ingest/iac.py: Docker Compose, Kubernetes y render.yaml
 ]
 
 [project.optional-dependencies]

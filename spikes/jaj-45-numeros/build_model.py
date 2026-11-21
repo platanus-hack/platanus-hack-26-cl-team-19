@@ -24,7 +24,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "jaj-7-ingestion"))
+sys.path.insert(0, str(HERE.parent.parent / "backend"))
 import extract  # noqa: E402
+from app.ingest.iac import scan_deployment  # noqa: E402  (JAJ-60: archivos de despliegue)
 
 RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
 HOURS_MONTH = 730
@@ -334,8 +336,9 @@ def traffic_model(ans: dict) -> dict:
     return {**inputs, "requests_per_session": rps_session, "scenarios": scenarios}
 
 
-def deployment_model(ans: dict, workers: dict, pool: dict) -> dict:
+def deployment_model(ans: dict, workers: dict, pool: dict, iac: dict) -> dict:
     d = ans.get("deployment", {})
+    seen = iac["observed"]
     dbp = d.get("db", {"provider": "local", "plan": "docker"})
     plans = CATALOG["db_plans"]
     plan = plans[dbp["provider"]][dbp["plan"]]
@@ -358,20 +361,35 @@ def deployment_model(ans: dict, workers: dict, pool: dict) -> dict:
         db["cpu_credits"] = credits
     if "pooler_connections" in plan:
         db["pooler_connections"] = num(plan["pooler_connections"], "conexiones", "ESTIMADO", src)
-    a = d.get("api", {"provider": "local", "replicas": 1, "vcpu": 1, "memory_gb": 2})
-    price = CATALOG["app_plans"][a["provider"]]
-    replicas = declared(a["replicas"], "réplicas", "réplicas de la API")
-    vcpu = declared(a["vcpu"], "vCPU", "vCPU por réplica")
-    mem = declared(a["memory_gb"], "GB", "memoria por réplica")
-    api_usd = a["replicas"] * (a["vcpu"] * price["usd_vcpu_hour"] + a["memory_gb"] * price["usd_gb_hour"]) * HOURS_MONTH
+    # Cada número: la respuesta del usuario manda; si no, lo que dice el repo (JAJ-60); si no, el valor por defecto
+    a = d.get("api", {})
+    defaults = {"replicas": 1, "vcpu": 1, "memory_gb": 2}
+    api_vals = {}
+    for key, unit, what in (("replicas", "réplicas", "réplicas de la API"), ("vcpu", "vCPU", "vCPU por réplica"),
+                            ("memory_gb", "GB", "memoria por réplica")):
+        if key in a:
+            api_vals[key] = declared(a[key], unit, what)
+        elif f"api.{key}" in seen:
+            api_vals[key] = seen[f"api.{key}"]
+        else:
+            api_vals[key] = num(defaults[key], unit, "SUPUESTO", f"Valor por defecto: ni el usuario ni el repo dicen {what}",
+                                default=True)
+    provider = a.get("provider", "local")
+    price = CATALOG["app_plans"][provider]
+    replicas, vcpu, mem = api_vals["replicas"], api_vals["vcpu"], api_vals["memory_gb"]
+    api_usd = replicas["value"] * (vcpu["value"] * price["usd_vcpu_hour"] + mem["value"] * price["usd_gb_hour"]) * HOURS_MONTH
     api = {
-        "provider": a["provider"], "replicas": replicas, "vcpu": vcpu, "memory_gb": mem, "workers": workers,
+        "provider": provider, "replicas": replicas, "vcpu": vcpu, "memory_gb": mem, "workers": workers,
         "threads_per_worker": from_catalog(CATALOG["api"]["threads_per_worker"]),
         "latency_ms": from_catalog(CATALOG["api"]["latency_ms"]),
         "usd_month": num(round(api_usd, 2), "US$/mes", "ESTIMADO", CATALOG["app_plans"]["_source"]),
-        "cpu_core_factor": core_factor(price, f"API en {a['provider']}"),
+        "cpu_core_factor": core_factor(price, f"API en {provider}"),
     }
-    return {"api": api, "db": db}
+    # Lo que el agente tiene que preguntar (JAJ-59): lo que no dicen ni el repo ni las respuestas
+    answered = {f"api.{k}" for k in a} | ({"db.plan"} if "db" in d else set())
+    return {"api": api, "db": db, "services": iac["services"],
+            "iac": {"files": iac["files"], "deploy_targets": iac["deploy_targets"], "warnings": iac["warnings"],
+                    "missing": [m for m in iac["missing"] if m["field"] not in answered]}}
 
 
 def business_model(ans: dict) -> dict:
@@ -468,8 +486,14 @@ def build(repo: Path, answers: dict) -> dict:
     graph = extract.run(repo)
     proj = extract.Project(repo)
     proj.load()
+    iac = scan_deployment(repo).to_dict()
     w = read_workers(repo)
-    workers = num(w[0], "procesos", "OBSERVADO", f"{w[0]} workers en {w[1]}") if w else from_catalog(CATALOG["api"]["workers_default"])
+    if w:
+        workers = num(w[0], "procesos", "OBSERVADO", f"{w[0]} workers en {w[1]}")
+    elif "api.workers" in iac["observed"]:
+        workers = iac["observed"]["api.workers"]
+    else:
+        workers = from_catalog(CATALOG["api"]["workers_default"])
     pool = read_pool(proj)
     ov = answers.get("overrides", {})
     rows_default = from_catalog(CATALOG["table_rows_default"])
@@ -486,7 +510,7 @@ def build(repo: Path, answers: dict) -> dict:
         "schema": "branchpoint.model/v1",
         "repo": {"path": repo.name, "extracted_at": TODAY,
                  "stats": {k: v for k, v in graph["stats"].items() if not k.startswith("seconds")}},
-        "deployment": deployment_model(answers, workers, pool),
+        "deployment": deployment_model(answers, workers, pool, iac),
         "traffic": traffic_model(answers),
         "business": business_model(answers),
         "endpoints": endpoints,

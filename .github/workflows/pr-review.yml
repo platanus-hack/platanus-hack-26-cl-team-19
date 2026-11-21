@@ -1,0 +1,52 @@
+name: PR review bot
+
+# Revisa cada PR hacia dev o main con la API de Claude y deja un solo comentario que se actualiza en
+# cada push (JAJ-63). Nunca bloquea la PR: sin el secret ANTHROPIC_API_KEY, o si la API falla, avisa
+# y termina en verde. El script está en .github/scripts/pr_review.py.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write # comentar en la PR
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true # si llega otro push, solo se revisa el último
+
+jobs:
+  review:
+    name: Review with Claude
+    # los borradores no se revisan (cuestan tokens); se revisan al marcarlos como listos
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # el diff se calcula contra el ancestro común con la base
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the Anthropic SDK
+        run: pip install "anthropic==2.12.0"
+
+      - name: Review the PR
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .github/scripts/pr_review.py
