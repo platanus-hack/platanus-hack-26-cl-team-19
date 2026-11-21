@@ -257,14 +257,23 @@ onMounted(loadProjects);
                 >
                   <li
                     v-for="repo in project.repositories.slice(0, 2)"
-                    :key="repo.id"
+                    :key="repo.fullName"
                     class="flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground"
                   >
                     <GitBranch class="size-3 shrink-0" aria-hidden="true" />
                     <span
                       class="min-w-0 flex-1 truncate"
-                      :title="repo.fullName"
+                      :title="
+                        repo.primary && project.repositories.length > 1
+                          ? `${repo.fullName} (principal: se simula)`
+                          : repo.fullName
+                      "
                       >{{ repo.fullName }}</span
+                    >
+                    <span
+                      v-if="repo.primary && project.repositories.length > 1"
+                      class="shrink-0 font-sans text-[0.625rem]"
+                      >principal</span
                     >
                     <span
                       v-if="repo.branch"

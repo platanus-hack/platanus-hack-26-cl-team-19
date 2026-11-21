@@ -42,6 +42,11 @@ import {
 } from "@/components/ui/sidebar";
 import type { Repository, SessionUser } from "./types";
 
+function isActive(repository: Repository) {
+  // en un proyecto de varios repos, todos abren el mismo proyecto: se marca el principal
+  return repository.id === props.activeId && repository.primary !== false;
+}
+
 const props = withDefaults(
   defineProps<{
     repositories: Repository[];
@@ -121,17 +126,26 @@ const initials = computed(() =>
           <SidebarMenu>
             <SidebarMenuItem
               v-for="repository in repositories"
-              :key="repository.id"
+              :key="repository.name"
             >
               <SidebarMenuButton
                 :disabled="disabled"
-                :is-active="repository.id === activeId"
-                :aria-current="repository.id === activeId ? 'page' : undefined"
-                :tooltip="repository.name"
+                :is-active="isActive(repository)"
+                :aria-current="isActive(repository) ? 'page' : undefined"
+                :tooltip="
+                  repository.primary
+                    ? `${repository.name} (principal: se simula)`
+                    : repository.name
+                "
                 @click="emit('select', repository.id)"
               >
                 <BookMarked aria-hidden="true" />
-                <span>{{ repository.name }}</span>
+                <span class="truncate">{{ repository.name }}</span>
+                <span
+                  v-if="repository.primary"
+                  class="ms-auto text-[0.625rem] text-muted-foreground"
+                  >principal</span
+                >
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem v-if="canConnect && !repositories.length">
@@ -205,10 +219,11 @@ const initials = computed(() =>
                   <DropdownMenuSubContent>
                     <DropdownMenuItem
                       v-for="repository in repositories"
-                      :key="repository.id"
+                      :key="repository.name"
                       @select="emit('select', repository.id)"
                     >
-                      {{ repository.name }}
+                      {{ repository.name
+                      }}{{ repository.primary ? " (principal)" : "" }}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator
                       v-if="canConnect && repositories.length"

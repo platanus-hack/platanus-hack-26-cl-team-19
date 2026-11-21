@@ -44,7 +44,8 @@ const barColor = computed(() => {
       <header class="flex flex-col gap-1">
         <p class="text-base font-semibold">{{ node.name }}</p>
         <p class="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <SaturationBadge :status="node.status" plain />
+          <span v-if="node.notSimulated">No simulado</span>
+          <SaturationBadge v-else :status="node.status" plain />
           <template v-if="node.kind">
             <span aria-hidden="true">·</span>
             {{ componentKinds[node.kind].label }}
@@ -52,9 +53,10 @@ const barColor = computed(() => {
         </p>
       </header>
 
+      <p v-if="node.notSimulated" class="text-sm">{{ node.notSimulated }}</p>
       <p v-if="node.summary" class="text-sm">{{ node.summary }}</p>
 
-      <dl class="flex flex-col gap-4 text-sm">
+      <dl v-if="!node.notSimulated" class="flex flex-col gap-4 text-sm">
         <div class="flex flex-col gap-2">
           <div class="flex items-baseline justify-between gap-3">
             <dt class="truncate text-muted-foreground">

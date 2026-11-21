@@ -39,6 +39,8 @@ export interface ProjectRepository {
   id: string;
   fullName: string;
   branch?: string;
+  /** El repo que simula el motor (IA-5). Viene primero. */
+  primary?: boolean;
 }
 
 export interface Project {
@@ -51,10 +53,29 @@ export interface Project {
 
 export interface GraphNode {
   id: string;
-  kind: "api" | "db" | "cache" | "queue" | "worker" | "external";
+  kind:
+    | "api"
+    | "db"
+    | "cache"
+    | "queue"
+    | "worker"
+    | "external"
+    | "service"
+    | "storage"
+    | "search"
+    | "other";
   label: string;
   resources: string[];
-  details: { replicas?: number; plan?: string };
+  details: {
+    replicas?: number;
+    plan?: string;
+    technology?: string;
+    endpoints?: number;
+    error?: string;
+  };
+  /** IA-5: el repo del componente (solo con varios repos) y si el motor lo simula. */
+  repo?: string | null;
+  simulated?: boolean;
 }
 
 export interface Graph {
