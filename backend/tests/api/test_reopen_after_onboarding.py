@@ -14,7 +14,7 @@ from app.api.auth import SupabaseAuth
 from app.api.main import create_app
 from app.api.store import InMemoryProjectStore
 from tests.api.test_auth import _JWK, ALICE, BOB, SUPABASE, _ensure_users, bearer, token
-from tests.github.test_github import FakeGitHub, connect
+from tests.github.test_github import KEY, FakeAnalyst, FakeGitHub, connect
 
 RUN = {"scenario": "cyberday", "seed": 1, "duration_s": 5}
 
@@ -36,6 +36,7 @@ def store(request):
 def session(store, auth, github, user: str = ALICE) -> TestClient:
     """Un navegador con una sesión nueva de ``user``: cada llamada lleva un token recién emitido."""
     app = create_app(store=store, auth=auth, github_app=github)
+    app.state.llm_factory = lambda key, model=None: FakeAnalyst()
     return TestClient(app, headers=bearer(token(user)), follow_redirects=False)
 
 
@@ -47,8 +48,13 @@ def test_imported_repo_and_its_v2_reopen_after_signing_out(store, auth, monkeypa
     # Cuenta nueva: Mis proyectos vacío. Conecta la GitHub App e importa su repo.
     assert alice.get("/projects").json() == []
     connect(alice)
-    job = alice.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).json()
-    done = alice.get(f"/github/ingestions/{job['id']}").json()
+    started = alice.post(
+        "/github/ingestions",
+        json={"repo_full_name": "acme/tienda"},
+        headers={"X-Anthropic-Api-Key": KEY},
+    )
+    assert started.status_code == 202, started.text
+    done = alice.get(f"/github/ingestions/{started.json()['id']}").json()
     assert done["status"] == "done" and done["version"] == 1
     pid = done["project_id"]
 
