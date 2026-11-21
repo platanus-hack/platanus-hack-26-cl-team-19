@@ -167,7 +167,8 @@ class Saturation:
     muchas, así que un "0 % de errores" puede esconder un colapso. Este bloque lo hace explícito.
     """
 
-    # muchas sin respuesta (UNANSWERED_SATURATED) y una espera que crece (WAIT_GROWTH): no alcanza a atender
+    # no alcanza a atender: muchas sin respuesta (UNANSWERED_SATURATED) y una espera que crece
+    # (WAIT_GROWTH) o que llegó cerca del timeout con timeouts y un recurso saturado (TIMEOUT_SHARE)
     saturated: bool
     offered_rps: float  # req/s que llegaron (requests / duración; con perfil, el promedio)
     unanswered: int  # requests sin respuesta al terminar (= Run.in_flight)

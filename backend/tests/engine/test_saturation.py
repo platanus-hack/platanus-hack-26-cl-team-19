@@ -93,13 +93,15 @@ def with_slow_call(raw, ms):
         (3000, 2, 30, None),  # una llamada a un LLM de 3 s: ~10 % sigue en curso al terminar, y está sana
         (600, 20, 6, None),  # simulación corta: ~10 % en curso (el doble del 5 %, para no depender del azar)
         (3000, 2, 30, "subida"),  # tasa que sube: la fila crece, pero la espera no
+        (6000, 4, 30, "bajada"),  # tasa que baja (sin llegar a 0): lo simétrico
     ],
 )
 def test_slow_but_healthy_is_not_saturated(raw, ms, rps, duration_s, profile):
     """Lo que señaló la revisión: quedar en curso no basta; tiene que crecer la espera (Ley de Little)."""
     from app.models.traffic import TrafficProfile, TrafficSegment
 
-    tp = TrafficProfile((TrafficSegment(duration_s, 0.2, 1.0),)) if profile == "subida" else None
+    ramps = {"subida": (0.2, 1.0), "bajada": (1.0, 0.3)}
+    tp = TrafficProfile((TrafficSegment(duration_s, *ramps[profile]),)) if profile else None
     run = simulate(with_slow_call(raw, ms), "x", seed=1, duration_s=duration_s, rps=rps, traffic_profile=tp)
     s = run.saturation
     assert s.unanswered_rate >= 0.05  # el umbral solo lo habría marcado como saturado
