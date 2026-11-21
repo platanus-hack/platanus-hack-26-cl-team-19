@@ -159,8 +159,8 @@ const accounts = computed(() =>
           <Badge variant="outline">Próximamente</Badge>
         </div>
         <p class="text-sm text-muted-foreground">
-          Vincula tu CLI para conversar con el agente desde el editor usando tu
-          propia sesión del proveedor.
+          Conecta tu CLI de IA para simular y proponer versiones del modelo
+          desde tu terminal.
         </p>
       </section>
     </main>

@@ -95,7 +95,7 @@ async function addDemoRepository() {
           {{
             step === "github"
               ? "Trae el código de una rama para analizar su arquitectura."
-              : "Usa tu sesión del proveedor para conversar con el agente en el editor."
+              : "Conecta tu CLI de IA para trabajar sobre el modelo desde tu terminal."
           }}
         </p>
       </div>

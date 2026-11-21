@@ -11,6 +11,8 @@ import {
   type Ingestion,
 } from "@/services/github-api";
 
+const POLL_LIMIT_MS = 5 * 60_000;
+
 export function githubErrorMessage(cause: unknown): string {
   const response = cause as {
     name?: string;
@@ -118,15 +120,23 @@ export function useGithubConnection({ immediate = true } = {}) {
     branch.value = "";
     if (!api || !fullName) return;
     try {
-      branches.value = await api.branches(fullName);
+      const names = await api.branches(fullName);
+      if (repo.value !== fullName) return; // ya se eligió otro repo
+      branches.value = names;
       const selected = repos.value.find((item) => item.full_name === fullName);
       branch.value =
         branches.value.find((name) => name === selected?.default_branch) ??
         branches.value[0] ??
         "";
     } catch (cause) {
-      error.value = githubErrorMessage(cause);
+      if (repo.value === fullName) error.value = githubErrorMessage(cause);
     }
+  });
+
+  // El sondeo se corta al salir de la página o tras POLL_LIMIT_MS; tolera fallos de red sueltos.
+  let alive = true;
+  onScopeDispose(() => {
+    alive = false;
   });
 
   async function analyze() {
@@ -138,9 +148,24 @@ export function useGithubConnection({ immediate = true } = {}) {
       let job = await api.startIngestion(repo.value, branch.value);
       starting.value = false;
       ingestion.value = job;
+      const deadline = Date.now() + POLL_LIMIT_MS;
+      let failures = 0;
       while (job.status === "queued" || job.status === "running") {
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        job = await api.getIngestion(job.id);
+        if (!alive) return;
+        if (Date.now() > deadline) {
+          error.value =
+            "El análisis está tardando más de lo esperado. Vuelve más tarde: el proyecto aparecerá en Mis proyectos al terminar.";
+          ingestion.value = null;
+          return;
+        }
+        try {
+          job = await api.getIngestion(job.id);
+          failures = 0;
+        } catch (cause) {
+          if (++failures >= 3) throw cause;
+          continue;
+        }
         ingestion.value = job;
       }
     } catch (cause) {
