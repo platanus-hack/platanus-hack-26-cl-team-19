@@ -70,8 +70,19 @@ export type ProposalState = "idle" | "pending" | "applied" | "discarded";
 
 export type ToolCallStatus = "running" | "done" | "error";
 
+export type ChatAttachmentRef = {
+  id: string;
+  filename: string;
+  kind: "image" | "log";
+};
+
 export type ChatMessage =
-  | { id: string; role: "user"; text: string }
+  | {
+      id: string;
+      role: "user";
+      text: string;
+      attachments?: ChatAttachmentRef[];
+    }
   | { id: string; role: "agent"; text: string }
   | {
       id: string;

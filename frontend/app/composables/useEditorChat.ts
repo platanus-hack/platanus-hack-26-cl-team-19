@@ -1,7 +1,8 @@
-import type { ChatMessage } from "@/components/editor/types";
+import type { ChatAttachmentRef, ChatMessage } from "@/components/editor/types";
 import {
   readChatEvents,
   type ChatEvent,
+  type ChatEvidence,
   type ChatKeySource,
   type ChatTurn,
   type ChatProvider,
@@ -9,18 +10,29 @@ import {
 import { createEditorApi } from "@/services/editor-api";
 
 type ToolMessage = Extract<ChatMessage, { role: "tool" }>;
-type Conversation = { messages: ChatMessage[]; history: ChatTurn[] };
+type Conversation = {
+  messages: ChatMessage[];
+  history: ChatTurn[];
+  evidence?: ChatEvidence | null;
+};
 
-function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
+function number(value: number) {
+  return value.toLocaleString("es-CL", { maximumFractionDigits: 1 });
+}
+
+export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
   const { result } = event;
   if (result?.error)
     return { status: "error" as const, output: String(result.error) };
-  const output =
-    typeof result?.p95_ms === "number"
-      ? [`p95 ${result.p95_ms} ms`, result.bottleneck?.resource]
-          .filter(Boolean)
-          .join(" · ")
-      : "Resultado disponible";
+  let output = "Resultado disponible";
+  if (typeof result?.p95_ms === "number")
+    output = [`p95 ${result.p95_ms} ms`, result.bottleneck?.resource]
+      .filter(Boolean)
+      .join(" · ");
+  else if (event.name === "analyze_log" && result?.peak_rps)
+    output = `${number(result.peak_rps.value)} req/s pico · ${result.endpoints?.length ?? 0} endpoints`;
+  else if (event.name === "apply_log_traffic" && result?.version)
+    output = `Versión ${result.version} con tráfico observado`;
   return {
     status: "done" as const,
     output,
@@ -50,9 +62,23 @@ function applyChatEvent(
         item.role === "tool" && item.id === `${turnId}:${event.id}`,
     );
     if (message) Object.assign(message, toolResult(event));
+  } else if (event.type === "done") {
+    // la tarjeta se reemplaza con cada respuesta: no se acumulan pedidos viejos
+    conversation.evidence = event.evidence ?? null;
   } else if (event.type === "error") {
     throw new Error(event.message);
   }
+}
+
+/** El turno del usuario para el historial: las imágenes no se reenvían, los logs sí (los leen las tools). */
+export function historyTurn(
+  text: string,
+  attachments: ChatAttachmentRef[],
+): ChatTurn {
+  const logs = attachments.filter((a) => a.kind === "log").map((a) => a.id);
+  return logs.length
+    ? { role: "user", content: text, attachments: logs }
+    : { role: "user", content: text };
 }
 
 function chatError(cause: unknown): string {
@@ -90,14 +116,37 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
   );
   let request: AbortController | undefined;
 
-  async function send(text: string, expectedSource?: ChatKeySource) {
+  // "No tengo este dato": el pedido no vuelve a mostrarse en esta sesión del navegador
+  const dismissed = useState<string[]>("editor-chat-dismissed", () => []);
+  const evidence = computed(() => {
+    const pending =
+      conversations.value[conversationId.value]?.evidence?.pending ?? [];
+    return pending.filter((item) => !dismissed.value.includes(item.field));
+  });
+
+  async function send(
+    text: string,
+    expectedSource?: ChatKeySource,
+    attachments: ChatAttachmentRef[] = [],
+  ) {
     const id = projectId.value;
     if (!id || thinking.value) return;
     conversations.value[conversationId.value] ??= { messages: [], history: [] };
     const state = conversations.value[conversationId.value]!;
     const turnId = crypto.randomUUID();
-    const user: ChatTurn = { role: "user", content: text };
-    state.messages.push({ id: turnId, role: "user", text });
+    const user: ChatTurn = attachments.length
+      ? {
+          role: "user",
+          content: text,
+          attachments: attachments.map((a) => a.id),
+        }
+      : { role: "user", content: text };
+    state.messages.push({
+      id: turnId,
+      role: "user",
+      text,
+      ...(attachments.length ? { attachments } : {}),
+    });
     error.value = "";
     thinking.value = true;
     request = new AbortController();
@@ -109,7 +158,7 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
         request.signal,
         expectedSource,
       );
-      await finishTurn(stream, state, user, turnId);
+      await finishTurn(stream, state, historyTurn(text, attachments), turnId);
     } catch (cause) {
       if (!request.signal.aborted) error.value = chatError(cause);
       for (const message of state.messages) {
@@ -132,11 +181,24 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
     error.value = "";
   }
 
+  function dismissEvidence(field: string) {
+    if (!dismissed.value.includes(field)) dismissed.value.push(field);
+  }
+
   onScopeDispose(() => request?.abort());
-  return { provider, error, thinking, messages, send, reset };
+  return {
+    provider,
+    error,
+    thinking,
+    messages,
+    evidence,
+    send,
+    reset,
+    dismissEvidence,
+  };
 }
 
-async function finishTurn(
+export async function finishTurn(
   stream: ReadableStream<Uint8Array<ArrayBuffer>>,
   conversation: Conversation,
   user: ChatTurn,
