@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppWordmark from "@/components/AppWordmark.vue";
 import {
   CircleCheck,
   TriangleAlert,
@@ -8,7 +9,6 @@ import {
   SlidersHorizontal,
   Calculator,
   CircleHelp,
-  GitBranch,
 } from "@lucide/vue";
 import ComponentGallery from "@/components/design/ComponentGallery.vue";
 import { galleryGroups } from "@/components/design/gallery";
@@ -120,8 +120,7 @@ const spacing = [
         class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8"
       >
         <p class="flex items-center gap-2 text-sm font-semibold">
-          <GitBranch class="size-4" aria-hidden="true" />
-          Branchpoint
+          <AppWordmark />
         </p>
         <ClientOnly>
           <label class="flex items-center gap-2 text-sm text-muted-foreground">

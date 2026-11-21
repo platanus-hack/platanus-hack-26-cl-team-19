@@ -61,6 +61,35 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres python
 
 Esos tests vacían las tablas, así que solo aceptan una base local. Sin `TEST_DATABASE_URL` se saltan. En el CI corren siempre, con `npx supabase db start`.
 
+## Probar el acceso con GitHub
+
+1. Registra una **OAuth App** de desarrollo en GitHub con
+   `http://localhost:54321/auth/v1/callback` como callback. La GitHub App que
+   importa repos se configura por separado.
+2. Configura Supabase CLI con estas variables en `supabase/.env.local` y
+   reinicia el stack con `npx supabase stop` y `npx supabase start`.
+
+   ```dotenv
+   SUPABASE_AUTH_EXTERNAL_GITHUB_ENABLED=true
+   SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID=
+   SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET=
+   ```
+
+3. Crea `frontend/.env` a partir de `frontend/.env.example` y completa
+   `NUXT_PUBLIC_SUPABASE_URL` con la URL de la API local y
+   `NUXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` con la llave pública que muestra
+   `npx supabase status`. El secreto de GitHub solo va en la configuración de
+   Supabase.
+4. Desde `frontend/`, ejecuta `pnpm dev` y abre
+   `http://localhost:3000/login`. Usa **Continuar con GitHub**. Tras autorizar,
+   Nuxt recibe el código en `/auth/callback` y abre `/onboarding` la primera vez en ese navegador. Después del onboarding,
+   el acceso lleva a `/projects`.
+
+Para el entorno alojado, habilita GitHub en **Authentication → Sign In /
+Providers** y configura el callback que muestra Supabase en la OAuth App de
+ese entorno. Agrega también la URL del frontend terminada en `/auth/callback`
+a las redirecciones autorizadas de Supabase. [Guía de GitHub Auth](https://supabase.com/docs/guides/auth/social-sign-in/auth-github)
+
 ## Día a día
 
 | Para | Comando |

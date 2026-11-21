@@ -120,17 +120,65 @@ function mockCosts(model: ArchitectureModel): CostEstimate {
   };
 }
 
-export function createMockEditorApi(): ReturnType<typeof createEditorApi> {
-  const projects = new Map<string, VersionDetail[]>();
+type DemoProject = Omit<Project, "versions"> & { versions: VersionDetail[] };
 
-  function getVersions(id: string) {
-    const versions = projects.get(id);
-    if (!versions) throw new Error("No existe el proyecto de demostración.");
-    return versions;
+const initialVersion: VersionDetail = {
+  number: 1,
+  label: "v1",
+  origin: "repo",
+  note: "Modelo de demostración",
+  model: {
+    deployment: { api: { replicas: assumed(1, "réplicas") } },
+    traffic: {
+      scenarios: { pico_normal: { rps: 13 }, cyberday: { rps: 262 } },
+    },
+  },
+};
+
+function makeProject(id: string, fullName = sample.name): DemoProject {
+  return {
+    id,
+    name: "FastAPI Template",
+    sample: sample.id,
+    repositories: [{ id, fullName, branch: "master" }],
+    versions: [structuredClone(initialVersion)],
+  };
+}
+
+export function createMockEditorApi(
+  storage?: Storage,
+): ReturnType<typeof createEditorApi> {
+  const primary = makeProject("fastapi-template");
+  const worker = makeProject(
+    "fastapi-worker",
+    "branchpoint-demo/background-worker",
+  );
+  worker.versions[0]!.model.deployment.api.replicas.value = 2;
+  primary.repositories = [
+    ...(primary.repositories ?? []),
+    ...(worker.repositories ?? []),
+  ];
+
+  const storeKey = "branchpoint:demo-projects";
+  const saved = storage?.getItem(storeKey);
+  const entries: DemoProject[] = saved ? JSON.parse(saved) : [primary, worker];
+  const projects = new Map(entries.map((entry) => [entry.id, entry]));
+  const existingPrimary = projects.get(primary.id);
+  if (existingPrimary) existingPrimary.repositories = primary.repositories;
+  if (!projects.has(worker.id)) projects.set(worker.id, worker);
+
+  function persist() {
+    storage?.setItem(storeKey, JSON.stringify([...projects.values()]));
+  }
+
+  function getProject(id: string) {
+    const project = projects.get(id);
+    if (!project) throw new Error("No existe el proyecto de demostración.");
+    return project;
   }
 
   function getVersion(id: string, number: number) {
-    const version = getVersions(id).find(
+    const version = getProject(id).versions.find(
       (version) => version.number === number,
     );
     if (!version) throw new Error("No existe la versión de demostración.");
@@ -139,31 +187,24 @@ export function createMockEditorApi(): ReturnType<typeof createEditorApi> {
 
   return {
     listModels: () => Promise.resolve([sample]),
-    createProject: () => {
-      const id = crypto.randomUUID();
-      const v1: VersionDetail = {
-        number: 1,
-        label: "v1",
-        origin: "repo",
-        note: "Modelo de demostración",
-        model: {
-          deployment: { api: { replicas: assumed(1, "réplicas") } },
-          traffic: {
-            scenarios: { pico_normal: { rps: 13 }, cyberday: { rps: 262 } },
-          },
-        },
-      };
-      projects.set(id, [v1]);
-      return Promise.resolve<Project>({
-        id,
-        name: sample.name,
-        versions: [v1],
-      });
+    listProjects: async () =>
+      structuredClone(
+        [...projects.values()]
+          .filter(({ id }) => id !== worker.id)
+          .toReversed(),
+      ),
+    getProject: async (id) => structuredClone(getProject(id)),
+    createProject: async (_sample, name) => {
+      const project = makeProject(crypto.randomUUID());
+      project.name = name ?? project.name;
+      projects.set(project.id, project);
+      persist();
+      return structuredClone(project);
     },
     getVersion: async (id, number) => getVersion(id, number),
     getGraph: (model) => Promise.resolve(mockGraph(model)),
     saveVersion: async (id, _parent, model, note) => {
-      const versions = getVersions(id);
+      const versions = getProject(id).versions;
       const number = versions.length + 1;
       const saved = {
         number,
@@ -173,6 +214,7 @@ export function createMockEditorApi(): ReturnType<typeof createEditorApi> {
         model,
       };
       versions.push(saved);
+      persist();
       return saved;
     },
     run: async (id, number, scenario) =>

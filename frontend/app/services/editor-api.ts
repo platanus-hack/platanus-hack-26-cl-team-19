@@ -34,10 +34,18 @@ export interface VersionDetail extends ProjectVersion {
   model: ArchitectureModel;
 }
 
+export interface ProjectRepository {
+  id: string;
+  fullName: string;
+  branch?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   versions: ProjectVersion[];
+  sample?: string | null;
+  repositories?: ProjectRepository[];
 }
 
 export interface GraphNode {
@@ -115,8 +123,26 @@ export function editorRunParams(scenario: string) {
   };
 }
 
-export function createEditorApi(baseURL: string) {
-  const fetchApi = $fetch.create({ baseURL, retry: 0, timeout: 30_000 });
+export function createEditorApi(
+  baseURL: string,
+  getAccessToken?: () => Promise<string | undefined>,
+) {
+  const fetchApi = $fetch.create({
+    baseURL,
+    retry: 0,
+    timeout: 30_000,
+    async onRequest({ request, options }) {
+      if (
+        !getAccessToken ||
+        typeof request !== "string" ||
+        !request.startsWith("/projects")
+      )
+        return;
+      const token = await getAccessToken();
+      if (!token) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión.");
+      options.headers.set("Authorization", `Bearer ${token}`);
+    },
+  });
   const post = <Response>(path: string, body: Record<string, unknown>) =>
     fetchApi<Response>(path, { method: "POST", body });
   const projectPath = (id: string) => `/projects/${encodeURIComponent(id)}`;
@@ -124,8 +150,11 @@ export function createEditorApi(baseURL: string) {
     `${projectPath(id)}/versions/${version}`;
 
   return {
+    listProjects: () => fetchApi<Project[]>("/projects"),
+    getProject: (id: string) => fetchApi<Project>(projectPath(id)),
     listModels: () => fetchApi<ModelSummary[]>("/models"),
-    createProject: (sample: string) => post<Project>("/projects", { sample }),
+    createProject: (sample: string, name?: string) =>
+      post<Project>("/projects", { sample, name }),
     getVersion: (id: string, version: number) =>
       fetchApi<VersionDetail>(versionPath(id, version)),
     getGraph: (model: ArchitectureModel) => post<Graph>("/graph", { model }),
