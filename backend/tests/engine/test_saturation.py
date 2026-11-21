@@ -64,6 +64,16 @@ def test_long_collapse_stays_saturated_when_wait_hits_the_timeout(model, duratio
         assert "cerca del timeout del cliente" in s.message
 
 
+def test_slow_endpoint_near_the_timeout_without_timeouts_is_not_saturated(raw):
+    """Un endpoint sano que tarda 25 s deja una espera de 25 s (cerca de los 30 s del timeout), pero sus
+    requests no vencen: no es colapso."""
+    run = simulate(with_slow_call(raw, 25_000), "x", seed=1, duration_s=120, rps=2)
+    s = run.saturation
+    # la espera supera el 80 % del timeout (30 s) y hay muchas en curso, pero ninguna venció
+    assert run.errors["client_timeout"] == 0 and s.wait_end_s >= 0.8 * 30 and s.unanswered_rate >= 0.05
+    assert not s.saturated
+
+
 def test_saturation_carries_its_provenance(model):
     s = simulate(model, "pico_normal", seed=1, duration_s=5).saturation
     assert s.label == "SUPUESTO" and "5 %" in s.source and "×1,5" in s.source and "80 %" in s.source

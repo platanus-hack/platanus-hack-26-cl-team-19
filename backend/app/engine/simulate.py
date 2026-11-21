@@ -49,6 +49,7 @@ from typing import Any
 
 from app.engine.kernel import Resource, Sim
 from app.engine.metrics import (
+    ERROR_CLIENT_TIMEOUT,
     ERROR_DB_REFUSED,
     ERROR_POOL_TIMEOUT,
     ERROR_QUEUE_FULL,
@@ -649,7 +650,10 @@ def _saturation(
         wait_mid = _implied_wait_s(rec, rec.seconds // 2 - 1)
         wait_end = _implied_wait_s(rec, rec.seconds - 1)
         growing = wait_end >= WAIT_GROWTH * wait_mid + WAIT_GROWTH_MIN_S
-        at_timeout = client_timeout_s is not None and wait_end >= TIMEOUT_SHARE * client_timeout_s
+        # llegar cerca del timeout solo cuenta si ya hay timeouts de verdad: un endpoint sano que tarda
+        # 25 s también deja una espera de 25 s, pero sus requests no vencen
+        timed_out = rec.error_types.get(ERROR_CLIENT_TIMEOUT, 0) > 0
+        at_timeout = client_timeout_s is not None and timed_out and wait_end >= TIMEOUT_SHARE * client_timeout_s
     saturated = rate >= UNANSWERED_SATURATED and (growing or at_timeout)
     message = None
     if saturated:
