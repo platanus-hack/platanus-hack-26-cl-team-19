@@ -68,7 +68,7 @@ Los recursos se arman desde el `deployment` del modelo:
 
 ### Caché y colas
 
-Son campos opcionales del modelo. `build_model.py` (JAJ-45) todavía no los genera: sin ellos, la caché y el encolar son solo una espera, igual que antes.
+La ingesta de repos genera los campos opcionales de caché y colas para los patrones que reconoce. Las llamadas sin un patrón identificado conservan su tiempo de espera.
 
 ```jsonc
 // paso de caché: GET; si acierta, se salta on_miss; si falla, hace on_miss y luego SET
@@ -83,13 +83,13 @@ Son campos opcionales del modelo. `build_model.py` (JAJ-45) todavía no los gene
                       "job_steps": [{"kind": "external", "resource": "external", "time": {"value": 300}}]}}
 ```
 
-- Sin `hit_ratio`, la caché se simula con 0 % de aciertos (el peor caso) y el modelo lo advierte. `--cache-hit` en el CLI, o `cache_hit_ratio` en `simulate()`, reemplaza la tasa de todas las cachés.
-- Si hay una sola cola, los pasos `background` sin `queue` usan esa. Si no tienen cola, solo se simula el encolar y el modelo lo advierte.
+- Si falta `hit_ratio` o su valor es `null`, la caché se simula con 0 % de aciertos y el motor emite un aviso. `--cache-hit` en el CLI, o `cache_hit_ratio` en `simulate()`, reemplaza la tasa de todas las cachés.
+- Con una sola cola, el motor la asigna por defecto a los pasos `background` sin `queue`. Un paso con `infer_queue: false` conserva solo el tiempo de encolado si falta una cola explícita, como en las tareas locales de `BackgroundTasks`.
 - La request no espera al trabajo. El trabajo espera un worker libre y usa su propia conexión a la DB, no el pool de la API. Sus consultas sí ocupan la CPU de la DB.
 - Si la cola está en su `max_length`, encolar falla y la request termina con error `queue_full`. Sin `max_length`, la cola crece sin límite.
 - El `Run` trae `cache` (aciertos y fallos) y `queues` (encolados, procesados, rechazados, cola al final y latencia de los trabajos).
 
-La ingesta genera `on_miss` cuando encuentra un `get` de caché, una rama que consulta la DB solo si falla y un `set` o `setex` de la misma clave. Para Celery sigue la función de `.delay()` o `.apply_async()` si la cola es explícita y tiene un solo perfil de trabajo. Lee la concurrencia de workers dedicados declarados en Compose o Kubernetes.
+La ingesta genera `on_miss` cuando encuentra un `get` de caché, una rama que consulta la DB solo si falla y un `set` o `setex` de la misma clave. Para Celery, el extractor resuelve las funciones de `.delay()` o `.apply_async()` con cola explícita y devuelve sus efectos en `jobs`, un mapa por identificador de función. El generador usa esos efectos para producir `job_steps` cuando la cola tiene un solo perfil de trabajo. Lee la concurrencia de workers dedicados declarados en Compose o Kubernetes.
 
 Los datos que falten quedan como preguntas en `deployment.iac.missing`. Al construir el modelo, `--answers` admite `overrides.cache_hit_ratio` como mapa de `archivo:línea` a fracción y `deployment.queues` como mapa de nombre de cola a `workers` y `max_length`. Un `max_length` explícito de `null` indica una cola sin límite.
 

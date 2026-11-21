@@ -53,6 +53,7 @@ def test_ingestion_models_cache_aside_and_celery_worker(tmp_path):
     user_query, lookup = cached_endpoint["steps"]
     assert user_query["detail"] == "db.get(User)"
     assert [step["detail"] for step in lookup["on_miss"]] == ["db.get(Item)"]
+    assert lookup["hit_ratio"]["value"] is None
     assert lookup["hit_ratio"]["needs_review"]
     queue = raw["deployment"]["queues"]["refresh"]
     assert queue["workers"]["value"] == 3 and queue["workers"]["label"] == "OBSERVADO"
@@ -61,8 +62,15 @@ def test_ingestion_models_cache_aside_and_celery_worker(tmp_path):
         f"overrides.cache_hit_ratio.{lookup['at']}",
         "deployment.queues.refresh.max_length",
     }
-    post_steps = next(ep for ep in load_model(raw).endpoints if ep.id == "POST /refresh").steps
+    model = load_model(raw)
+    post_steps = next(ep for ep in model.endpoints if ep.id == "POST /refresh").steps
     assert [step.queue for step in post_steps] == ["refresh", None]
+
+    default_run = simulate(model, rps=100, duration_s=5, seed=1)
+    assert default_run.cache.hits == 0
+    assert default_run.cache.misses > 0
+    assert default_run.queues[0].processed > 0
+    assert any("tasa de aciertos" in warning for warning in default_run.warnings)
 
     configured = build(
         tmp_path,
