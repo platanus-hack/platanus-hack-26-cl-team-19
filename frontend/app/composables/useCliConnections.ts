@@ -29,24 +29,6 @@ export function useCliConnections() {
   const tokens = reactive(perProvider(""));
   const checking = reactive(perProvider(false));
 
-  const chosen = computed(() =>
-    cliProviders.filter((provider) => selected[provider.id]),
-  );
-  const connectedCount = computed(
-    () =>
-      chosen.value.filter((provider) => states[provider.id] === "verified")
-        .length,
-  );
-  const allChosenConnected = computed(
-    () =>
-      chosen.value.length > 0 && connectedCount.value === chosen.value.length,
-  );
-  const progress = computed(() => {
-    const total = chosen.value.length;
-    if (!total) return "Elige al menos una CLI.";
-    return `${connectedCount.value} de ${total} ${total === 1 ? "conectada" : "conectadas"}.`;
-  });
-
   function setState(id: CliProviderId, state: CliConnectionState) {
     if (state === "missing") tokens[id] = "";
     else if (!tokens[id]) tokens[id] = fakeToken();
@@ -75,9 +57,6 @@ export function useCliConnections() {
     states,
     tokens,
     checking,
-    chosen,
-    allChosenConnected,
-    progress,
     setState,
     generate,
     check,

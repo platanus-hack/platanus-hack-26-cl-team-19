@@ -2,8 +2,7 @@
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowLeft, ExternalLink, Lock, RefreshCw } from "@lucide/vue";
-import CliConnectCard from "@/components/onboarding/CliConnectCard.vue";
-import { cliProviders } from "@/components/onboarding/cli-providers";
+import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -177,40 +176,17 @@ const accounts = computed(() =>
       <Separator />
 
       <section aria-labelledby="cli-title" class="flex flex-col gap-4">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <h2 id="cli-title" class="text-base font-semibold">CLI local</h2>
-            <p class="mt-1 text-sm text-muted-foreground">
-              El agente corre en tu propia CLI, con tu suscripción. Activa las
-              que uses para simular y proponer versiones desde tu terminal.
-            </p>
-          </div>
-          <span class="shrink-0 text-sm text-muted-foreground" role="status">{{
-            cli.progress.value
-          }}</span>
+        <div>
+          <h2 id="cli-title" class="text-base font-semibold">CLI local</h2>
+          <p class="mt-1 text-sm text-muted-foreground">
+            Activa las CLIs de IA que uses para simular y proponer versiones
+            desde tu terminal, con tu propia suscripción.
+          </p>
         </div>
-        <Alert v-if="!isMock">
-          <AlertDescription
-            >La conexión con la CLI todavía es una vista previa: el comando no
-            funciona aún.</AlertDescription
-          >
-        </Alert>
-        <div class="flex flex-col gap-4">
-          <CliConnectCard
-            v-for="provider in cliProviders"
-            :key="provider.id"
-            v-model:selected="cli.selected[provider.id]"
-            :provider="provider"
-            :state="cli.states[provider.id]"
-            :endpoint="cli.endpoint"
-            :token="cli.tokens[provider.id]"
-            :checking="cli.checking[provider.id]"
-            connected-at="hace un momento"
-            @generate="cli.generate(provider.id)"
-            @check="cli.check(provider.id)"
-            @revoke="cli.revoke(provider.id)"
-          />
-        </div>
+        <CliConnectionList :connections="cli" />
+        <p v-if="!isMock" class="text-xs text-muted-foreground">
+          Vista previa: el comando todavía no funciona.
+        </p>
       </section>
     </main>
   </div>

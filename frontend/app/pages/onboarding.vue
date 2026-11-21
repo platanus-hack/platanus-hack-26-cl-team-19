@@ -2,8 +2,7 @@
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowLeft, ArrowRight, Check } from "@lucide/vue";
-import CliConnectCard from "@/components/onboarding/CliConnectCard.vue";
-import { cliProviders } from "@/components/onboarding/cli-providers";
+import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -65,8 +64,7 @@ async function addDemoRepository() {
     <AppHeader minimal />
 
     <main
-      class="mx-auto flex w-full flex-1 flex-col justify-center px-6 pt-8 pb-20"
-      :class="step === 'cli' ? 'max-w-xl' : 'max-w-md'"
+      class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-8 pb-20"
     >
       <ol
         aria-label="Configuración"
@@ -345,45 +343,17 @@ async function addDemoRepository() {
       </div>
 
       <div v-else class="flex flex-col gap-4">
-        <Alert v-if="!isMock">
-          <AlertDescription
-            >La conexión con la CLI todavía es una vista previa: el comando no
-            funciona aún. Puedes seguir y usar el editor sin
-            CLI.</AlertDescription
-          >
-        </Alert>
-        <CliConnectCard
-          v-for="provider in cliProviders"
-          :key="provider.id"
-          v-model:selected="cli.selected[provider.id]"
-          :provider="provider"
-          :state="cli.states[provider.id]"
-          :endpoint="cli.endpoint"
-          :token="cli.tokens[provider.id]"
-          :checking="cli.checking[provider.id]"
-          connected-at="hace un momento"
-          @generate="cli.generate(provider.id)"
-          @check="cli.check(provider.id)"
-          @revoke="cli.revoke(provider.id)"
-        />
-        <p class="text-sm text-muted-foreground" role="status">
-          {{ cli.progress.value }}
+        <CliConnectionList :connections="cli" />
+        <p v-if="!isMock" class="text-xs text-muted-foreground">
+          Vista previa: el comando todavía no funciona. Puedes seguir y usar el
+          editor sin CLI.
         </p>
         <div class="flex flex-wrap items-center gap-2">
-          <Button
-            :disabled="!cli.allChosenConnected.value"
-            @click="completeOnboarding"
-          >
+          <Button @click="completeOnboarding">
             Ir a Mis proyectos
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Button>
-          <Button
-            v-if="!cli.allChosenConnected.value"
-            variant="ghost"
-            @click="completeOnboarding"
-            >Omitir por ahora</Button
-          >
-          <Button variant="ghost" class="ms-auto" @click="step = 'github'">
+          <Button variant="ghost" @click="step = 'github'">
             <ArrowLeft data-icon="inline-start" aria-hidden="true" />
             Volver
           </Button>
