@@ -17,6 +17,7 @@ backend/
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
 │   │   ├── run.py           #   salida: el Run (branchpoint.run/v1)
+│   │   ├── traffic.py       #   perfil de tráfico en el tiempo y el preset "pico" (JAJ-71)
 │   │   ├── graph.py         #   grafo del diagrama (nodos y aristas) desde el modelo
 │   │   └── compare.py       #   delta entre dos Run y cambios entre dos modelos
 │   ├── engine/              # motor de eventos discretos
@@ -128,6 +129,48 @@ Los tests están en `tests/engine/test_attribution.py`:
 - **Hilos y colas:** se anotan a la request completa y a la cola.
 - **Template:** en CyberDay, el cuello de botella apunta a una línea de hash de contraseña con más del 50 % de la CPU.
 
+### Tráfico que cambia en el tiempo (JAJ-71)
+
+Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`. Con `traffic_profile`, la tasa sigue tramos en orden. Cada tramo dura `duration_s` y va linealmente de `from_multiplier` a `to_multiplier` veces la tasa base:
+
+```jsonc
+"traffic_profile": [
+  {"duration_s": 60,  "from_multiplier": 0.35, "to_multiplier": 1},    // subida
+  {"duration_s": 120, "from_multiplier": 1,    "to_multiplier": 1},    // meseta
+  {"duration_s": 60,  "from_multiplier": 1,    "to_multiplier": 0.5}   // bajada
+]
+// o "traffic_profile": "pico": la misma forma escalada a duration_s (25 % de subida, 45 % de meseta, 30 % de bajada)
+```
+
+**Qué cambia en el motor:**
+- **Duración:** con una lista de tramos, la duración es la suma de los tramos y `duration_s` no se usa. Con `"pico"`, la forma se escala a `duration_s`.
+- **Llegadas `poisson`:** se generan a la tasa del pico y cada una se acepta con probabilidad `perfil(t) / pico` (*thinning*, el método estándar para un Poisson con tasa variable).
+- **Llegadas `uniform`:** la siguiente llega `1 / tasa(t)` segundos después.
+
+**Qué agrega al `Run`:**
+- **`series[].target_rps`:** las req/s que pide el perfil en cada segundo, para dibujar la curva pedida contra lo que se atiende (`ok`). Sin perfil es la tasa constante.
+- **`traffic_profile`:** los tramos en req/s, con su segundo de inicio y de fin. Sin perfil es `null`.
+
+**El tope de requests por llamada** (300.000) usa el multiplicador medio del perfil.
+
+**La forma de `"pico"`** es la que usa el editor en sus datos de ejemplo. Es una elección de diseño para mostrar un evento, no una medición: en JAJ-59, el usuario la va a poder dar en el chat.
+
+**Validación** (`tests/engine/test_traffic_profile.py`), con capacidad de 100 req/s:
+
+| Tramo | Duración | Qué pasa con la cola |
+| -- | -- | -- |
+| 50 req/s | 30 s | casi no hay |
+| 150 req/s | 30 s | crece a ~1.500 requests, como sale de la cuenta (50/s × 30 s) |
+| 30 req/s | 60 s | se vacía |
+
+Además:
+- **Un perfil plano en 1×** da exactamente el mismo `Run` que la tasa constante.
+- **Con Poisson,** el total de llegadas es tasa × duración × multiplicador medio (±5 %).
+
+**Por qué importa la duración:** el timeout del cliente es de 30 s, así que una simulación de 30 s no alcanza a mostrar los errores por timeout de un evento largo. Con el template en CyberDay y `"pico"` en 300 s:
+- **La v2 (API ×3 y pooler)** aguanta la subida, pero a los 2 minutos se satura la DB y los errores llegan al 60 %.
+- **La v1 llega al 81 %** de errores.
+
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
 ## Cómo usarlo
@@ -146,6 +189,9 @@ python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario 
 
 # la DB de realworld es un db.t4g.medium: comparar con sus vCPU sostenidos (por defecto) y en burst
 python -m app.cli app/samples/fastapi-realworld-example-app.model.json --scenario pico_normal --cpu-credits burst
+
+# CyberDay con subida, meseta y bajada en 5 minutos (la serie por segundo trae target_rps)
+python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario cyberday --profile pico --duration 300 --out run.json
 
 # levantar la API en http://localhost:8000 (documentación interactiva en /docs)
 uvicorn app.api.main:app --reload
@@ -196,7 +242,8 @@ Body de `POST /runs`. Solo `model` es obligatorio:
   "arrivals": "poisson",        // o "uniform" (tasa constante, como k6)
   "client_timeout_s": 30,       // null = sin timeout
   "cache_hit_ratio": null,      // reemplaza la tasa de aciertos de las cachés con on_miss
-  "cpu_credits": "sustained"    // DB con créditos de CPU (db.t4g.*): "sustained" (vCPU sostenidos) o "burst" (todos)
+  "cpu_credits": "sustained",   // DB con créditos de CPU (db.t4g.*): "sustained" (vCPU sostenidos) o "burst" (todos)
+  "traffic_profile": null       // "pico" o una lista de tramos: tasa que cambia en el tiempo (JAJ-71)
 }
 ```
 

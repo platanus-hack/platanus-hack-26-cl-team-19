@@ -145,6 +145,41 @@ def test_run_too_large(client, raw):
     assert r.json()["error"]["code"] == "run_too_large"
 
 
+# --- perfil de tráfico (JAJ-71) -----------------------------------------------------------------
+
+
+def test_traffic_profile_pico(client, raw):
+    r = client.post("/runs", json={"model": raw, "rps": 50, "duration_s": 40, "traffic_profile": "pico"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["duration_s"] == 40 and len(body["series"]) == 40
+    assert [round(s["to_rps"], 1) for s in body["traffic_profile"]] == [50, 50, 25]
+    assert body["series"][0]["target_rps"] < body["series"][20]["target_rps"]
+
+
+def test_traffic_profile_segments_set_the_duration(client, raw):
+    profile = [
+        {"duration_s": 10, "from_multiplier": 1, "to_multiplier": 1},
+        {"duration_s": 5, "from_multiplier": 2, "to_multiplier": 0},
+    ]
+    body = client.post("/runs", json={"model": raw, "rps": 20, "traffic_profile": profile}).json()
+    assert body["duration_s"] == 15
+    assert body["series"][3]["target_rps"] == 20
+
+
+def test_traffic_profile_errors(client, raw):
+    zero = [{"duration_s": 10, "from_multiplier": 0, "to_multiplier": 0}]
+    r = client.post("/runs", json={"model": raw, "traffic_profile": zero})
+    assert r.status_code == 422 and "no llega nadie" in r.json()["error"]["message"]
+    bad = [{"duration_s": 10, "from_multiplier": 1}]
+    r = client.post("/runs", json={"model": raw, "traffic_profile": bad})
+    assert r.json()["error"]["code"] == "invalid_parameters"
+    # el tope de requests usa el multiplicador medio del perfil: 1.000 req/s × 600 s × 0,75 = 450.000
+    big = [{"duration_s": 600, "from_multiplier": 1, "to_multiplier": 0.5}]
+    r = client.post("/runs", json={"model": raw, "rps": 1000, "traffic_profile": big})
+    assert r.json()["error"]["code"] == "run_too_large" and "450,000" in r.json()["error"]["message"]
+
+
 def test_cors_allows_nuxt_dev(client):
     r = client.options(
         "/runs",
