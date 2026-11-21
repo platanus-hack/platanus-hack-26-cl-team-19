@@ -3,10 +3,16 @@
 Uso:
     GITHUB_TOKEN=... python fetch_repo.py <owner>/<repo> [--ref main] [-o salida.json] [--keep DIR]
 
-Sirve igual con un token de instalación de GitHub App, un user access token o un token de
-OAuth App: el endpoint de tarball es el mismo. Usa solo la librería estándar.
+Modo GitHub App (JAJ-65): sin GITHUB_TOKEN, firma un JWT RS256 con la private key de la app y
+pide un token de instalación acotado a ese repo y a `contents: read`.
+    GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY_PATH=~/.config/branchpoint/github-app.pem \
+    GITHUB_APP_INSTALLATION_ID=... python fetch_repo.py <owner>/<repo>
+La private key también se puede pasar con su contenido en GITHUB_APP_PRIVATE_KEY. Nunca va en el
+repo. Este modo necesita PyJWT con `cryptography` (`pyjwt[crypto]`, ya está en backend/); el modo
+con GITHUB_TOKEN usa solo la librería estándar.
 
 Pasos que mide:
+0. Solo en modo app: JWT y `POST /app/installations/{id}/access_tokens`.
 1. Descarga del tarball (`GET /repos/{owner}/{repo}/tarball/{ref}`).
 2. Extracción segura a un directorio temporal (filtro `data` de tarfile: sin rutas fuera del
    directorio, sin symlinks absolutos ni archivos de dispositivo).
@@ -36,14 +42,52 @@ API = "https://api.github.com"
 MAX_BYTES = 200 * 1024 * 1024  # tope de descarga para que un repo gigante no llene el disco
 
 
-def download_tarball(full_name: str, ref: str | None, token: str) -> bytes:
-    url = f"{API}/repos/{full_name}/tarball" + (f"/{ref}" if ref else "")
-    req = urllib.request.Request(url, headers={
+def _headers(token: str) -> dict[str, str]:
+    return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "branchpoint-spike",
-    })
+    }
+
+
+def _read_private_key() -> str:
+    if key := os.environ.get("GITHUB_APP_PRIVATE_KEY"):
+        return key
+    path = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH")
+    if not path:
+        raise SystemExit("Falta GITHUB_APP_PRIVATE_KEY_PATH (o GITHUB_APP_PRIVATE_KEY)")
+    return Path(path).expanduser().read_text()
+
+
+def app_jwt(app_id: str, private_key: str) -> str:
+    import jwt  # PyJWT; solo se necesita en modo app
+
+    now = int(time.time())
+    # iat 60 s atrás por desfase de reloj; GitHub acepta como máximo 10 min de vida.
+    return jwt.encode({"iat": now - 60, "exp": now + 9 * 60, "iss": app_id}, private_key, algorithm="RS256")
+
+
+def installation_token(full_name: str, app_id: str, installation_id: str, private_key: str) -> dict:
+    """Pide un token de instalación (1 h) acotado a un solo repo y a `contents: read`."""
+    body = json.dumps({"repositories": [full_name.split("/", 1)[1]], "permissions": {"contents": "read"}})
+    req = urllib.request.Request(
+        f"{API}/app/installations/{installation_id}/access_tokens",
+        data=body.encode(),
+        method="POST",
+        headers=_headers(app_jwt(app_id, private_key)) | {"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        raise SystemExit(f"GitHub respondió {e.code} al pedir el token de instalación: {detail}") from None
+
+
+def download_tarball(full_name: str, ref: str | None, token: str) -> bytes:
+    url = f"{API}/repos/{full_name}/tarball" + (f"/{ref}" if ref else "")
+    req = urllib.request.Request(url, headers=_headers(token))
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:  # sigue el 302 a codeload
             data = resp.read(MAX_BYTES + 1)
@@ -71,9 +115,17 @@ def main() -> None:
     ap.add_argument("--keep", type=Path, help="extraer aquí en vez de un directorio temporal")
     args = ap.parse_args()
 
+    t_start = time.perf_counter()
     token = os.environ.get("GITHUB_TOKEN")
+    mode = "token"
     if not token:
-        raise SystemExit("Falta GITHUB_TOKEN")
+        app_id = os.environ.get("GITHUB_APP_ID")
+        installation_id = os.environ.get("GITHUB_APP_INSTALLATION_ID")
+        if not (app_id and installation_id):
+            raise SystemExit("Falta GITHUB_TOKEN, o GITHUB_APP_ID y GITHUB_APP_INSTALLATION_ID para el modo app")
+        mode = "github_app"
+        granted = installation_token(args.repo, app_id, installation_id, _read_private_key())
+        token = granted["token"]  # nunca se imprime
 
     t0 = time.perf_counter()
     data = download_tarball(args.repo, args.ref, token)
@@ -90,6 +142,9 @@ def main() -> None:
 
     endpoints = graph.get("endpoints", [])
     summary = {
+        "mode": mode,
+        **({"installation_token_s": round(t0 - t_start, 2), "token_permissions": granted.get("permissions"),
+            "token_expires_at": granted.get("expires_at")} if mode == "github_app" else {}),
         "tarball_mb": round(len(data) / (1024 * 1024), 2),
         "commit_dir": root.name,
         "py_files": py_files,
