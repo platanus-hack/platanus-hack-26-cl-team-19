@@ -108,8 +108,10 @@ class UsageTracker:
     """Tiempo que cada endpoint ocupa cada recurso, y desde qué línea de código (JAJ-69).
 
     ``add`` se llama cuando una request (o un trabajo de una cola) suelta un recurso, con el tiempo
-    que lo tuvo. ``at`` es el ``archivo:línea`` del paso que lo ocupó; ``None`` si no tiene línea en
-    el modelo (ej. la CPU propia del framework o los hilos, que se toman por toda la request).
+    que lo tuvo, y al terminar la simulación por lo que sigue tomado, con el tiempo hasta el final
+    (JAJ-100). Así lo anotado de cada recurso suma todo su tiempo ocupado. ``at`` es el
+    ``archivo:línea`` del paso que lo ocupó; ``None`` si no tiene línea en el modelo (ej. la CPU propia
+    del framework o los hilos, que se toman por toda la request).
     """
 
     def __init__(self) -> None:

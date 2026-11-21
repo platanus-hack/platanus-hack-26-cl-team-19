@@ -239,3 +239,166 @@ def test_move_to_queue_errors(model):
     op = {"op": "move_to_queue", "endpoint": eid, "at": "backend/app/crud.py:58", "queue": "q", "workers": 1}
     with pytest.raises(OpError, match="Ya existe la cola"):
         apply_ops(model, [op, {**op, "at": "backend/app/crud.py:59"}])
+
+
+# --- inversas (IA-8) ------------------------------------------------------------------------------
+
+
+def total_cost(m):
+    from app.costs import estimate_cost
+
+    return estimate_cost(m).total["value"]
+
+
+def strip(m):
+    """El modelo sin lo que apply_ops recalcula siempre (supuestos y cotas)."""
+    return {k: v for k, v in m.items() if k not in ("assumptions", "checks")}
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        {"op": "add_cache", "endpoint": "GET /items/", "hit_ratio": 0.8, "quote": "el 80 % se repite"},
+        {"op": "add_cache", "endpoint": "GET /items/", "at": ["backend/app/api/routes/items.py:23"]},
+    ],
+)
+def test_add_cache_then_remove_cache_is_the_original(model, op):
+    base = apply_ops(model, [{"op": "scale_api", "replicas": 1}]).model  # misma forma que tras apply_ops
+    added = apply_ops(base, [op]).model
+    removed = apply_ops(added, [{"op": "remove_cache", "endpoint": "GET /items/"}])
+    assert endpoint(removed.model, "GET /items/")["steps"] == endpoint(base, "GET /items/")["steps"]
+    assert total_cost(removed.model) == total_cost(base)
+    assert strip(removed.model) == strip(base)
+    simulates(removed.model)
+
+
+def test_add_pooler_then_remove_pooler_is_the_original(model):
+    base = apply_ops(model, [{"op": "change_db_plan", "provider": "supabase", "plan": "small"}]).model
+    added = apply_ops(base, [{"op": "add_pooler"}]).model
+    assert "pooler" in added["deployment"]["db"]
+    removed = apply_ops(added, [{"op": "remove_pooler"}])
+    assert removed.model["deployment"]["db"] == base["deployment"]["db"]
+    assert total_cost(removed.model) == total_cost(base)
+    assert "conexiones directo" in removed.changes[0]
+    simulates(removed.model)
+
+
+def test_move_to_queue_then_move_to_sync_is_the_original(model):
+    eid, at = "POST /login/access-token", "backend/app/core/security.py:32"
+    base = apply_ops(model, [{"op": "scale_api", "replicas": 1}]).model
+    queued = apply_ops(base, [{"op": "move_to_queue", "endpoint": eid, "at": at, "queue": "hashes", "workers": 2}])
+    back = apply_ops(queued.model, [{"op": "move_to_sync", "endpoint": eid, "step": at}])
+    assert endpoint(back.model, eid) == endpoint(base, eid)  # pasos y api_cpu_ms
+    assert "queues" not in back.model["deployment"] or "hashes" not in back.model["deployment"]["queues"]
+    assert strip(back.model) == strip(base)
+    assert total_cost(back.model) == total_cost(base)
+    assert "se quitan" in back.changes[0]
+    simulates(back.model)
+
+
+def repo_cache_and_queue(model):
+    """Una caché y una cola como las arma la ingesta (sin restore_*), para probar las inversas sobre el repo."""
+    m = json.loads(json.dumps(model))
+    ep = endpoint(m, "GET /items/")
+    reads = ep["steps"][:]
+    ep["steps"] = [
+        {
+            "kind": "cache",
+            "resource": "cache",
+            "detail": "redis.get(items)",
+            "at": "backend/app/api/routes/items.py:20",
+            "time": {"value": 0.5, "unit": "ms", "label": "ESTIMADO", "source": "catálogo"},
+            "on_miss": reads,
+        }
+    ]
+    login = endpoint(m, "POST /login/access-token")
+    hash_step = next(s for s in login["steps"] if s.get("at") == "backend/app/core/security.py:32")
+    m["deployment"]["queues"] = {
+        "mails": {
+            "workers": {"value": 1, "unit": "workers", "label": "SUPUESTO", "source": "repo", "needs_review": True},
+            "job_steps": [hash_step],
+        }
+    }
+    login["steps"] = [
+        s
+        if s is not hash_step
+        else {
+            "kind": "background",
+            "resource": "background",
+            "detail": "send_email.delay",
+            "at": "backend/app/api/routes/login.py:40",
+            "time": {"value": 1, "unit": "ms", "label": "ESTIMADO", "source": "catálogo"},
+            "queue": "mails",
+        }
+        for s in login["steps"]
+    ]
+    return m, reads
+
+
+def test_remove_cache_from_the_repo_puts_reads_where_the_cache_was(model):
+    m, reads = repo_cache_and_queue(model)
+    r = apply_ops(m, [{"op": "remove_cache", "endpoint": "GET /items/"}])
+    assert endpoint(r.model, "GET /items/")["steps"] == reads
+    simulates(r.model)
+
+
+def test_move_to_sync_from_the_repo_brings_back_cpu(model):
+    m, _ = repo_cache_and_queue(model)
+    eid = "POST /login/access-token"
+    before = endpoint(m, eid)["api_cpu_ms"]["value"]
+    r = apply_ops(m, [{"op": "move_to_sync", "endpoint": eid, "step": "backend/app/api/routes/login.py:40"}])
+    ep = endpoint(r.model, eid)
+    assert any(s.get("at") == "backend/app/core/security.py:32" for s in ep["steps"])
+    assert ep["api_cpu_ms"]["value"] == pytest.approx(before + 110)
+    assert "queues" not in r.model["deployment"]
+    simulates(r.model)
+
+
+def test_remove_cache_errors(model):
+    with pytest.raises(OpError, match="no tiene caché. Tienen caché: ninguno"):
+        apply_ops(model, [{"op": "remove_cache", "endpoint": "GET /items/"}])
+    m = json.loads(json.dumps(model))
+    endpoint(m, "GET /items/")["steps"].insert(
+        0, {"kind": "cache", "resource": "cache", "at": "x.py:1", "time": {"value": 1, "unit": "ms"}}
+    )
+    with pytest.raises(OpError, match="no guarda qué se hace cuando falla"):
+        apply_ops(m, [{"op": "remove_cache", "endpoint": "GET /items/"}])
+
+
+def test_remove_pooler_without_pooler(model):
+    with pytest.raises(OpError, match="El proyecto no tiene pooler"):
+        apply_ops(model, [{"op": "remove_pooler"}])
+
+
+def test_move_to_sync_errors(model):
+    eid = "POST /login/access-token"
+    with pytest.raises(OpError, match="no encola nada en x.py:1"):
+        apply_ops(model, [{"op": "move_to_sync", "endpoint": eid, "step": "x.py:1"}])
+    m, _ = repo_cache_and_queue(model)
+    m["deployment"]["queues"]["mails"]["job_steps"] = []
+    with pytest.raises(OpError, match="no guarda los pasos de su trabajo"):
+        apply_ops(m, [{"op": "move_to_sync", "endpoint": eid, "step": "backend/app/api/routes/login.py:40"}])
+
+
+def test_scale_workers(model):
+    m, _ = repo_cache_and_queue(model)
+    r = apply_ops(m, [{"op": "scale_workers", "queue": "mails", "workers": 4, "quote": "queremos 4 workers"}])
+    w = r.model["deployment"]["queues"]["mails"]["workers"]
+    assert w["value"] == 4 and "queremos 4 workers" in w["source"] and not w.get("needs_review")
+    r = apply_ops(m, [{"op": "scale_workers", "queue": "mails", "workers": 3}])
+    w = r.model["deployment"]["queues"]["mails"]["workers"]
+    assert w["label"] == "SUPUESTO" and w["source"].startswith("Propuesta del agente") and w["needs_review"]
+    assert "1 → 3" in r.changes[0]
+    simulates(r.model)
+    assert_provenance(r.model)
+
+
+def test_scale_workers_unknown_queue(model):
+    with pytest.raises(OpError, match="No existe la cola 'x'. Hay: ninguna"):
+        apply_ops(model, [{"op": "scale_workers", "queue": "x", "workers": 2}])
+
+
+def test_ops_schema_has_the_inverse_ops():
+    text = json.dumps(ops_json_schema())
+    for name in ("remove_cache", "remove_pooler", "move_to_sync", "scale_workers"):
+        assert f'"{name}"' in text

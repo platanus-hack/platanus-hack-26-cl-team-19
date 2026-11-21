@@ -3,8 +3,15 @@
 El modelo describe endpoints y sus pasos, no cajas y flechas. Aquí se arma lo que dibuja el editor:
 
 * Nodos: la API, y la DB, caché, servicio externo, colas y sus workers que usa algún paso.
+  Si la IA del usuario propuso la arquitectura (JAJ-85, JAJ-86), cada servicio externo es un nodo con
+  su nombre, y los componentes que declaró (``deployment.services`` con ``origin``) aparecen aunque
+  ningún paso los use, con su tecnología, su ``archivo:línea`` y su procedencia en ``details``.
 * Aristas: quién llama a quién, con los endpoints que pasan por ahí y las líneas de código
   (``at``) de cada llamada, para que el banner del cuello de botella pueda apuntar al código.
+
+Con varios repos (IA-5), cada nodo trae ``repo`` y ``simulated``: el motor simula el repo principal, y cada
+repo secundario es un nodo ``service:<repo>`` (con sus componentes) que no se simula. En un proyecto de un
+solo repo, ``repo`` es ``None`` y todo queda ``simulated: true``, como antes.
 
 Los ids de nodo coinciden con los recursos del ``Run`` cuando existen (``db_cpu`` y ``db_pool``
 son de ``db``; ``api_cpu`` y ``api_threads`` de ``api``; ``queue:<nombre>`` de su cola).
@@ -12,6 +19,7 @@ son de ``db``; ``api_cpu`` y ``api_threads`` de ``api``; ``queue:<nombre>`` de s
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -51,10 +59,12 @@ class GraphEndpoint:
 @dataclass
 class GraphNode:
     id: str
-    kind: str  # api, db, cache, external, queue, worker
+    kind: str  # api, db, cache, external, queue, worker; de la IA también storage, search, other
     label: str
     resources: list[str] = field(default_factory=list)  # recursos del Run de este nodo
     details: dict[str, Any] = field(default_factory=dict)
+    repo: str | None = None  # el repo del componente, solo en proyectos de varios repos (IA-5)
+    simulated: bool = True  # false: viene de un repo secundario y el motor no lo simula
 
 
 @dataclass
@@ -93,8 +103,43 @@ class _EdgeAcc:
             self.refs.append(step.at)
 
 
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "servicio"
+
+
+def _component_details(component: dict[str, Any] | None) -> dict[str, Any]:
+    if not component:
+        return {}
+    return {
+        k: v
+        for k, v in (
+            ("technology", component.get("engine")),
+            ("at", component.get("at")),
+            ("origin", component.get("origin")),
+            ("endpoints", component.get("endpoints")),
+            ("error", component.get("error")),
+        )
+        if v is not None and v != ""
+    }
+
+
+def _secondary_id(component: dict[str, Any]) -> str:
+    if component.get("role") == "service":
+        return f"service:{_slug(component['name'])}"
+    return f"component:{_slug(component.get('repo') or '')}:{_slug(component['name'])}"
+
+
 def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
     dep = raw.get("deployment", {})
+    # Componentes que propuso la IA, y el servicio con nombre de cada llamada externa (archivo:línea)
+    ai_components = [s for s in dep.get("services", []) if s.get("origin")]
+    by_name = {s["name"].lower(): s for s in ai_components}
+    service_at = {
+        step["at"]: step["service"]
+        for ep in raw.get("endpoints", [])
+        for step in ep.get("steps", [])
+        if step.get("service") and step.get("at")
+    }
     api_raw, db_raw = dep.get("api", {}), dep.get("db", {})
     nodes: dict[str, GraphNode] = {
         "api": GraphNode(
@@ -113,7 +158,22 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
     }
     edges: dict[tuple[str, str], _EdgeAcc] = {}
 
-    def node_for(resource: str | None, queue: str | None) -> str | None:
+    def node_for(resource: str | None, queue: str | None, at: str | None = None) -> str | None:
+        if resource == RESOURCE_EXTERNAL and at in service_at:
+            name = service_at[at]
+            component = by_name.get(name.lower())
+            if component and component.get("role") == "service":  # un repo secundario (IA-5)
+                node_id = _secondary_id(component)
+                if node_id not in nodes:
+                    nodes[node_id] = GraphNode(
+                        node_id, "service", name, [], _component_details(component), component.get("repo"), False
+                    )
+                return node_id
+            node_id = f"external:{_slug(name)}"
+            if node_id not in nodes:
+                details = _component_details(component)
+                nodes[node_id] = GraphNode(node_id, "external", name, [], details)
+            return node_id
         if resource in _TARGET:
             node_id, kind, label = _TARGET[resource]
             if node_id not in nodes:
@@ -146,7 +206,7 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
 
     def add_steps(source: str, who: str, steps: Iterable[Step]) -> None:
         for step in steps:
-            target = node_for(step.resource, step.queue)
+            target = node_for(step.resource, step.queue, step.at)
             if target is None:
                 continue
             edges.setdefault((source, target), _EdgeAcc(source, target)).add(who, step)
@@ -165,6 +225,32 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
         edges[(queue_id, worker_id)] = _EdgeAcc(queue_id, worker_id)
         add_steps(worker_id, f"cola {name}", walk_steps(q.job_steps))
 
+    for component in ai_components:
+        role, details = component.get("role"), _component_details(component)
+        if component.get("simulated") is False:  # de un repo secundario: su propio nodo, nunca el del principal
+            node_id = _secondary_id(component)
+            if node_id not in nodes:
+                kind = "service" if role == "service" else role
+                nodes[node_id] = GraphNode(node_id, kind, component["name"], [], details, component.get("repo"), False)
+            continue
+        if role in ("db", "cache") and role in nodes:
+            nodes[role].details.update({k: v for k, v in details.items() if k not in nodes[role].details})
+            continue
+        if role == "external":
+            node_id = f"external:{_slug(component['name'])}"
+        elif role in ("db", "cache"):
+            node_id = role
+        else:
+            node_id = f"component:{_slug(component['name'])}"
+        if node_id not in nodes:
+            nodes[node_id] = GraphNode(node_id, role, component["name"], [], details)
+
+    sources = (raw.get("repo") or {}).get("sources") or []
+    if len(sources) > 1:  # varios repos: lo simulado es del principal
+        primary = next((src["full_name"] for src in sources if src.get("primary")), None)
+        for node in nodes.values():
+            if node.simulated and node.repo is None:
+                node.repo = primary
     return Graph(
         model=model.name,
         nodes=list(nodes.values()),

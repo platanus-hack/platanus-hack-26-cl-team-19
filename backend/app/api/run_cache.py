@@ -80,7 +80,7 @@ def cached_run(
     ``label`` reemplaza el nombre del escenario en el ``Run`` (JAJ-76: cuando la tasa sale de la tabla
     de escenarios del proyecto) y entra en la clave."""
     key = cache_key(project_id, number, params, label)
-    saved = store.find_run(key)
+    saved = store.find_run(project_id, number, key)
     if saved is not None:
         return run_from_json(saved), True
     run = run_model(model, params)

@@ -35,7 +35,10 @@ backend/
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
 │   │   └── failure.py       #   failure_cost(modelo, run): ventas en juego por hora (JAJ-74)
-│   ├── ingest/              # ingesta determinista del repo (ADR 0001, paso 1)
+│   ├── ingest/              # del repo al modelo (ADR 0001, pasos 1 y 3)
+│   │   ├── analyzer.py      #   Claude lee el repo en la ingesta de GitHub (ADR 0002)
+│   │   ├── ai_graph.py      #   schema de la arquitectura que propone la IA → grafo intermedio (JAJ-85, JAJ-86)
+│   │   ├── build_model.py   #   grafo + catálogo + IaC → model/v1, sin importar el framework (JAJ-45)
 │   │   └── iac.py           #   archivos de despliegue → servicios y números OBSERVADO (JAJ-60)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos (JAJ-55) y ProjectStore sobre Postgres (JAJ-56)
@@ -71,7 +74,7 @@ Los recursos se arman desde el `deployment` del modelo:
 
 ### Caché y colas
 
-La ingesta de repos genera los campos opcionales de caché y colas para los patrones que reconoce. Las llamadas sin un patrón identificado conservan su tiempo de espera.
+La ingesta genera los campos opcionales de caché y colas cuando la IA los reconoce en el código. Las llamadas sin un patrón identificado conservan su tiempo de espera.
 
 ```jsonc
 // paso de caché: GET; si acierta, se salta on_miss; si falla, hace on_miss y luego SET
@@ -92,7 +95,7 @@ La ingesta de repos genera los campos opcionales de caché y colas para los patr
 - Si la cola está en su `max_length`, encolar falla y la request termina con error `queue_full`. Sin `max_length`, la cola crece sin límite.
 - El `Run` trae `cache` (aciertos y fallos) y `queues` (encolados, procesados, rechazados, cola al final y latencia de los trabajos).
 
-La ingesta genera `on_miss` cuando encuentra un `get` de caché, una rama que consulta la DB solo si falla y un `set` o `setex` de la misma clave. Para Celery, el extractor resuelve las funciones de `.delay()` o `.apply_async()` con cola explícita y devuelve sus efectos en `jobs`, un mapa por identificador de función. El generador usa esos efectos para producir `job_steps` cuando la cola tiene un solo perfil de trabajo. Lee la concurrencia de workers dedicados declarados en Compose o Kubernetes.
+La IA marca `on_miss` en una lectura de caché cuando el código consulta la DB solo si la clave falta (cache-aside). Para colas (Celery, BullMQ, Sidekiq...), los pasos `background` llevan `task` y `queue`, y `jobs` trae los pasos de cada trabajo. El generador los usa para producir `job_steps` cuando la cola tiene un solo perfil de trabajo. La concurrencia de los workers sale de Compose o Kubernetes.
 
 Los datos que falten quedan como preguntas en `deployment.iac.missing`. Al construir el modelo, `--answers` admite `overrides.cache_hit_ratio` como mapa de `archivo:línea` a fracción y `deployment.queues` como mapa de nombre de cola a `workers` y `max_length`. Un `max_length` explícito de `null` indica una cola sin límite.
 
@@ -111,7 +114,7 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
   - `sustained`, el valor por defecto, usa la base de créditos. Es lo que aguanta la instancia con carga sostenida, como un CyberDay de horas.
   - `burst` usa todos los vCPU. Solo se mantiene mientras duren los créditos, o pagando el exceso.
 - **Sin estos campos,** los tiempos se usan tal cual (factor 1), como antes de JAJ-48.
-- **Los trabajos de las colas** usan sus tiempos sin ajustar. El modelo todavía no dice en qué procesador corren.
+- **En los trabajos de las colas,** la CPU del worker va sin ajustar, porque el modelo todavía no dice en qué procesador corren los workers. Sus consultas sí usan el factor de la DB, porque corren en la DB (JAJ-110; antes este README decía que todo el trabajo iba sin ajustar).
 - **El `Run` lo informa:** trae `cpu` (factores, procesadores, vCPU de la DB del plan y los simulados, y el modo de créditos), y una advertencia en `warnings` que dice qué se ajustó.
 
 **Validación del ajuste** (`tests/engine/test_cloud_factor.py`):
@@ -120,7 +123,7 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
 
 ### Quién causa el cuello de botella (JAJ-69)
 
-Cada vez que una request suelta un recurso, el motor anota cuánto tiempo lo tuvo, a nombre de su endpoint y de la línea de código del paso que lo ocupó (el `at` del paso):
+Cada vez que una request suelta un recurso, el motor anota cuánto tiempo lo tuvo, a nombre de su endpoint y de la línea de código del paso que lo ocupó (el `at` del paso). **Lo que sigue tomado al terminar la simulación también cuenta (JAJ-100):** se anota desde que se tomó hasta el final. Sin eso, en saturación, las requests que tienen el recurso y siguen en curso no le contaban a nadie, y el banner culpaba a quien menos lo ocupaba. Así, el tiempo repartido entre endpoints es todo el tiempo ocupado: calza con `utilization × capacidad × duración`.
 
 | Recurso | Línea a la que se anota |
 | -- | -- |
@@ -144,6 +147,8 @@ Los tests están en `tests/engine/test_attribution.py`:
 - **Pool:** se anota a la primera consulta de la request.
 - **Hilos y colas:** se anotan a la request completa y a la cola.
 - **Template:** en CyberDay, el cuello de botella apunta a una línea de hash de contraseña con más del 50 % de la CPU.
+- **Recursos tomados al terminar (JAJ-100):** `GET /lento` toma la conexión y espera 120 s con ella, y ninguna de sus requests termina en 60 s. Igual queda con más del 90 % del pool y el banner apunta a `lento.py:1`.
+- **Todo el tiempo se reparte:** lo anotado de cada recurso calza con `utilization × capacidad × duración`, también con requests y trabajos en curso.
 
 ### Tráfico que cambia en el tiempo (JAJ-71)
 
@@ -161,7 +166,7 @@ Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`
 **Qué cambia en el motor:**
 - **Duración:** con una lista de tramos, la duración es la suma de los tramos y `duration_s` no se usa. Con `"pico"`, la forma se escala a `duration_s`.
 - **Llegadas `poisson`:** se generan a la tasa del pico y cada una se acepta con probabilidad `perfil(t) / pico` (*thinning*, el método estándar para un Poisson con tasa variable).
-- **Llegadas `uniform`:** la siguiente llega `1 / tasa(t)` segundos después.
+- **Llegadas `uniform`:** la siguiente llega cuando la integral de la tasa desde la anterior suma 1 (JAJ-104). Lo acumulado se conserva al cruzar el borde de un tramo, y dentro de una rampa se usa la tasa que va cambiando, no la del instante. Antes, la cuenta se reiniciaba en cada borde: con tramos cortos se perdían llegadas (100 en vez de 131 con 10,5 req/s y tramos de 0,25 s), y si `1 / tasa` era más largo que el tramo no llegaba nadie.
 
 **Qué agrega al `Run`:**
 - **`series[].target_rps`:** las req/s que pide el perfil en cada segundo, para dibujar la curva pedida contra lo que se atiende (`ok`). Sin perfil es la tasa constante.
@@ -180,12 +185,38 @@ Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`
 | 30 req/s | 60 s | se vacía |
 
 Además:
-- **Un perfil plano en 1×** da exactamente el mismo `Run` que la tasa constante.
+- **Un perfil plano en 1×** da exactamente el mismo `Run` que la tasa constante, también partido en muchos tramos cortos (±1 request).
+- **Con llegadas uniformes y rampas,** el total es tasa × duración × multiplicador medio (±1 %).
 - **Con Poisson,** el total de llegadas es tasa × duración × multiplicador medio (±5 %).
 
 **Por qué importa la duración:** el timeout del cliente es de 30 s, así que una simulación de 30 s no alcanza a mostrar los errores por timeout de un evento largo. Con el template en CyberDay y `"pico"` en 300 s:
 - **La v2 (API ×3 y pooler)** aguanta la subida, pero a los 2 minutos se satura la DB y los errores llegan al 60 %.
 - **La v1 llega al 81 %** de errores.
+
+### Cuando el sistema no alcanza a atender (JAJ-89)
+
+`error_rate` solo cuenta las requests que terminaron, sea bien o con error. Una request que sigue en fila cuando se acaba la simulación, y todavía no llega al timeout del cliente, no es ni ok ni error: queda en `in_flight`. En un sistema saturado la fila crece sin parar, así que un "0 % de errores" puede esconder un colapso. Con branchpoint-shop-demo a 400 req/s, 60 s y semilla 7 (el perfil de su `simulate_demo.py`), el `Run` daba 0 % de errores con un p95 de 22 s.
+
+Por eso el `Run` trae `saturation`:
+- `saturated`: se cumplen dos condiciones.
+  1. **Muchas requests sin respuesta:** al menos 5 % (`UNANSWERED_SATURATED`).
+  2. **Una espera que crece o que llegó al timeout:** la espera que implica la fila (Ley de Little: fila / tasa de llegada) es al final al menos 1,5 veces la de la mitad, más 0,25 s (`WAIT_GROWTH` y `WAIT_GROWTH_MIN_S`). También cuenta si llegó al 80 % del timeout del cliente (`TIMEOUT_SHARE`) **si además ya hay timeouts y algún recurso está sobre el 90 %**: un endpoint sano que tarda 25 s deja una espera de 25 s, y alguna request puede vencer por azar, pero eso es latencia y no falta de capacidad. En simulaciones de más de ~2× el timeout, la espera deja de crecer porque las requests que vencen pasan a error, pero el sistema sigue colapsado.
+
+  La primera condición sola no basta. Sin saturación, la fracción en curso es latencia / duración: un endpoint sano de 3 s (una llamada a un LLM) deja 10 % en curso en 30 s. Pero en un sistema sano la espera se estabiliza en la latencia, y en uno saturado crece sin parar. La tasa de llegada se mide en una ventana de 3 s, así que un perfil que sube no se confunde con una fila que crece. Con menos de 4 s simulados no se evalúa.
+- `wait_mid_s` y `wait_end_s`: la espera a la mitad y al final.
+- `label` (`SUPUESTO`) y `source`: la procedencia de `saturated`, armada desde las constantes del motor. El editor puede mostrarla junto al aviso. El agente la recibe de dos formas:
+  - en `simulate` y `compare`, dentro del bloque `saturation`, con `label` y `source` (son de `saturated`; los conteos salen del motor);
+  - en las metas (`goals.errors` y `goals.p95`), anidada en `saturated_provenance`, para que no pise el `label` y el `source` del piso del 1 %.
+- `unanswered` y `unanswered_rate`: cuántas quedaron sin respuesta.
+- `error_rate_if_unanswered_fail`: la tasa de error si esas requests terminaran fallando. Es el techo de `error_rate`.
+- `offered_rps`: las req/s que llegaron (con perfil, el promedio).
+- `message`: el aviso en español. También va primero en `warnings`, y dice cuánto crece la espera y dónde estaba la fila.
+
+Los umbrales (5 %, ×1,5, 0,25 s y 80 % del timeout) y la forma de medir (ventana de 3 s, mínimo de 4 s) son **SUPUESTO**: los eligió el equipo, con el razonamiento de arriba, y no salen de una medición. Los tests cubren los dos lados: el colapso con 0 % de errores se marca, también en simulaciones de 60 y 120 s; un endpoint lento, una simulación corta o un perfil que sube no se marcan (`tests/engine/test_saturation.py`). Con branchpoint-shop-demo (60 s, semilla 7), a 400 req/s queda 39 % sin respuesta y la espera crece de 11 a 22 s. A 100 req/s no aparece el aviso.
+
+En `compare`, `summary` agrega "Ojo: v1 no alcanza a atender este tráfico (v1 deja 39 % de las requests sin respuesta al terminar): su tasa de error es un piso". Las metas del agente (`simulate` y `compare` de `app/agent/tools.py`) usan ese techo, así que una versión saturada nunca "cumple" por su 0 % de errores. El bloque `errors` dice con qué tasa juzgó (`basis`, `value` y el `error_rate` original), y el de `p95` dice por qué no cumple.
+
+**Runs guardados (JAJ-75):** no hay que subir ninguna versión. `ENGINE_VERSION` es el hash del código de `app/engine` y `app/models`, así que este cambio ya cambia la clave de los runs guardados y se vuelven a simular. Un `Run` guardado antes, sin `saturation`, se sigue leyendo (queda en `None`).
 
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
@@ -208,6 +239,9 @@ python -m app.cli app/samples/fastapi-realworld-example-app.model.json --scenari
 
 # CyberDay con subida, meseta y bajada en 5 minutos (la serie por segundo trae target_rps)
 python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario cyberday --profile pico --duration 300 --out run.json
+
+# un escenario que no existe, un archivo que no es un modelo o un parámetro fuera de rango:
+# "error: …" en stderr y código 2, sin traceback (JAJ-110)
 
 # levantar la API en http://localhost:8000 (documentación interactiva en /docs)
 uvicorn app.api.main:app --reload
@@ -235,7 +269,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/models/{id}` | Un modelo de ejemplo completo (`branchpoint.model/v1`). |
 | `POST` | `/graph` | Grafo del diagrama desde `{"model": ...}`: nodos, aristas con sus endpoints y `archivo:línea`, y el peso de cada endpoint. |
 | `POST` | `/projects` | Crea un proyecto desde `{"sample": id}` o `{"model": ...}`, con `name` opcional. Queda con **v1** (`origin: repo`). |
-| `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos). |
+| `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos) y `repositories`, el repo del que salió (ver "Repo de cada proyecto" abajo). |
 | `POST` | `/projects/{id}/versions` | Guarda `{"model", "origin", "parent", "note"}` como versión nueva. `origin`: `repo`, `manual` (por defecto) o `agente`; `parent`: por defecto, la última. |
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. Si ya se simuló con los mismos parámetros, devuelve el run guardado (ver "Runs guardados" abajo). |
@@ -248,6 +282,18 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
+
+**Repo de cada proyecto (JAJ-92):** `GET /projects` y `GET /projects/{id}` traen `repositories`, lo que muestran las tarjetas de "Mis proyectos", su búsqueda y el filtro por repos:
+
+```json
+"repositories": [{"id": "<id del proyecto>", "fullName": "acme/tienda", "branch": "main"}]
+```
+
+- **Las claves siguen el tipo `ProjectRepository` del editor**, por eso `fullName` va en camelCase.
+- **`id` es el id del proyecto, no el de la conexión.** El editor abre `GET /projects/{id}` con él al elegir el repo en la barra lateral. Hoy cada proyecto tiene un solo repo, así que es el mismo proyecto. Es una lista porque el editor ya sabe agrupar varios.
+- **`branch` es la rama analizada para la v1** (`projects.branch`), que puede no ser la rama por defecto del repo.
+- **`null` si el proyecto salió de un ejemplo o de un modelo subido a mano.** Con `null`, y no `[]`, el editor usa su fallback y muestra el nombre del proyecto. La tarjeta muestra `sample`.
+- **De dónde sale:** en Postgres, un `left join` de `projects` con `repo_connections` por `repo_connection_id`. La conexión la crea la ingesta con el mismo dueño del proyecto, así que el filtro por `owner_id` de JAJ-78 también aísla el repo.
 
 **Login y proyectos por usuario (JAJ-78):** con `SUPABASE_URL` en el entorno, todas las rutas de `/projects` piden el token de sesión de Supabase Auth: `Authorization: Bearer <access_token>`, el que entrega `supabase.auth.getSession()` en el frontend.
 - **Cómo se valida** (`app/api/auth.py`): la firma se revisa con las claves públicas del proyecto (JWKS, en `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`), que se bajan una vez y se vuelven a bajar si aparece una clave nueva. También se revisan `exp`, `aud = authenticated` e `iss = {SUPABASE_URL}/auth/v1`. Para un proyecto que todavía firma con el secreto compartido (HS256), va `SUPABASE_JWT_SECRET`.
@@ -307,15 +353,21 @@ Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "mes
 
 | `code` | Cuándo |
 | -- | -- |
-| `invalid_model` | El modelo no es `branchpoint.model/v1` o le falta un campo. |
+| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, o pasa un límite del servicio (ver "Límites de trabajo" abajo). |
 | `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
-| `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo). |
+| `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo), o la simulación pasó el presupuesto de eventos (trae `max_events`). |
 | `invalid_operations` | Una operación de `/ops` no se puede aplicar. El `message` dice cuál y qué valores sí existen. No guarda nada. |
 | `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.
+- **Límites de trabajo (JAJ-99).** La simulación retiene el GIL y `POST /runs` no pide login, así que una corrida que no termina deja la API sin responder. El tope de 300.000 requests no basta, porque no dice cuánto trabajo hace cada request. Hay tres frenos más:
+  - **Pasos por request:** hasta 10.000 (`MAX_STEPS_PER_REQUEST` en `app/models/architecture.py`), contando `repeat` y el peor caso de las cachés, en que todas fallan y se recorren sus `on_miss`. Vale lo mismo para el trabajo de una cola. El template llega a ~200. Más que eso responde `invalid_model`.
+  - **Colas en ciclo:** un trabajo que encola, directa o indirectamente, en su propia cola se rechaza con `invalid_model`, porque cada trabajo crearía otro sin fin. Un paso `background` de un trabajo tampoco infiere la cola cuando hay una sola: se encolaría a sí mismo. Si nombra una cola que no existe, queda un aviso y solo se simula la espera de encolar, como en un endpoint.
+  - **Presupuesto de eventos:** 20 millones por corrida (`MAX_EVENTS` en `app/engine/simulate.py`). La simulación legítima más pesada que se permite usa unos 14,4 millones: fastapi-realworld-example-app en `pico_normal`, al tope de requests, en ~11 s. Al pasarlo, el kernel lanza `SimulationTooLarge` y la API responde `run_too_large`. Garantiza que ninguna corrida quede simulando para siempre, aunque un modelo esquive los otros dos frenos.
+
+  Son límites del servicio, no números del modelo.
 
 ### Operaciones
 
@@ -328,8 +380,12 @@ Son el vocabulario con que el agente propone versiones (`app/agent/ops.py`, [ADR
 | `add_pooler()` | Agrega `deployment.db.pooler` en modo transacción | `pooler_connections` del plan. Solo Supabase en el MVP |
 | `add_cache(endpoint, at?, hit_ratio?, quote?)` | Las lecturas del endpoint GET pasan a `on_miss` de un paso de caché | Tiempo de Redis del catálogo. `hit_ratio` es un dato del usuario: solo con `quote`; sin él, 0 % de aciertos (el peor caso) |
 | `move_to_queue(endpoint, at, queue, workers, quote?)` | El paso de `at` pasa a `job_steps` de una cola nueva y la request solo encola | Tiempo de encolar del catálogo. `workers`: decisión de diseño, igual que `replicas` |
+| `remove_cache(endpoint)` | Inversa de `add_cache`: el paso de caché desaparece y sus lecturas de `on_miss` vuelven a su lugar | Ninguno nuevo. Una caché del repo sin `on_miss` se rechaza: no se sabe qué vuelve a la DB |
+| `remove_pooler()` | Inversa de `add_pooler`: la app vuelve al límite de conexiones del plan | `max_connections` del plan actual |
+| `move_to_sync(endpoint, step)` | Inversa de `move_to_queue`: el trabajo de la cola vuelve a la request (y su CPU a `api_cpu_ms`). Si la cola queda sin uso, se quita | Ninguno nuevo. Una cola sin `job_steps` se rechaza |
+| `scale_workers(queue, workers, quote?)` | Workers de una cola existente | Decisión de diseño, igual que `replicas` |
 
-Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de Redis y de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`.
+Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`. Una operación existe solo si el motor puede simular su efecto: para lo que no está (réplica de lectura, CDN, cambiar de base de datos), el agente tiene que decir que Branchpoint todavía no lo simula.
 
 ```bash
 # v2 propuesta: 3 réplicas + pooler, y compararla con v1 en CyberDay
@@ -344,16 +400,29 @@ El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las 
 1. **MCP en `/mcp` (modo principal).** El loop corre en la CLI de IA del usuario, por ejemplo Claude Code con su suscripción, y el backend solo ejecuta las tools. Branchpoint no ve ninguna credencial de IA.
 
    ```bash
-   claude mcp add --transport http branchpoint http://localhost:8000/mcp --header "Authorization: Bearer <token de sesión de Supabase>"
+   claude mcp add --scope user --transport http branchpoint http://localhost:8000/mcp --header "Authorization: Bearer <token de sesión de Supabase>"
    ```
 
    - **Con login:** el token es el mismo que usa el editor (JAJ-78), y cada usuario ve solo sus proyectos. Sin token, `/mcp` responde 401. El token de larga duración para emparejar la CLI llega con JAJ-81.
    - **Sin login** (`BRANCHPOINT_AUTH=off`): no hace falta el header.
+   - **`--scope user`:** así la tool está en cualquier carpeta. Sin eso, Claude Code la carga solo en la carpeta donde se agregó, y no aparece al abrir el repo que se quiere analizar.
 
-2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`), con un máximo de 8 vueltas por mensaje. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage` y `cost` de la tabla de precios) y `error`.
-   - **Credencial del usuario:** su API key en el header `X-Anthropic-Api-Key`. Se usa en esa request y no se guarda.
-   - **Modo demo:** con `BRANCHPOINT_CHAT_DEMO=on` y sin header, se usa la credencial del equipo (el SDK la resuelve del entorno), con 30 mensajes por usuario y por día.
-   - **Sin ninguna de las dos:** responde 422.
+2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`) u OpenAI Responses (`gpt-4.1-mini`), con un máximo de 8 vueltas por mensaje. El modelo de cada proveedor se cambia con `BRANCHPOINT_<ANTHROPIC|OPENAI>_<CHAT|EXTRACT>_MODEL` (`model_for` en `app/agent/loop.py`). Los dos adaptadores aceptan imágenes en los mensajes del usuario, como bloques `image` con la forma de Anthropic. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage`, `cost` de la tabla de precios y `evidence`) y `error`.
+
+   **Adjuntos y evidencia (IA-7).** Cada mensaje del usuario puede llevar `attachments` (hasta 5 ids de la sección de adjuntos). En el último mensaje, una imagen va al modelo como bloque de imagen y un log como una línea con su id; las imágenes de mensajes anteriores no se reenvían. Con sesión y Storage, el chat suma cinco tools (no se publican por MCP):
+
+   | Tool | Qué hace |
+   | -- | -- |
+   | `list_attachments` | Los adjuntos vigentes del proyecto |
+   | `read_log`, `grep_log` | Tramos del log, numerados (hasta 400 líneas o 100 coincidencias) |
+   | `analyze_log` | Resumen determinista (`app/agent/logs.py`, sin LLM): pico y media de req/s en ventanas de 60 s, tasa de 5xx, p95 si el log trae duración y peso de cada endpoint del modelo. Todo `OBSERVADO`, con las líneas como fuente. Acepta access log combinado (nginx, Apache, gunicorn), uvicorn con hora y JSON por línea |
+   | `apply_log_traffic` | Versión nueva con el pico y los pesos observados. Vuelve a analizar el log: no recibe números |
+
+   Un número leído en una imagen no se guarda hasta que el usuario lo confirma: `set_traffic` y las demás siguen pidiendo `quote`. `done.evidence` dice qué falta respaldar en la última versión (`pending_evidence`, sin LLM): tráfico pico, pesos de endpoints, latencia de servicios externos y tasa de aciertos de caché, cuando son supuestos por revisar.
+   - **Credencial guardada:** el onboarding y Configuración usan `GET /credentials` para listar proveedores configurados y `PUT /credentials/{provider}` o `DELETE /credentials/{provider}` para guardar o quitar la clave. Requiere sesión de Supabase, `DATABASE_URL` y las migraciones aplicadas en Supabase con Vault. La lectura devuelve solo los nombres de proveedor. Cuando no llega un header, OpenAI usa la clave guardada y Claude usa la opción elegida en Configuración.
+   - **Credencial por solicitud:** envía `provider: "anthropic"` (predeterminado) con `X-Anthropic-Api-Key` o `provider: "openai"` con `X-OpenAI-Api-Key`. Se usa en esa request y no se guarda.
+   - **Cuota de Branchpoint:** configura `ANTHROPIC_API_KEY` (y, opcional, `OPENAI_API_KEY`) en el backend. Es la opción inicial y requiere sesión. La cuota es por usuario y por día UTC, separada para el chat (`BRANCHPOINT_TEAM_CHAT_LIMIT`, 30 mensajes) y para la extracción (`BRANCHPOINT_TEAM_EXTRACT_LIMIT`, 5 repos), con contador atómico en Postgres (`team_chat_usage`). La key del header o la personal elegida no consumen cuota. `llm_key` en `app/api/routes/credentials.py` hace la elección y devuelve también de dónde salió la key (`header`, `personal` o `team`). Sin `OPENAI_API_KEY`, OpenAI usa siempre la API key del usuario.
+   - **Sin credencial aplicable:** responde 422.
 
 | Tool | Qué hace |
 | -- | -- |
@@ -367,6 +436,7 @@ El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las 
 | `set_traffic` | Tráfico del usuario → pico en req/s y escenario del evento, como versión nueva |
 | `set_deployment` | Réplicas, vCPU o plan de DB del usuario, como versión nueva |
 | `set_goals` | Metas del proyecto: p95, errores y presupuesto |
+| `submit_architecture` | Solo MCP. La arquitectura de un repo que la CLI leyó en local: crea el proyecto o suma una versión (ver abajo) |
 
 Reglas, iguales en los dos modos:
 
@@ -376,9 +446,53 @@ Reglas, iguales en los dos modos:
 - **Límites por usuario:** 60 llamadas por minuto y 300 simulaciones por día (`compare` cuenta 2). Son en memoria, por instancia de la API.
 - **Metas:** `projects.slo_p95_ms`, `slo_error_rate` y `budget_usd_month` del modelo de datos (JAJ-55). El p95 solo mide las requests exitosas. Por eso, si el usuario no declaró una meta de errores, `simulate` y `compare` exigen un piso de 1 % (`SUPUESTO`, y lo dicen): una versión que rechaza el 85 % de las requests nunca cumple, aunque su p95 sea bajo.
 
-`read_file` y `grep` no están. En el modo MCP sobran, porque la CLI del usuario lee su repo local. Para el chat haría falta guardar el repo extraído.
+#### La arquitectura del repo la lee una IA (ADR 0002, JAJ-85, JAJ-86)
+
+No hay extractores por framework: Branchpoint funciona igual con Express, Django, FastAPI, Spring, Go o Rails. Una IA lee el repo y entrega su arquitectura con un schema estricto (`app/ingest/ai_graph.py`), y el backend le pone los números:
+
+```
+CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingestions)
+  lee el repo local                        Claude lee el tarball: list_files, read_file, grep (analyzer.py)
+  submit_architecture ───────┐   ┌──────── submit_architecture (mismo schema)
+                             ▼   ▼
+              ai_graph: valida → grafo intermedio (origin: ia)   + iac.py (archivos de despliegue)
+              build_model.build_from_graph: catálogo → model/v1
+```
+
+- **La IA clasifica; los números salen del catálogo.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache` (con `on_miss`), `external` (con el nombre del servicio), `background` (con `task` y `queue`) o `cpu`. El schema no acepta tiempos, filas ni costos.
+- **La configuración se cita, no se inventa.** Los workers de la API y el pool de conexiones van en `observations`, con el `archivo:línea` donde está escrito el número. En la ingesta, el servidor revisa que el número esté en esa línea: si está, queda `OBSERVADO`, y si no, se descarta con un aviso. Desde la CLI no puede revisarlo, así que queda `ESTIMADO` y por revisar.
+- **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`, `via: "cli"` o `"ingesta"`). Los tiempos de sus pasos son `ESTIMADO` como máximo. La CPU base queda `SUPUESTO` si el framework no es en el que la midió el catálogo.
+- **La IaC manda.** Si un archivo de despliegue declara un servicio con el mismo nombre que un componente de la IA, se queda el de la IaC. Los workers de la IaC ganan sobre los que cita la IA.
+- **Volver a mandar.** Con `project_id`, `submit_architecture` guarda una versión nueva (origen `agente`) con la arquitectura nueva, y conserva el despliegue, el tráfico y lo que dijo la IaC.
+- **Diagrama.** `POST /graph` dibuja cada servicio externo con su nombre y los componentes declarados (caché, storage, colas) con su tecnología, `archivo:línea` y procedencia, aunque ningún paso los use.
+- **Ingesta de GitHub.** `POST /github/ingestions` acepta `provider` (`anthropic` u `openai`). La key sale como en el chat (`llm_key(..., purpose="extract")`): la del header (`X-Anthropic-Api-Key` o `X-OpenAI-Api-Key`, no se guarda), la personal elegida o la de Branchpoint, que descuenta 1 de la cuota de extracción. Sin ninguna, 422; sin cuota, 429 `team_extract_quota`. El modelo de cada proveedor sale de `model_for(provider, "extract")`. Hasta 40 vueltas de lectura; el modelo guarda proveedor, modelo, tokens, vueltas, costo y lo descartado en `repo.source.analysis`.
+- **Varios repos (IA-5).** `POST /github/ingestions` acepta `repos` (entre 1 y 4, sin repetidos) y `primary` (obligatorio con más de uno), además del cuerpo de un solo repo. Cada repo descuenta 1 de la cuota de extracción, todos o ninguno. Se analizan en paralelo, cada uno con su LLM; si falla el principal la ingesta falla, y si falla un secundario sigue con un aviso. El motor simula el principal; cada secundario entra en `deployment.services` con `role: "service"` y `simulated: false`, con sus componentes (sin duplicar los del principal). Un paso externo que nombra a un secundario queda enlazado a su servicio (`app/ingest/multirepo.py`). `repo.sources` lista todos los repos; `POST /graph` pasa `repo` y `simulated` a cada nodo, y `GET /projects` lista todos los repos en `repositories`, con `primary`.
+- **Evidencia verificada (IA-4).** Cada entrega del analizador pasa por `check_evidence` (`app/ingest/ai_graph.py`): el archivo existe dentro del repo (sin salir por symlink), la línea está en rango y, en los endpoints, el segmento fijo más largo de la ruta aparece a ±30 líneas. Los problemas vuelven al modelo; tras 3 entregas así, se acepta sin esos elementos y quedan en `analysis.dropped` y en `warnings`. Sin ningún endpoint válido, falla.
+- **Tope y progreso.** Con la key de Branchpoint, el análisis se corta al pasar `BRANCHPOINT_TEAM_EXTRACT_TOKENS` (1.500.000 por defecto, provisorio hasta medir con IA-0). `GET /github/ingestions/{id}` trae `llm_steps` en vivo y `cost` al terminar. Un error del proveedor (key inválida, sin crédito) deja la ingesta `failed` con el mensaje del proveedor, sin la key. `AnthropicLLM` marca el último bloque con `cache_control`: el historial que se reenvía en cada vuelta se cobra como lectura de caché.
+
+El chat del editor no ofrece `submit_architecture`, porque no ve el repo.
+
+`read_file` y `grep` no están entre las tools del agente: en el modo MCP sobran, porque la CLI lee su repo local, y en la ingesta las usa el analizador. Para el chat haría falta guardar el repo extraído.
 
 `BRANCHPOINT_MCP_ALLOWED_HOSTS` (separados por coma; por defecto localhost) define los `Host` que acepta `/mcp`, como protección contra DNS rebinding. En producción va el dominio de la API.
+
+### Adjuntos del chat (IA-6)
+
+El usuario sube imágenes y logs para que el agente los use como evidencia. El archivo va del navegador a Supabase Storage con una URL firmada: el backend no lo recibe, solo firma, registra y descarga cuando una tool lo pide (`app/storage/attachments.py`, rutas en `app/api/routes/attachments.py`).
+
+| Ruta | Hace |
+| -- | -- |
+| `POST /projects/{id}/attachments` con `{filename, media_type, bytes}` | Valida tipo, tamaño y tope; deja la fila `pending` y devuelve `{id, kind, upload_url, content_type, expires_at}` |
+| `PUT upload_url` (desde el navegador, con `Content-Type: content_type`) | Sube el archivo a Storage |
+| `POST /projects/{id}/attachments/{aid}/complete` | Compara tamaño y tipo con lo declarado y lo marca `ready` (204). Si no calza, lo borra (422) |
+| `GET /projects/{id}/attachments` | Los `ready` vigentes |
+| `DELETE /projects/{id}/attachments/{aid}` | Borra objeto y fila |
+
+- Imágenes PNG, JPEG, WebP o GIF hasta 5 MB; logs `.log`, `.txt`, `.csv`, `.json` o `.ndjson` hasta 10 MB. Máximo 20 vigentes por proyecto.
+- Vencen a las `BRANCHPOINT_ATTACHMENT_TTL_HOURS` horas (24). Sin cron: cada `POST` y `GET` borra antes los vencidos del usuario; `purge_expired(store, storage, None)` limpia los de todos.
+- Bucket privado `chat-attachments` y tabla `chat_attachments`, sin políticas para `anon` ni `authenticated` (migración `20261121181000_chat_attachments.sql`). Ruta del objeto: `<owner>/<proyecto>/<adjunto>/<nombre saneado>`.
+- Piden sesión: sin login responden 401. Sin `SUPABASE_URL` y `SUPABASE_SECRET_KEY`, 503.
+- `tests/storage/test_supabase_storage.py` prueba el cliente contra el Storage del stack local con `TEST_SUPABASE_URL` y `TEST_SUPABASE_SECRET_KEY`.
 
 ### Costos (JAJ-72)
 
@@ -428,6 +542,13 @@ curl -s localhost:8000/projects/$P/versions/1/costs
 curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "replicas": 3}]}' localhost:8000/projects/$P/versions/1/ops
 curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 10}' localhost:8000/projects/$P/compare | python -c 'import json,sys; print(json.load(sys.stdin)["cost_delta"])'
 ```
+
+**API o DB sin precio (JAJ-88).** Solo hay precios para la API en `fargate` y para la DB en `supabase` o `rds_postgres`. En `local` cuestan US$0, y en otro proveedor (por ejemplo `render`) no tienen precio. En ambos casos el total no las incluye, así que **no cambia con sus réplicas ni con su plan**. Un repo importado con Docker Compose queda en `local`. Con branchpoint-shop-demo, por ejemplo, 1 y 5 réplicas daban "= Igual", y los US$62/mes eran solo la caché.
+- **`CostEstimate.missing`:** `["api", "db"]`, los componentes sin precio. El primer elemento de `warnings` lo explica y dice qué proveedor usar para comparar.
+- **`CostDelta.missing`:** los que faltan en alguna de las dos versiones. `missing_a` y `missing_b` dicen en cuál. `a`, `b`, `diff`, `pct` y `by_line` **cuentan solo los componentes con precio en las dos**. Si v1 está en local y v2 en Fargate, sumar la API (y su ALB) haría que todo el "+US$X" fuera la API de v2, presentado como una diferencia. En ese caso el resumen dice "sin contar la API (con precio solo en v2)". Los totales completos siguen en `cost_a` y `cost_b`.
+- **Proveedores con precio:** lo que falta se detecta de las mismas funciones que calculan el precio. `PRICED_API` y `PRICED_DB` solo arman el aviso, y un test comprueba que coinciden.
+- **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
+- **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Si lo que tiene precio ya supera el presupuesto, queda en `false`, porque lo que falta solo puede sumar. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
 
 ### Costo de fallar (JAJ-74)
 

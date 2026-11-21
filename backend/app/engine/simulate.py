@@ -44,11 +44,12 @@ import math
 import time
 from bisect import bisect_right
 from collections.abc import Generator
-from itertools import accumulate
+from itertools import accumulate, count
 from typing import Any
 
 from app.engine.kernel import Resource, Sim
 from app.engine.metrics import (
+    ERROR_CLIENT_TIMEOUT,
     ERROR_DB_REFUSED,
     ERROR_POOL_TIMEOUT,
     ERROR_QUEUE_FULL,
@@ -76,6 +77,7 @@ from app.models.run import (
     QueueStats,
     ResourceStats,
     Run,
+    Saturation,
     SecondSample,
 )
 from app.models.traffic import TrafficProfile
@@ -87,10 +89,51 @@ RESOURCE_LABELS = {
     "db_cpu": "CPU de la DB",
 }
 SATURATION_WARNING = 0.9  # JAJ-44: sobre esto, latencia y errores se muestran como piso
+# JAJ-89: cuándo el sistema "no alcanza a atender". Todos estos números son SUPUESTO, elegidos por el
+# equipo (no medidos), y saturation_source() los cita en cada Run:
+# * UNANSWERED_SATURATED: fracción mínima de requests sin respuesta al terminar para avisar. Por sí sola
+#   no basta: sin saturación, la fracción en curso es latencia / duración (un endpoint sano de 3 s en
+#   30 s deja 10 %).
+# * WAIT_GROWTH y WAIT_GROWTH_MIN_S: la espera que implica la fila (Ley de Little: fila / tasa de
+#   llegada) tiene que crecer entre la mitad y el final. Sana, se estabiliza en la latencia; saturada,
+#   crece. El mínimo en segundos evita que el ruido de esperas de milisegundos cuente como crecer.
+# * TIMEOUT_SHARE: o la espera llegó cerca del timeout del cliente. En simulaciones largas (más de ~2×
+#   el timeout) la espera deja de crecer porque las que vencen pasan a error, y sigue colapsado.
+# * WAIT_WINDOW_S y MIN_SECONDS_FOR_GROWTH: cómo se mide (ventana de la tasa de llegada, y bajo cuántos
+#   segundos no se evalúa).
+UNANSWERED_SATURATED = 0.05
+WAIT_GROWTH = 1.5
+WAIT_GROWTH_MIN_S = 0.25
+TIMEOUT_SHARE = 0.8
+WAIT_WINDOW_S = 3
+MIN_SECONDS_FOR_GROWTH = 4
+
+
+def saturation_source() -> str:
+    """De dónde sale ``Saturation.saturated``: los umbrales, armados desde las constantes (JAJ-89)."""
+    return (
+        f"JAJ-89, umbrales elegidos por el equipo: saturado = al menos {_es(UNANSWERED_SATURATED * 100)} % de las "
+        f"requests sin respuesta al terminar, y una espera (Ley de Little, tasa de llegada en {WAIT_WINDOW_S} s) "
+        f"que crece de la mitad al final (×{_es(WAIT_GROWTH)} más {_es(WAIT_GROWTH_MIN_S)} s) o que llega al "
+        f"{_es(TIMEOUT_SHARE * 100)} % del timeout del cliente. No se evalúa con menos de {MIN_SECONDS_FOR_GROWTH} s."
+    )
+
+
+def _es(x: float) -> str:
+    """Un número con coma decimal: 1.5 → '1,5'."""
+    return f"{x:g}".replace(".", ",")
+
+
 BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
 CPU_CREDITS = ("sustained", "burst")
 QUEUE_PREFIX = "queue:"
+# Presupuesto de eventos por corrida (JAJ-99). La simulación legítima más pesada que se permite (el
+# tope de 300.000 requests de la API con fastapi-realworld-example-app en pico_normal, 48 eventos
+# por request por sus N+1) usa unos 14,4 millones y tarda ~11 s. El presupuesto le deja margen y
+# garantiza que ninguna corrida quede simulando para siempre. Es un límite del servicio, no un
+# número del modelo.
+MAX_EVENTS = 20_000_000
 
 
 def resource_label(name: str) -> str:
@@ -167,21 +210,36 @@ def simulate(
     cache = [0, 0]  # aciertos, fallos
     rec = Recorder(duration_s, model.endpoints, resources)
     usage = UsageTracker()
+    # lo que está tomado ahora: clave -> (recurso, dueño, línea, desde cuándo). Al soltarlo se anota en
+    # ``usage``; lo que sigue tomado al terminar se anota hasta ``duration_s`` (JAJ-100). Sin esto, en
+    # saturación las requests que tienen el recurso (y siguen en curso) no le cuentan a nadie.
+    held: dict[int, tuple[str, str, str | None, float]] = {}
+    hold_ids = count()
+
+    def take(res: Resource, owner: str, at: str | None) -> int:
+        key = next(hold_ids)
+        held[key] = (res.name, owner, at, sim.now)
+        return key
+
+    def give_back(key: int) -> None:
+        name, owner, at, since = held.pop(key)
+        usage.add(name, owner, at, sim.now - since)
+
     in_flight: dict[int, tuple[Endpoint, float]] = {}
     api_latency_s = model.api.latency_ms / 1000
     pool_timeout_s = model.db.pool_timeout_s
 
     def hold(res: Resource, scale: float, ms: float, owner: str, at: str | None) -> Generator[Any, Any, None]:
         yield res.acquire()
-        seconds = ms * scale / 1000
-        yield seconds
+        key = take(res, owner, at)
+        yield ms * scale / 1000
         res.release()
-        usage.add(res.name, owner, at, seconds)
+        give_back(key)
 
     def run_steps(steps: tuple[Step, ...], conn: list[Any] | None, owner: str) -> Generator[Any, Any, str | None]:
-        """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, desde cuándo,
-        línea que la tomó]`` de la request; ``None`` en un trabajo de una cola (usa su propia conexión
-        y su propia CPU). ``owner``: a nombre de quién se anota el uso de cada recurso."""
+        """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, clave en
+        held]`` de la request; ``None`` en un trabajo de una cola (usa su propia conexión y su propia
+        CPU). ``owner``: a nombre de quién se anota el uso de cada recurso."""
         for step in steps:
             res, ms = step.resource, step.time_ms
             for _ in range(step.repeat):
@@ -191,7 +249,7 @@ def simulate(
                             return ERROR_DB_REFUSED
                         if not (yield pool.acquire(pool_timeout_s)):
                             return ERROR_POOL_TIMEOUT
-                        conn[:] = [True, sim.now, step.at]
+                        conn[:] = [True, take(pool, owner, step.at)]
                     if ms > 0:
                         yield from hold(db_cpu, db_scale, ms, owner, step.at)
                 elif res == RESOURCE_API_CPU and conn is not None:
@@ -229,10 +287,10 @@ def simulate(
     def job(q: _QueueCounters, t0: float) -> Generator[Any, Any, None]:
         owner = f"cola {q.config.name}"
         yield q.resource.acquire()
-        started = sim.now
+        key = take(q.resource, owner, None)
         yield from run_steps(q.config.job_steps, None, owner)
         q.resource.release()
-        usage.add(q.resource.name, owner, None, sim.now - started)
+        give_back(key)
         q.processed += 1
         q.latencies_ms.append((sim.now - t0) * 1000)
 
@@ -243,17 +301,17 @@ def simulate(
             yield api_latency_s
         if not ep.is_async:
             yield threads.acquire()
-            thread_since = sim.now
+            thread = take(threads, ep.id, None)
         if ep.base_cpu_ms > 0:
             yield from hold(api_cpu, api_scale, ep.base_cpu_ms, ep.id, None)
-        conn: list[Any] = [False, 0.0, None]
+        conn: list[Any] = [False, None]
         error = yield from run_steps(ep.steps, conn, ep.id)
         if conn[0]:
             pool.release()
-            usage.add(pool.name, ep.id, conn[2], sim.now - conn[1])
+            give_back(conn[1])
         if not ep.is_async:
             threads.release()
-            usage.add(threads.name, ep.id, None, sim.now - thread_since)
+            give_back(thread)
         del in_flight[rid]
         rec.finish(ep, t0, sim.now, error, client_timeout_s)
 
@@ -281,10 +339,15 @@ def simulate(
 
         Poisson: se generan candidatas a la tasa del pico y se acepta cada una con probabilidad
         ``perfil(t) / pico`` (thinning, el método estándar para un Poisson con tasa variable).
-        Uniforme: la siguiente llega ``1 / tasa(t)`` segundos después; si eso cruza el borde del tramo,
-        se salta al borde y se vuelve a calcular con la tasa nueva.
+        Uniforme: la siguiente llega cuando la integral de la tasa desde la anterior suma 1 (JAJ-104).
+        Lo acumulado se conserva al cruzar el borde de un tramo, así que un perfil plano en 1× da las
+        mismas llegadas que la tasa constante, con tramos de cualquier largo. Dentro de un tramo la tasa
+        es lineal y el instante sale de una cuadrática. Antes se reiniciaba la cuenta en cada borde y
+        se usaba la tasa del instante para todo el intervalo: se perdían llegadas en cada borde y, si
+        ``1 / tasa`` era más largo que el tramo, no llegaba nadie.
         """
         peak = profile.peak
+        need = 1.0  # integral de tasa × tiempo que falta para la próxima llegada
         while sim.now < duration_s:
             if arrivals == "poisson":
                 yield sim.rng.expovariate(rate * peak)
@@ -293,12 +356,19 @@ def simulate(
                 if sim.rng.random() * peak < profile.multiplier_at(sim.now):
                     arrive()
                 continue
-            lam = rate * profile.multiplier_at(sim.now)
+            m, k = profile.multiplier_at(sim.now), profile.slope_at(sim.now)
             boundary = profile.next_change(sim.now)
-            if lam <= 0 or sim.now + 1.0 / lam > boundary:
-                yield boundary - sim.now
+            if boundary <= sim.now:  # después del final del perfil: no llega nadie más
+                return
+            window = boundary - sim.now
+            target = need / rate  # en multiplicador × segundos
+            if m * window + k * window * window / 2 < target:
+                need -= rate * (m * window + k * window * window / 2)
+                yield window
                 continue
-            yield 1.0 / lam
+            # m·dt + k·dt²/2 = target, en la forma estable (sin restar números parecidos)
+            yield 2 * target / (m + math.sqrt(max(m * m + 2 * k * target, 0.0)))
+            need = 1.0
             if sim.now >= duration_s:
                 return
             arrive()
@@ -310,7 +380,7 @@ def simulate(
 
     sim.start(source() if traffic_profile is None else profiled_source(traffic_profile))
     sim.start(sampler())
-    sim.run(until=duration_s)
+    sim.run(until=duration_s, max_events=MAX_EVENTS)
 
     still_running = 0
     for ep, t0 in in_flight.values():
@@ -318,6 +388,9 @@ def simulate(
             rec.timeout_in_flight(ep)
         else:
             still_running += 1
+    # lo que sigue tomado al terminar también ocupa el recurso: se anota hasta el final (JAJ-100)
+    for name, owner, at, since in held.values():
+        usage.add(name, owner, at, duration_s - since)
 
     hits, misses = cache
     cache_stats = CacheStats(hits, misses, round(hits / (hits + misses), 4) if hits + misses else None)
@@ -352,6 +425,7 @@ def simulate(
         cpu,
         usage,
         traffic_profile,
+        client_timeout_s,
     )
 
 
@@ -471,6 +545,7 @@ def _build_run(
     cpu: CpuAdjustment,
     usage: UsageTracker,
     profile: TrafficProfile | None,
+    client_timeout_s: float | None = None,
 ) -> Run:
     resource_stats = [
         ResourceStats(
@@ -491,6 +566,10 @@ def _build_run(
     errors = sum(rec.error_types.values())
     all_latencies = [ms for second in rec.latencies_ms for ms in second]
 
+    requests = sum(rec.arrivals)
+    saturation = _saturation(requests, errors, still_running, duration_s, resource_stats, rec, client_timeout_s)
+    if saturation.message:
+        warnings.insert(0, saturation.message)  # primero: es lo que cambia cómo leer el resto
     for rs in resource_stats:
         if rs.utilization >= SATURATION_WARNING:
             warnings.append(
@@ -505,7 +584,7 @@ def _build_run(
         seed=seed,
         duration_s=duration_s,
         arrivals=arrivals,
-        requests=sum(rec.arrivals),
+        requests=requests,
         ok=ok,
         errors=dict(rec.error_types),
         in_flight=still_running,
@@ -544,6 +623,112 @@ def _build_run(
         ],
         traffic_profile=_profile_segments(profile, rate),
         elapsed_ms=round((time.perf_counter() - wall_start) * 1000, 1),
+        saturation=saturation,
+    )
+
+
+def _pct(x: float) -> str:
+    return f"{x * 100:.0f} %"
+
+
+def _secs(x: float) -> str:
+    return f"{x:.1f}".replace(".", ",") + " s"
+
+
+def _thousands(n: int) -> str:
+    """9317 → '9.317', como se escriben los miles en español."""
+    return f"{n:,}".replace(",", ".")
+
+
+def _implied_wait_s(rec: Recorder, second: int) -> float:
+    """Espera que implica la fila al final del segundo ``second`` (Ley de Little: fila / tasa de llegada).
+
+    La fila es lo que llegó y todavía no termina (ok o error). La tasa de llegada se estima con los
+    últimos ``WAIT_WINDOW_S`` segundos, así un perfil que sube no se confunde con una fila que crece.
+    Si en esa ventana no llegó nada (un perfil que baja a 0) pero queda fila, se usa la tasa promedio
+    hasta ese segundo: con 0 la espera sería infinita, y devolver 0 escondería la fila.
+    """
+    backlog = sum(rec.arrivals[: second + 1]) - sum(rec.ok[: second + 1]) - sum(rec.errors[: second + 1])
+    if backlog <= 0:
+        return 0.0
+    window = rec.arrivals[max(0, second + 1 - WAIT_WINDOW_S) : second + 1]
+    arrival_rate = sum(window) / len(window) if window else 0.0
+    if arrival_rate <= 0:
+        arrival_rate = sum(rec.arrivals[: second + 1]) / (second + 1)
+    return backlog / arrival_rate if arrival_rate > 0 else 0.0
+
+
+def _saturation(
+    requests: int,
+    errors: int,
+    unanswered: int,
+    duration_s: float,
+    stats: list[ResourceStats],
+    rec: Recorder,
+    client_timeout_s: float | None = None,
+) -> Saturation:
+    """Si la fila crece sin parar y quedan muchas requests sin respuesta, el sistema no alcanza a atender
+    (JAJ-89).
+
+    ``error_rate`` no cuenta las requests sin respuesta (no son ok ni error todavía), así que un sistema
+    colapsado puede dar "0 % de errores" con un p95 de decenas de segundos. Pero quedar en curso no basta
+    para decir que está saturado: con un endpoint lento o una simulación corta, una fracción sana queda
+    en curso (latencia / duración). Por eso se exigen las dos cosas: muchas sin respuesta
+    (``UNANSWERED_SATURATED``) y una espera que crece entre la mitad y el final (``WAIT_GROWTH``) o que
+    llegó cerca del timeout del cliente (``TIMEOUT_SHARE``: en simulaciones largas deja de crecer porque
+    las que vencen pasan a error, y sigue colapsado).
+    """
+    rate = unanswered / requests if requests else 0.0
+    worst = (errors + unanswered) / requests if requests else 0.0
+    wait_mid = wait_end = 0.0
+    growing = at_timeout = False
+    if rec.seconds >= MIN_SECONDS_FOR_GROWTH:
+        wait_mid = _implied_wait_s(rec, rec.seconds // 2 - 1)
+        wait_end = _implied_wait_s(rec, rec.seconds - 1)
+        growing = wait_end >= WAIT_GROWTH * wait_mid + WAIT_GROWTH_MIN_S
+        # llegar cerca del timeout solo cuenta si hay timeouts de verdad y algún recurso está saturado: un
+        # endpoint sano que tarda 25 s también deja una espera de 25 s (y alguno puede vencer por azar),
+        # pero eso es latencia, no falta de capacidad
+        timed_out = rec.error_types.get(ERROR_CLIENT_TIMEOUT, 0) > 0
+        full = any(s.utilization >= SATURATION_WARNING for s in stats)
+        at_timeout = (
+            client_timeout_s is not None and timed_out and full and wait_end >= TIMEOUT_SHARE * client_timeout_s
+        )
+    saturated = rate >= UNANSWERED_SATURATED and (growing or at_timeout)
+    message = None
+    if saturated:
+        queued = max(stats, key=lambda s: (s.final_queue, s.utilization), default=None)
+        where = (
+            f" La fila estaba en {queued.label} ({_thousands(queued.final_queue)} esperando)."
+            if queued is not None and queued.final_queue
+            else ""
+        )
+        wait = (
+            f"La espera crece sin parar: unos {_secs(wait_mid)} a la mitad y {_secs(wait_end)} al final."
+            if growing
+            else f"La espera llegó a unos {_secs(wait_end)}, cerca del timeout del cliente ({_secs(client_timeout_s)}): "
+            "las que vencen pasan a error."
+        )
+        advice = (
+            "Simula más tiempo para ver los timeouts, o toma la tasa de error como piso."
+            if growing
+            else "Toma la tasa de error como piso: la fila no se vacía."
+        )
+        message = (
+            f"El sistema no alcanza a atender este tráfico: {_thousands(unanswered)} de {_thousands(requests)} "
+            f"requests ({_pct(rate)}) seguían sin respuesta al terminar y no cuentan como error. {wait}{where} Si "
+            f"terminaran fallando, la tasa de error sería {_pct(worst)}. {advice}"
+        )
+    return Saturation(
+        saturated=saturated,
+        offered_rps=round(requests / duration_s, 3) if duration_s > 0 else 0.0,
+        unanswered=unanswered,
+        unanswered_rate=round(rate, 4),
+        error_rate_if_unanswered_fail=round(worst, 4),
+        message=message,
+        wait_mid_s=round(wait_mid, 3),
+        wait_end_s=round(wait_end, 3),
+        source=saturation_source(),
     )
 
 

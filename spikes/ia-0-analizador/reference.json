@@ -1,0 +1,87 @@
+{
+  "_doc": "Endpoints reales de cada repo, contados a mano (IA-0). Rutas normalizadas: parámetros como {}, sin barra final. Para mealie solo el conteo de decoradores @router.<método> (292).",
+  "repos": {
+    "fastapi-realworld-example-app": {
+      "url": "https://github.com/nsidnev/fastapi-realworld-example-app",
+      "commit": "029eb77",
+      "framework": "fastapi",
+      "compose": true,
+      "source": "backend/app/samples/fastapi-realworld-example-app.model.json (el extractor AST) y grep de @router.<método>: 19",
+      "endpoints": "from_sample:fastapi-realworld-example-app"
+    },
+    "full-stack-fastapi-template": {
+      "url": "https://github.com/fastapi/full-stack-fastapi-template",
+      "commit": "77e550a",
+      "framework": "fastapi",
+      "compose": true,
+      "source": "backend/tests/fixtures/full-stack-fastapi-template.model.json y grep de @router.<método>: 23",
+      "endpoints": "from_fixture:full-stack-fastapi-template"
+    },
+    "node-express-realworld-example-app": {
+      "url": "https://github.com/gothinkster/node-express-realworld-example-app",
+      "commit": "30b68e1",
+      "framework": "express",
+      "compose": false,
+      "source": "grep de router.<método>( en src/: 19, montados en /api (src/app/routes/routes.ts:13). No trae Docker Compose, solo Dockerfile",
+      "endpoints": "realworld"
+    },
+    "django-realworld-example-app": {
+      "url": "https://github.com/gothinkster/django-realworld-example-app",
+      "commit": "29c9d42",
+      "framework": "django",
+      "compose": false,
+      "source": "urls.py de conduit/apps leídos a mano: ArticleViewSet no define destroy (no hay DELETE /api/articles/{slug}) y RetrieveUpdateAPIView expone PATCH /api/user. 19 endpoints, distintos de la spec RealWorld",
+      "endpoints": "django"
+    },
+    "mealie": {
+      "url": "https://github.com/mealie-recipes/mealie",
+      "commit": "d84deca",
+      "framework": "fastapi",
+      "compose": true,
+      "source": "grep de @<router>.<método>( en mealie/: 292. Cerca del tope del schema (300 endpoints)",
+      "endpoints": 292
+    }
+  },
+  "realworld": [
+    "POST /api/users/login",
+    "POST /api/users",
+    "GET /api/user",
+    "PUT /api/user",
+    "GET /api/profiles/{}",
+    "POST /api/profiles/{}/follow",
+    "DELETE /api/profiles/{}/follow",
+    "GET /api/articles",
+    "GET /api/articles/feed",
+    "GET /api/articles/{}",
+    "POST /api/articles",
+    "PUT /api/articles/{}",
+    "DELETE /api/articles/{}",
+    "POST /api/articles/{}/comments",
+    "GET /api/articles/{}/comments",
+    "DELETE /api/articles/{}/comments/{}",
+    "POST /api/articles/{}/favorite",
+    "DELETE /api/articles/{}/favorite",
+    "GET /api/tags"
+  ],
+  "django": [
+    "POST /api/users/login",
+    "POST /api/users",
+    "GET /api/user",
+    "PUT /api/user",
+    "GET /api/profiles/{}",
+    "POST /api/profiles/{}/follow",
+    "DELETE /api/profiles/{}/follow",
+    "GET /api/articles",
+    "GET /api/articles/feed",
+    "GET /api/articles/{}",
+    "POST /api/articles",
+    "PUT /api/articles/{}",
+    "POST /api/articles/{}/comments",
+    "GET /api/articles/{}/comments",
+    "DELETE /api/articles/{}/comments/{}",
+    "POST /api/articles/{}/favorite",
+    "DELETE /api/articles/{}/favorite",
+    "GET /api/tags",
+    "PATCH /api/user"
+  ]
+}

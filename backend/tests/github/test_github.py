@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tarfile
 import time
 import urllib.parse
@@ -10,6 +11,7 @@ import urllib.parse
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agent.loop import Turn
 from app.api.main import create_app
 from app.api.store import InMemoryProjectStore
 from app.github.client import GitHubApp, GitHubAppConfig, GitHubError, Repo
@@ -20,24 +22,47 @@ SECRET = "client-secret-de-prueba"
 TOKEN = "ghs_token_que_nunca_debe_salir"
 SHA = "06ff98cfa9b925e35b866e5abdf9e792006a36bb"
 
-FASTAPI_APP = b"""
-from fastapi import FastAPI, Depends
-from sqlalchemy.orm import Session
-
-app = FastAPI()
-
-def get_db():
-    yield Session()
-
-@app.get("/items")
-def list_items(db: Session = Depends(get_db)):
-    return db.query(Item).all()
-
-@app.post("/items")
-def create_item(db: Session = Depends(get_db)):
-    db.add(Item())
-    db.commit()
+APP = b"""const express = require('express')
+const app = express()
+app.get('/items', async (req, res) => res.json(await db.item.findMany({ take: 20 })))
+app.post('/items', async (req, res) => res.json(await db.item.create({ data: req.body })))
+app.listen(3000)
 """
+KEY = "sk-ant-key-de-prueba-que-nunca-debe-salir"
+
+
+class FakeAnalyst:
+    """Hace de Claude en la ingesta: busca rutas con grep y, según lo que encuentra, entrega la arquitectura
+    o avisa que no hay endpoints. Como el analizador real, solo ve el repo por sus tools."""
+
+    model = "claude-opus-5-5"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, system, messages, tools):
+        self.calls += 1
+        last = messages[-1]["content"]
+        if isinstance(last, str):  # primera vuelta: el árbol del repo
+            return Turn([{"type": "tool_use", "id": "t1", "name": "grep", "input": {"pattern": r"app\.(get|post)"}}],
+                        "tool_use", {"input": 2000, "output": 100})  # fmt: skip
+        hits = json.loads(last[0]["content"])["hits"]
+        if not hits:
+            call = {"type": "tool_use", "id": "t2", "name": "report_no_endpoints", "input": {"reason": "sin rutas"}}
+            return Turn([call], "tool_use", {"input": 2000, "output": 50})
+        endpoints = []
+        for hit in hits:
+            file, line, code = hit.split(":", 2)
+            method = "GET" if ".get(" in code else "POST"
+            op, shape = ("read", "range") if method == "GET" else ("write", "commit")
+            step = {"kind": "db", "op": op, "shape": shape, "entity": "Item", "detail": "db.item",
+                    "file": file, "line": int(line), "why": "Prisma"}  # fmt: skip
+            endpoints.append({"method": method, "path": "/items", "handler": f"items_{method.lower()}",
+                              "file": file, "line": int(line), "why": "ruta de express", "is_async": True,
+                              "effects": [step]})  # fmt: skip
+        arch = {"framework": "express", "language": "javascript", "endpoints": endpoints}
+        return Turn([{"type": "tool_use", "id": "t2", "name": "submit_architecture", "input": arch}], "tool_use",
+                    {"input": 3000, "output": 400})  # fmt: skip
 
 
 def tarball(files: dict[str, bytes], root: str = f"acme-tienda-{SHA[:7]}") -> bytes:
@@ -57,7 +82,7 @@ class FakeGitHub(GitHubApp):
         super().__init__(GitHubAppConfig("1", "branchpoint-test", "Iv1.test", SECRET, "sin-key"))
         self.user_installations_seen = {42: "alice-gh"}  # lo que ve el usuario dueño del code "ok"
         self.repos = {42: [Repo(7, "acme/tienda", True, "main", 42)]}
-        self.tarballs = {"acme/tienda": tarball({"app/main.py": FASTAPI_APP})}
+        self.tarballs = {"acme/tienda": tarball({"src/app.js": APP})}
         self.fetched: list[tuple[int, str, str]] = []
         self.exchanged_with: list[str | None] = []  # redirect_uri de cada canje de code
 
@@ -94,9 +119,17 @@ def store():
 
 
 @pytest.fixture
-def client(github, store, monkeypatch):
+def keys():
+    return []  # las keys de Anthropic que llegaron a la fábrica del LLM
+
+
+@pytest.fixture
+def client(github, store, keys, monkeypatch):
     monkeypatch.setenv("BRANCHPOINT_FRONTEND_URL", "http://front.test")
-    return TestClient(create_app(store=store, auth=None, github_app=github), follow_redirects=False)
+    app = create_app(store=store, auth=None, github_app=github)
+    app.state.llm_factory = lambda key, model=None: keys.append(key) or FakeAnalyst()
+    app.state.openai_llm_factory = lambda key, model=None: keys.append(("openai", key, model)) or FakeAnalyst()
+    return TestClient(app, follow_redirects=False, headers={"X-Anthropic-Api-Key": KEY})
 
 
 def connect(client) -> None:
@@ -256,12 +289,14 @@ def test_ingestion_creates_the_project_with_its_v1(client, github, store):
     # TestClient corre la tarea en segundo plano antes de devolver la respuesta
     done = client.get(f"/github/ingestions/{job['id']}").json()
     assert done["status"] == "done" and done["version"] == 1 and done["commit_sha"] == SHA
-    assert done["endpoints"] == 2 and done["error_message"] is None
+    assert done["endpoints"] == 2 and done["error_message"] is None, done
     assert github.fetched == [(42, "acme/tienda", "main")]
 
     project = client.get(f"/projects/{done['project_id']}").json()
     assert project["name"] == "tienda"
     v1 = client.get(f"/projects/{done['project_id']}/versions/1").json()
+    assert v1["model"]["repo"]["source"]["via"] == "ingesta" and v1["model"]["repo"]["source"]["commit"] == SHA
+    assert v1["model"]["endpoints"][0]["at"] == "src/app.js:3"  # archivo:línea relativo al repo
     assert v1["origin"] == "repo" and v1["note"] == "Extraída de acme/tienda@main (06ff98c)"
     model = v1["model"]
     assert model["repo"]["path"] == "acme/tienda"
@@ -283,12 +318,12 @@ def test_ingestion_of_another_branch_and_name(client, github):
     assert client.get(f"/projects/{done['project_id']}").json()["name"] == "Tienda (feature)"
 
 
-def test_ingestion_without_fastapi_fails_in_spanish(client, github):
+def test_ingestion_without_endpoints_fails_in_spanish(client, github):
     connect(client)
     github.tarballs["acme/tienda"] = tarball({"README.md": b"# nada"})
     job = client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).json()
     failed = client.get(f"/github/ingestions/{job['id']}").json()
-    assert failed["status"] == "failed" and "No encontramos endpoints de FastAPI" in failed["error_message"]
+    assert failed["status"] == "failed" and "No encontramos endpoints" in failed["error_message"]
     assert failed["project_id"] is None
     assert client.get("/projects").json() == []  # no queda un proyecto a medias
 
@@ -326,7 +361,38 @@ def test_the_token_never_reaches_a_response(client):
     job = client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).json()
     bodies.append(client.get(f"/github/ingestions/{job['id']}").text)
     bodies.append(client.get(f"/projects/{job['id']}").text)
-    assert all(TOKEN not in b for b in bodies)
+    assert all(TOKEN not in b and KEY not in b for b in bodies)
+
+
+def test_ingestion_uses_the_header_key_and_needs_one_without_login(client, keys, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-branchpoint")  # sin sesión no hay cuota: no se usa
+    connect(client)
+    assert client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).status_code == 202
+    assert keys == [KEY]
+    del client.headers["X-Anthropic-Api-Key"]
+    r = client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"})
+    assert r.status_code == 422
+    message = r.json()["error"]["message"]
+    assert "API key de Anthropic" in message and "MCP" in message
+    assert keys == [KEY]  # no se encoló nada
+
+
+def test_ingestion_with_openai_uses_its_factory_and_extract_model(client, store, keys, monkeypatch):
+    monkeypatch.setenv("BRANCHPOINT_OPENAI_EXTRACT_MODEL", "gpt-5-mini")
+    connect(client)
+    del client.headers["X-Anthropic-Api-Key"]
+    r = client.post(
+        "/github/ingestions",
+        json={"repo_full_name": "acme/tienda", "provider": "openai"},
+        headers={"X-OpenAI-Api-Key": "sk-openai-usuario"},
+    )
+    assert r.status_code == 202
+    assert keys == [("openai", "sk-openai-usuario", "gpt-5-mini")]
+    job = client.get(f"/github/ingestions/{r.json()['id']}").json()
+    assert job["status"] == "done", job
+    model = store.get_version(job["project_id"], 1).model
+    assert model["repo"]["source"]["analysis"]["provider"] == "openai"
+    assert "sk-openai-usuario" not in json.dumps(model) + json.dumps(job)
 
 
 # ---------- extracción segura ----------
@@ -337,3 +403,21 @@ def test_extract_tarball_blocks_path_traversal(tmp_path):
     with pytest.raises(tarfile.OutsideDestinationError):
         extract_tarball(evil, tmp_path / "dest")
     assert not (tmp_path / "escapado.py").exists()
+
+
+def test_onboarding_connection_reports_revocation_and_recovery(client, github):
+    """JAJ-91: si desinstalan la app desde GitHub, el onboarding sabe por qué no hay repos."""
+    assert client.get("/github/connection").json() == {"repos": [], "installations": [], "revoked": False}
+    connect(client)
+    github.repos.pop(42)
+
+    revoked = client.get("/github/connection")
+    assert revoked.status_code == 200
+    assert revoked.json() == {"repos": [], "installations": [], "revoked": True}
+    assert client.get("/github/connection").json()["revoked"] is True
+
+    github.repos[42] = [Repo(7, "acme/tienda", True, "main", 42)]
+    connect(client)
+    restored = client.get("/github/connection").json()
+    assert restored["revoked"] is False
+    assert restored["repos"][0]["full_name"] == "acme/tienda"

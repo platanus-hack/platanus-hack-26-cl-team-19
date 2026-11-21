@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
+import type { EvidenceRequest } from "@/services/chat-stream";
 import { Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
-import EditorCliPanel from "@/components/editor/EditorCliPanel.vue";
+import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
@@ -13,7 +15,7 @@ import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
-import type { ChatMessage, EditorSection } from "@/components/editor/types";
+import type { EditorSection } from "@/components/editor/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,14 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   simulationProvenance,
@@ -33,6 +43,7 @@ import {
   toComparisonRows,
   toEdges,
   toInspectedNode,
+  toUnsimulatedNode,
   toNodes,
   toPlayback,
   toVersionChanges,
@@ -110,7 +121,14 @@ const inspected = computed(() => {
   const node = graph.value?.nodes.find(
     (node) => node.id === selectedNode.value,
   );
-  return node ? toInspectedNode(node, run.value, provenance) : null;
+  if (!node) return null;
+  const primary = projectGroup.value?.repositories?.find(
+    (repo) => repo.primary,
+  )?.fullName;
+  return (
+    toUnsimulatedNode(node, primary) ??
+    toInspectedNode(node, run.value, provenance)
+  );
 });
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
 const rows = computed(() =>
@@ -135,6 +153,7 @@ const repositories = computed(() => {
   return repos.map((repo) => ({
     id: repo.id,
     name: repo.fullName,
+    primary: repos.length > 1 ? repo.primary === true : undefined,
     version: repo.id === project.value?.id ? (version.value?.label ?? "") : "",
   }));
 });
@@ -190,82 +209,65 @@ function changeView(value: unknown) {
   else if (value === "editor") view.value = "editor";
 }
 
-// Agente en la CLI del usuario (JAJ-81). El panel muestra si hay una CLI conectada; la
-// «Simulación de prueba» es local (testSimulation) y no pasa por el MCP.
-const cli = useCliConnections();
-const activity = ref<ChatMessage[]>([]);
-const testing = ref(false);
-const agentPrompt = computed(() => {
-  const label =
-    scenarios.value.find((entry) => entry.id === scenario.value)?.label ??
-    scenarios.value[0]?.label ??
-    "el escenario principal";
-  return `Usa branchpoint para simular ${label} en ${project.value?.name ?? "este proyecto"} y propón un cambio.`;
-});
+const {
+  enabled: savedKeysEnabled,
+  chatSettings,
+  load: refreshChatSettings,
+  error: chatSettingsError,
+  loaded: savedKeysLoaded,
+} = useApiCredentials();
+const {
+  provider: chatProvider,
+  error: chatError,
+  thinking,
+  messages,
+  evidence,
+  send,
+  reset,
+  dismissEvidence,
+} = useEditorChat(computed(() => project.value?.id));
+// adjuntos del chat (IA-9): imágenes y logs que el agente usa como evidencia
+const chatAttachments = useChatAttachments(computed(() => project.value?.id));
+const attachNotice = ref("");
 
-function updateTool(
-  id: string,
-  patch: Partial<Extract<ChatMessage, { role: "tool" }>>,
-) {
-  activity.value = activity.value.map((message) =>
-    message.id === id && message.role === "tool"
-      ? { ...message, ...patch }
-      : message,
-  );
+function attachFiles(files: File[]) {
+  const skipped = chatAttachments.add(files);
+  attachNotice.value = skipped
+    ? `Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje: ${skipped} quedaron fuera.`
+    : "";
 }
 
-// Simulación local para ver cómo se ve una corrida en el panel. No la pide la CLI: en modo MCP la
-// conversación ocurre en la terminal y al editor solo llegan las versiones que proponga (ADR 0001).
-async function testSimulation() {
-  if (testing.value) return;
-  testing.value = true;
-  const id = `${Date.now()}-simulate`;
-  try {
-    if (!scenario.value) {
-      activity.value = [
-        ...activity.value,
-        {
-          id,
-          role: "tool",
-          name: "simulate",
-          input: "",
-          status: "error",
-          output: "Elige un escenario para simular.",
-        },
-      ];
-      return;
-    }
-    activity.value = [
-      ...activity.value,
-      {
-        id,
-        role: "tool",
-        name: "simulate",
-        input: `scenario="${scenario.value}"`,
-        status: "running",
-      },
-    ];
-    const before = run.value;
-    await simulate();
-    // si la corrida no cambió, la simulación falló: no se reportan datos viejos
-    const result = run.value !== before ? run.value : null;
-    const bottleneck = result ? toBottleneck(result) : null;
-    updateTool(id, {
-      status: result ? "done" : "error",
-      output: result
-        ? (bottleneck?.title ?? "Sin cuello de botella")
-        : "La simulación falló.",
-      detail: result
-        ? `${bottleneck?.description ?? ""} Fuente: ${provenance.source}.`.trim()
-        : undefined,
-    });
-  } catch {
-    updateTool(id, { status: "error", output: "La simulación falló." });
-  } finally {
-    testing.value = false;
-  }
+async function dismissRequest(request: EvidenceRequest) {
+  dismissEvidence(request.field);
+  await sendChat("No tengo ese dato: sigue con los supuestos.");
 }
 
+const usingPersonalKey = computed(() =>
+  chatSettings.value?.personal.includes(chatProvider.value),
+);
+const teamChatAvailable = computed(
+  () =>
+    chatSettings.value?.team.includes(chatProvider.value) &&
+    chatSettings.value.remaining > 0,
+);
+const chatDisabled = computed(
+  () =>
+    !savedKeysEnabled ||
+    !savedKeysLoaded.value ||
+    (!usingPersonalKey.value && !teamChatAvailable.value),
+);
+async function sendChat(text: string) {
+  if (chatDisabled.value || chatAttachments.uploading.value) return;
+  const attached = chatAttachments.ready.value.map((draft) => ({
+    id: draft.id,
+    filename: draft.name,
+    kind: draft.kind,
+  }));
+  chatAttachments.clear();
+  attachNotice.value = "";
+  await send(text, usingPersonalKey.value ? "personal" : "team", attached);
+  await refreshChatSettings();
+}
 async function saveVersion() {
   if (canSave.value) await saveReplicas(Number(replicas.value));
 }
@@ -504,15 +506,75 @@ async function saveVersion() {
       >
     </template>
 
-    <template v-if="project" #agent>
-      <EditorCliPanel
-        :connections="cli"
-        :activity="activity"
-        :prompt="agentPrompt"
-        :testing="testing"
-        @test="testSimulation"
-        @clear="activity = []"
-      />
+    <template v-if="project && !isMock" #agent>
+      <section aria-label="Chat" class="flex min-h-0 flex-1 flex-col">
+        <h2 class="border-b border-border px-4 py-3 text-sm font-semibold">
+          Chat
+        </h2>
+        <div class="flex shrink-0 flex-col gap-2 p-3">
+          <Label for="editor-chat-provider">Proveedor</Label>
+          <Select v-model="chatProvider" :disabled="thinking">
+            <SelectTrigger id="editor-chat-provider" class="w-full"
+              ><SelectValue
+            /></SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="anthropic">Claude (Anthropic)</SelectItem>
+                <SelectItem value="openai">OpenAI</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <p v-if="savedKeysEnabled" class="text-xs text-muted-foreground">
+            <template v-if="savedKeysLoaded">
+              {{
+                usingPersonalKey
+                  ? "Usando tu API key."
+                  : chatProvider === "openai"
+                    ? "Agrega tu API key de OpenAI."
+                    : chatSettings?.team.includes("anthropic")
+                      ? `Cuota de Branchpoint · ${chatSettings.remaining} mensajes disponibles hoy.`
+                      : "Cuota de Branchpoint no disponible."
+              }}
+            </template>
+            <NuxtLink
+              to="/settings#api-keys"
+              class="underline underline-offset-4"
+            >
+              Gestionar API keys
+            </NuxtLink>
+          </p>
+          <p v-else class="text-xs text-muted-foreground">
+            Inicia sesión con GitHub para usar el chat.
+          </p>
+          <p v-if="attachNotice" class="text-xs text-muted-foreground">
+            {{ attachNotice }}
+          </p>
+          <Alert v-if="chatError || chatSettingsError" variant="destructive">
+            <AlertDescription>{{
+              chatError || chatSettingsError
+            }}</AlertDescription>
+          </Alert>
+        </div>
+        <EditorAgentPanel
+          :messages="messages"
+          :thinking="thinking"
+          :disabled="chatDisabled"
+          :attachments="chatAttachments.drafts.value"
+          :can-attach="chatAttachments.enabled"
+          :evidence="evidence"
+          :suggestions="['Simula CyberDay para este proyecto']"
+          :next-version="''"
+          @attach="attachFiles"
+          @remove-attachment="chatAttachments.remove"
+          @dismiss-evidence="dismissRequest"
+          @send="sendChat"
+          @reset="reset"
+        >
+          <template #intro>
+            Pregunta por el modelo del proyecto o pide una simulación.
+          </template>
+        </EditorAgentPanel>
+      </section>
     </template>
 
     <template #metrics>

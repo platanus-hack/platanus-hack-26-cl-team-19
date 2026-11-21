@@ -15,7 +15,14 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
-from app.api.auth import SupabaseAuth, auth_from_env
+from app.api.auth import (
+    JWKS_TTL_S,
+    MISS_COOLDOWN_S,
+    RETRY_AFTER_FAILURE_S,
+    AuthError,
+    SupabaseAuth,
+    auth_from_env,
+)
 from app.api.main import create_app
 from app.api.store import InMemoryProjectStore
 from app.samples import load_sample
@@ -239,6 +246,49 @@ def test_jwks_is_fetched_once_and_refetched_for_a_new_kid(client, jwks_calls):
     assert jwks_calls == [f"{ISSUER}/.well-known/jwks.json"]
     client.get("/projects", headers=bearer(token(kid="nueva")))  # clave rotada: vuelve a bajar
     assert len(jwks_calls) == 2
+
+
+def test_invented_kids_trigger_a_single_download(auth, jwks_calls):
+    for i in range(10):
+        with pytest.raises(AuthError, match="no publica"):
+            auth.verify(token(kid=f"inventado-{i}"))
+    assert len(jwks_calls) == 1
+    assert auth.verify(token()).id == ALICE  # la clave real sigue funcionando, sin otra descarga
+    assert len(jwks_calls) == 1
+
+
+def test_unknown_kid_is_looked_up_again_after_the_cooldown(auth, jwks_calls, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr("app.api.auth.time.monotonic", lambda: clock[0])
+    with pytest.raises(AuthError):
+        auth.verify(token(kid="inventado"))
+    clock[0] += MISS_COOLDOWN_S + 1
+    with pytest.raises(AuthError):
+        auth.verify(token(kid="inventado"))
+    assert len(jwks_calls) == 2
+
+
+def test_cached_key_survives_a_failed_ttl_refresh(monkeypatch):
+    clock, calls, up = [1000.0], [], [True]
+
+    def fetch(url):
+        calls.append(clock[0])
+        if not up[0]:
+            raise OSError("connection refused")
+        return {"keys": [_JWK]}
+
+    monkeypatch.setattr("app.api.auth.time.monotonic", lambda: clock[0])
+    auth = SupabaseAuth(SUPABASE, fetch_jwks=fetch)
+    assert auth.verify(token()).id == ALICE
+    up[0] = False
+    clock[0] += JWKS_TTL_S + 1  # caché vencida y Supabase Auth caído
+    assert auth.verify(token()).id == ALICE
+    assert auth.verify(token()).id == ALICE  # no reintenta en cada request
+    assert len(calls) == 2
+    clock[0] += RETRY_AFTER_FAILURE_S + 1
+    up[0] = True
+    assert auth.verify(token()).id == ALICE
+    assert len(calls) == 3  # reintentó y volvió a tener el JWKS al día
 
 
 def test_supabase_auth_down_is_503(store):

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import BrandIcon from "@/components/BrandIcon.vue";
+import ApiCredentialSettings from "@/components/ApiCredentialSettings.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowLeft, ExternalLink, Lock, RefreshCw } from "@lucide/vue";
-import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,6 @@ definePageMeta({ middleware: "supabase-session" });
 useSeoMeta({ title: "Configuración · Branchpoint" });
 
 const github = useGithubConnection();
-const cli = useCliConnections();
-const isMock = !useRuntimeConfig().public.apiBase.trim();
 const connected = computed(() => github.installations.value.length > 0);
 const accounts = computed(() =>
   github.installations.value.map((item) => item.account_login).join(", "),
@@ -135,6 +133,13 @@ const accounts = computed(() =>
         </template>
 
         <template v-else>
+          <Alert v-if="github.revoked.value">
+            <AlertDescription>
+              Se revocó el acceso de la GitHub App de Branchpoint. Tus proyectos
+              siguen disponibles, pero no puedes importar repos hasta
+              reconectarla.
+            </AlertDescription>
+          </Alert>
           <p class="text-sm text-muted-foreground">
             {{
               github.awaitingGithub.value
@@ -151,7 +156,9 @@ const accounts = computed(() =>
               {{
                 github.awaitingGithub.value
                   ? "Volver a abrir GitHub"
-                  : "Conectar con GitHub"
+                  : github.revoked.value
+                    ? "Reconectar GitHub"
+                    : "Conectar con GitHub"
               }}
             </Button>
             <Button
@@ -175,18 +182,21 @@ const accounts = computed(() =>
 
       <Separator />
 
-      <section aria-labelledby="cli-title" class="flex flex-col gap-4">
+      <section
+        id="api-keys"
+        aria-labelledby="credentials-title"
+        class="flex flex-col gap-4"
+      >
         <div>
-          <h2 id="cli-title" class="text-base font-semibold">CLI local</h2>
+          <h2 id="credentials-title" class="text-base font-semibold">
+            API keys del chat
+          </h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            Activa las CLIs de IA que uses para simular y proponer versiones
-            desde tu terminal, con tu propia suscripción.
+            Elige entre la cuota de Branchpoint para Claude y tu propia API key.
+            Las claves personales se guardan cifradas.
           </p>
         </div>
-        <CliConnectionList :connections="cli" />
-        <p v-if="!isMock" class="text-xs text-muted-foreground">
-          Vista previa: el comando todavía no funciona.
-        </p>
+        <ApiCredentialSettings />
       </section>
     </main>
   </div>

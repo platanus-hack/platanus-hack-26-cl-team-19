@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from app.api.errors import INVALID_MODEL, INVALID_PARAMETERS, RUN_TOO_LARGE, UNKNOWN_SCENARIO, ApiError
 from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams, RunRequest
 from app.engine import simulate
+from app.engine.kernel import SimulationTooLarge
 from app.models import load_model
 from app.models.architecture import ArchitectureModel
 from app.models.run import Run
@@ -66,6 +67,8 @@ def run_model(raw: dict, req: RunParams) -> Run:
             cpu_credits=req.cpu_credits,
             traffic_profile=profile,
         )
+    except SimulationTooLarge as e:  # JAJ-99: pasó el presupuesto de eventos
+        raise ApiError(422, RUN_TOO_LARGE, str(e), max_events=e.max_events) from e
     except ValueError as e:  # ej. un escenario con 0 req/s o vCPU en 0
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from e
 

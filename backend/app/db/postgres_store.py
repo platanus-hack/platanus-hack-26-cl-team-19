@@ -18,10 +18,12 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app.api.store import (
+    Attachment,
     GitHubInstallation,
     Origin,
     Project,
     ProjectGoals,
+    ProjectRepo,
     ProjectScenario,
     RepoSource,
     Version,
@@ -30,6 +32,17 @@ from app.api.store import (
 
 _SUMMARY = "number, origin::text as origin, parent_number, note, created_at"
 _PROJECT = "id, name, sample_id, created_at, owner_id"
+# el proyecto con su repo (JAJ-92): repo_connections tiene el nombre, projects la rama analizada.
+# left join: los proyectos de un ejemplo no tienen repo. La conexión es del mismo dueño (la crea la
+# ingesta con el owner del proyecto), así que el filtro por p.owner_id basta para aislar.
+_PROJECT_WITH_REPO = (
+    "p.id, p.name, p.sample_id, p.created_at, p.owner_id, rc.repo_full_name, p.branch"
+    " from projects p left join repo_connections rc on rc.id = p.repo_connection_id"
+)
+
+
+_USAGE_COLUMNS = {"chat": "messages", "extract": "extractions"}  # nombres fijos: van en el SQL
+_NO_USAGE = {"messages": 0, "extractions": 0}
 
 
 def _iso(ts: datetime) -> str:
@@ -44,6 +57,27 @@ def _uuid(project_id: str) -> uuid.UUID | None:
         return None
 
 
+_ATTACHMENT = (
+    "id, owner_id, project_id, kind, filename, media_type, bytes, storage_path, status, created_at, expires_at"
+)
+
+
+def _attachment(row: dict[str, Any]) -> Attachment:
+    return Attachment(
+        id=str(row["id"]),
+        owner=str(row["owner_id"]),
+        project_id=str(row["project_id"]),
+        kind=row["kind"],
+        filename=row["filename"],
+        media_type=row["media_type"],
+        bytes=row["bytes"],
+        storage_path=row["storage_path"],
+        status=row["status"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+    )
+
+
 def _version(row: dict[str, Any]) -> Version:
     return Version(
         number=row["number"],
@@ -55,14 +89,17 @@ def _version(row: dict[str, Any]) -> Version:
     )
 
 
-def _project(row: dict[str, Any], versions: list[Version]) -> Project:
+def _project(row: dict[str, Any], versions: list[Version], repos: list[ProjectRepo] | None = None) -> Project:
     return Project(
+        repositories=repos or [],
         id=str(row["id"]),
         name=row["name"],
         sample=row["sample_id"],
         created_at=_iso(row["created_at"]),
         versions=versions,
         owner=str(row["owner_id"]) if row["owner_id"] is not None else None,
+        repo_full_name=row.get("repo_full_name"),
+        branch=row.get("branch"),
     )
 
 
@@ -105,6 +142,90 @@ class PostgresProjectStore:
     def _conn(self) -> Any:
         return self._pool.connection()  # transacción: commit al salir del with, rollback si hay error
 
+    def credential_providers(self, owner: str) -> list[str]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "select provider from llm_credentials where owner_id = %s and revoked_at is null", (owner,)
+            ).fetchall()
+        return [row["provider"] for row in rows]
+
+    def personal_chat_providers(self, owner: str, always: tuple[str, ...] = ()) -> list[str]:
+        """Proveedores donde la key personal está seleccionada. Los de ``always`` cuentan con solo estar
+        guardados: es el caso de OpenAI cuando Branchpoint no tiene key propia de OpenAI."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """select provider from llm_credentials
+                   where owner_id = %s and (provider = any(%s) or use_personal) and revoked_at is null""",
+                (owner, list(always)),
+            ).fetchall()
+        return [row["provider"] for row in rows]
+
+    def select_chat_key(self, owner: str, provider: str, personal: bool) -> bool:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "update llm_credentials set use_personal = %s where owner_id = %s and provider = %s and revoked_at is null",
+                (personal, owner, provider),
+            )
+            return cursor.rowcount > 0 or not personal
+
+    def team_used(self, owner: str) -> dict[str, int]:
+        """Usos de hoy (UTC) de la key de Branchpoint: mensajes de chat y repos analizados."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """select messages, extractions from team_chat_usage
+                   where owner_id = %s and usage_date = (now() at time zone 'UTC')::date""",
+                (owner,),
+            ).fetchone()
+        return {"messages": row["messages"], "extractions": row["extractions"]} if row else _NO_USAGE.copy()
+
+    def charge_team(self, owner: str, purpose: str, limit: int, n: int = 1) -> bool:
+        """Suma ``n`` usos de hoy a ``purpose`` (``chat`` o ``extract``) si no pasan de ``limit``.
+
+        Descuenta los ``n`` o nada, en una sola sentencia: dos requests a la vez no pasan el límite."""
+        column = _USAGE_COLUMNS[purpose]
+        if n < 1:
+            raise ValueError("n tiene que ser al menos 1")
+        with self._conn() as conn:
+            row = conn.execute(
+                f"""insert into team_chat_usage (owner_id, usage_date, {column})
+                    select %s, (now() at time zone 'UTC')::date, %s where %s <= %s
+                    on conflict (owner_id, usage_date) do update
+                    set {column} = team_chat_usage.{column} + excluded.{column}
+                    where team_chat_usage.{column} + excluded.{column} <= %s
+                    returning {column}""",
+                (owner, n, n, limit, limit),
+            ).fetchone()
+        return row is not None
+
+    def save_credential(self, owner: str, provider: str, key: str) -> None:
+        with self._conn() as conn:
+            secret = conn.execute("select vault.create_secret(%s) as id", (key,)).fetchone()
+            conn.execute(
+                """insert into llm_credentials (owner_id, provider, secret_id, use_personal)
+                   values (%s, %s, %s, %s)
+                   on conflict (owner_id, provider) do update
+                   set secret_id = excluded.secret_id, revoked_at = null, key_hint = null,
+                       use_personal = llm_credentials.use_personal or excluded.use_personal""",
+                # OpenAI: la key personal queda seleccionada al guardarla (el editor la usa enseguida)
+                (owner, provider, secret["id"], provider == "openai"),
+            )
+
+    def delete_credential(self, owner: str, provider: str) -> None:
+        with self._conn() as conn:
+            conn.execute("delete from llm_credentials where owner_id = %s and provider = %s", (owner, provider))
+
+    def personal_chat_key(self, owner: str, provider: str, require_selected: bool = True) -> str | None:
+        """La key personal guardada. Con ``require_selected``, solo si el usuario la eligió en Configuración."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """select s.decrypted_secret from llm_credentials c
+                   join vault.decrypted_secrets s on s.id = c.secret_id
+                   where c.owner_id = %s and c.provider = %s and (not %s or c.use_personal)
+                     and c.revoked_at is null""",
+                (owner, provider, require_selected),
+            ).fetchone()
+        return row["decrypted_secret"] if row else None
+
     def create(
         self,
         name: str,
@@ -112,8 +233,10 @@ class PostgresProjectStore:
         sample: str | None,
         owner: str | None = None,
         source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
     ) -> Project:
         conn_id = _uuid(source.connection_id) if source else None
+        extra = sources if sources and len(sources) > 1 else []
         with self._conn() as conn:
             # owner_id referencia auth.users: un usuario que no existe ahí no puede crear proyectos
             row = conn.execute(
@@ -144,7 +267,20 @@ class PostgresProjectStore:
                     "insert into scenarios (project_id, name, multiplier, rps) values (%s, %s, %s, %s)",
                     [(row["id"], s.name, s.multiplier, s.rps) for s in scenarios_from_model(model)],
                 )
-        return _project(row, [_version(v1)])
+                primary = source.repo_full_name if source else None
+                cur.executemany(
+                    "insert into project_repositories (project_id, repo_connection_id, branch, commit_sha,"
+                    " is_primary, position) values (%s, %s, %s, %s, %s, %s)",
+                    [
+                        (row["id"], _uuid(s.connection_id), s.branch, s.commit_sha, s.repo_full_name == primary, i)
+                        for i, s in enumerate(extra)
+                    ],
+                )
+        # el returning no trae el repo (está en repo_connections): sale del source, igual que get y list
+        repo = {"repo_full_name": source.repo_full_name, "branch": source.branch} if source else {}
+        primary_name = source.repo_full_name if source else None
+        repos = [ProjectRepo(s.repo_full_name, s.branch, s.repo_full_name == primary_name) for s in extra]
+        return _project({**row, **repo}, [_version(v1)], sorted(repos, key=lambda r: not r.primary))
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
         pid = _uuid(project_id)
@@ -153,12 +289,12 @@ class PostgresProjectStore:
         with self._conn() as conn:
             # el proyecto de otro usuario no existe para este (la ruta responde 404, no 403)
             row = conn.execute(
-                f"select {_PROJECT} from projects where id = %s and owner_id is not distinct from %s::uuid",
+                f"select {_PROJECT_WITH_REPO} where p.id = %s and p.owner_id is not distinct from %s::uuid",
                 (pid, owner),
             ).fetchone()
             if row is None:
                 return None
-            return _project(row, self._summaries(conn, [pid])[pid])
+            return _project(row, self._summaries(conn, [pid])[pid], self._repos(conn, [pid]).get(pid))
 
     def get_version(self, project_id: str, number: int) -> Version | None:
         pid = _uuid(project_id)
@@ -173,12 +309,30 @@ class PostgresProjectStore:
     def list(self, owner: str | None = None) -> list[Project]:
         with self._conn() as conn:
             rows = conn.execute(
-                f"select {_PROJECT} from projects where owner_id is not distinct from %s::uuid"
-                " order by created_at desc",
+                f"select {_PROJECT_WITH_REPO} where p.owner_id is not distinct from %s::uuid"
+                " order by p.created_at desc",
                 (owner,),
             ).fetchall()
-            versions = self._summaries(conn, [r["id"] for r in rows])
-        return [_project(r, versions[r["id"]]) for r in rows]
+            ids = [r["id"] for r in rows]
+            versions = self._summaries(conn, ids)
+            repos = self._repos(conn, ids)
+        return [_project(r, versions[r["id"]], repos.get(r["id"])) for r in rows]
+
+    @staticmethod
+    def _repos(conn: Connection, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[ProjectRepo]]:
+        """Los repos de varios proyectos (IA-5), el principal primero. Solo los de más de un repo tienen filas."""
+        if not project_ids:
+            return {}
+        rows = conn.execute(
+            "select pr.project_id, rc.repo_full_name, pr.branch, pr.is_primary from project_repositories pr"
+            " join repo_connections rc on rc.id = pr.repo_connection_id"
+            " where pr.project_id = any(%s) order by pr.project_id, pr.is_primary desc, pr.position",
+            (project_ids,),
+        ).fetchall()
+        out: dict[uuid.UUID, list[ProjectRepo]] = {}
+        for r in rows:
+            out.setdefault(r["project_id"], []).append(ProjectRepo(r["repo_full_name"], r["branch"], r["is_primary"]))
+        return out
 
     def add_version(
         self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
@@ -249,9 +403,18 @@ class PostgresProjectStore:
                 raise KeyError(project_id)
         return _goals(row)
 
-    def find_run(self, cache_key: str) -> dict[str, Any] | None:
+    def find_run(self, project_id: str, number: int, cache_key: str) -> dict[str, Any] | None:
+        pid = _uuid(project_id)
+        if pid is None:
+            return None
         with self._conn() as conn:
-            row = conn.execute("select result from runs where cache_key = %s", (cache_key,)).fetchone()
+            # por proyecto y versión además de la clave (JAJ-97): una fila con la clave de otro
+            # proyecto no se devuelve
+            row = conn.execute(
+                "select r.result from runs r join model_versions v on v.id = r.model_version_id"
+                " where r.cache_key = %s and r.project_id = %s and v.number = %s",
+                (cache_key, pid, number),
+            ).fetchone()
         return row["result"] if row is not None else None
 
     def save_run(
@@ -322,12 +485,12 @@ class PostgresProjectStore:
                 (installation_id, owner, account_login),
             )
 
-    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
+    def list_installations(self, owner: str | None, *, revoked: bool = False) -> list[GitHubInstallation]:
         with self._conn() as conn:
             rows = conn.execute(
                 "select installation_id, account_login from github_installations"
-                " where owner_id is not distinct from %s::uuid and revoked_at is null order by created_at",
-                (owner,),
+                " where owner_id is not distinct from %s::uuid and (revoked_at is not null) = %s order by created_at",
+                (owner, revoked),
             ).fetchall()
         return [GitHubInstallation(r["installation_id"], r["account_login"]) for r in rows]
 
@@ -352,3 +515,73 @@ class PostgresProjectStore:
                 (owner, installation_id, repo_id, full_name, default_branch),
             ).fetchone()
         return str(row["id"])
+
+    # ---------- Adjuntos del chat (IA-6) ----------
+
+    def create_attachment(self, attachment: Attachment) -> Attachment:
+        with self._conn() as conn:
+            row = conn.execute(
+                f"""insert into chat_attachments
+                    (id, owner_id, project_id, kind, filename, media_type, bytes, storage_path, status, expires_at)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning {_ATTACHMENT}""",
+                (
+                    attachment.id,
+                    attachment.owner,
+                    attachment.project_id,
+                    attachment.kind,
+                    attachment.filename,
+                    attachment.media_type,
+                    attachment.bytes,
+                    attachment.storage_path,
+                    attachment.status,
+                    attachment.expires_at,
+                ),
+            ).fetchone()
+        return _attachment(row)
+
+    def get_attachment(self, attachment_id: str, owner: str) -> Attachment | None:
+        aid = _uuid(attachment_id)
+        if aid is None:
+            return None
+        with self._conn() as conn:
+            row = conn.execute(
+                f"select {_ATTACHMENT} from chat_attachments where id = %s and owner_id = %s", (aid, owner)
+            ).fetchone()
+        return _attachment(row) if row else None
+
+    def list_attachments(self, project_id: str, owner: str, include_pending: bool = False) -> list[Attachment]:
+        pid = _uuid(project_id)
+        if pid is None:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""select {_ATTACHMENT} from chat_attachments
+                    where project_id = %s and owner_id = %s and expires_at > now() and (%s or status = 'ready')
+                    order by created_at, id""",
+                (pid, owner, include_pending),
+            ).fetchall()
+        return [_attachment(r) for r in rows]
+
+    def mark_attachment_ready(self, attachment_id: str, owner: str, size: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "update chat_attachments set status = 'ready', bytes = %s where id = %s and owner_id = %s",
+                (size, _uuid(attachment_id), owner),
+            )
+
+    def delete_attachment(self, attachment_id: str, owner: str) -> None:
+        aid = _uuid(attachment_id)
+        if aid is None:
+            return
+        with self._conn() as conn:
+            conn.execute("delete from chat_attachments where id = %s and owner_id = %s", (aid, owner))
+
+    def expired_attachments(self, owner: str | None, limit: int = 100) -> list[Attachment]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""select {_ATTACHMENT} from chat_attachments
+                    where expires_at <= now() and (%s::uuid is null or owner_id = %s::uuid)
+                    order by expires_at limit %s""",
+                (owner, owner, limit),
+            ).fetchall()
+        return [_attachment(r) for r in rows]

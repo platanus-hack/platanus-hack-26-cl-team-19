@@ -5,13 +5,25 @@
 // (si el onboarding ya se hizo, /onboarding lo reenvía a /settings). Al volver a esta pestaña, la
 // lista de repos se refresca sola.
 import { useEventListener } from "@vueuse/core";
+import type { ChatProvider } from "@/services/chat-stream";
 import {
+  MAX_REPOS,
   STAGE_LABELS,
   createGithubApi,
+  repoSelectionError,
   type GithubInstallation,
   type GithubRepo,
   type Ingestion,
+  type RepoSelection,
 } from "@/services/github-api";
+
+/** Un repo extra del proyecto (IA-10): el primero sigue en `repo` y `branch`. */
+export interface ExtraRepo {
+  key: string;
+  repo: string;
+  branch: string;
+  branches: string[];
+}
 
 const POLL_LIMIT_MS = 5 * 60_000;
 
@@ -42,6 +54,7 @@ export function useGithubConnection({ immediate = true } = {}) {
 
   const repos = shallowRef<GithubRepo[]>([]);
   const installations = shallowRef<GithubInstallation[]>([]);
+  const revoked = ref(false);
   const branches = shallowRef<string[]>([]);
   const repo = ref("");
   const branch = ref("");
@@ -52,6 +65,27 @@ export function useGithubConnection({ immediate = true } = {}) {
   const awaitingGithub = ref(false);
   const starting = ref(false); // el POST revisa el acceso en GitHub antes de responder (~1 s)
   const error = ref("");
+  const provider = ref<ChatProvider>("anthropic"); // la IA que lee el repo (IA-3)
+  const extras = ref<ExtraRepo[]>([]); // más repos para el mismo proyecto (IA-10)
+  const primary = ref(""); // el repo que simula el motor; vacío = el primero
+  const selection = computed<RepoSelection[]>(() => [
+    { full_name: repo.value, branch: branch.value },
+    ...extras.value.map((item) => ({
+      full_name: item.repo,
+      branch: item.branch,
+    })),
+  ]);
+  const primaryRepo = computed(() => primary.value || repo.value);
+  const selectionError = computed(() =>
+    repoSelectionError(selection.value, primaryRepo.value),
+  );
+  const canAddRepo = computed(
+    () =>
+      extras.value.length + 1 < MAX_REPOS &&
+      repos.value.length > extras.value.length + 1,
+  );
+  // el backend rechazó la credencial (422) o se acabó la cuota (429): la UI ofrece ir a Configuración
+  const keyProblem = ref(false);
 
   const returnError = computed(() => {
     if (route.query.github !== "error") return "";
@@ -67,21 +101,70 @@ export function useGithubConnection({ immediate = true } = {}) {
   const done = computed(() =>
     ingestion.value?.status === "done" ? ingestion.value : null,
   );
-  const progress = computed(() =>
-    ingestion.value?.stage
-      ? STAGE_LABELS[ingestion.value.stage]
-      : "Revisando el acceso al repo…",
-  );
+  const progress = computed(() => {
+    const job = ingestion.value;
+    if (!job?.stage) return "Revisando el acceso al repo…";
+    if (job.stage === "analisis" && job.llm_steps)
+      return `Analizando con IA · paso ${job.llm_steps}`;
+    return STAGE_LABELS[job.stage];
+  });
+
+  async function loadBranches(item: ExtraRepo) {
+    item.branches = [];
+    item.branch = "";
+    if (!api || !item.repo) return;
+    const fullName = item.repo;
+    try {
+      const names = await api.branches(fullName);
+      if (item.repo !== fullName) return;
+      item.branches = names;
+      const selected = repos.value.find((r) => r.full_name === fullName);
+      item.branch =
+        names.find((name) => name === selected?.default_branch) ??
+        names[0] ??
+        "";
+    } catch (cause) {
+      error.value = githubErrorMessage(cause);
+    }
+  }
+
+  function addRepo() {
+    if (!canAddRepo.value) return;
+    const taken = new Set(selection.value.map((item) => item.full_name));
+    const next = repos.value.find((item) => !taken.has(item.full_name));
+    const extra: ExtraRepo = {
+      key: crypto.randomUUID(),
+      repo: next?.full_name ?? "",
+      branch: "",
+      branches: [],
+    };
+    extras.value.push(extra);
+    void loadBranches(extras.value.at(-1)!);
+  }
+
+  function setExtraRepo(key: string, fullName: string) {
+    const item = extras.value.find((extra) => extra.key === key);
+    if (!item) return;
+    if (primary.value === item.repo) primary.value = fullName;
+    item.repo = fullName;
+    void loadBranches(item);
+  }
+
+  function removeRepo(key: string) {
+    const item = extras.value.find((extra) => extra.key === key);
+    if (item && primary.value === item.repo) primary.value = "";
+    extras.value = extras.value.filter((extra) => extra.key !== key);
+  }
 
   async function loadRepos(quiet = false) {
     if (!api) return;
     if (!quiet) loading.value = true;
     error.value = "";
     try {
-      [repos.value, installations.value] = await Promise.all([
-        api.repos(),
-        api.installations(),
-      ]);
+      const snapshot = await api.connection();
+      repos.value = snapshot.repos;
+      installations.value = snapshot.installations;
+      revoked.value = snapshot.revoked;
       if (!repos.value.some((item) => item.full_name === repo.value))
         repo.value = repos.value[0]?.full_name ?? "";
       if (installations.value.length && !installHref.value)
@@ -164,12 +247,27 @@ export function useGithubConnection({ immediate = true } = {}) {
   });
 
   async function analyze() {
-    if (!api || !repo.value || !branch.value || running.value) return;
+    if (!api || selectionError.value || running.value) return;
     error.value = "";
+    keyProblem.value = false;
     ingestion.value = null;
     starting.value = true;
     try {
-      let job = await api.startIngestion(repo.value, branch.value);
+      let job: Ingestion;
+      try {
+        // varios repos (IA-10): el principal lo simula el motor; los demás quedan como dependencias
+        job = extras.value.length
+          ? await api.startMultiIngestion(
+              selection.value,
+              primaryRepo.value,
+              provider.value,
+            )
+          : await api.startIngestion(repo.value, branch.value, provider.value);
+      } catch (cause) {
+        const status = (cause as { statusCode?: number }).statusCode;
+        keyProblem.value = status === 422 || status === 429;
+        throw cause;
+      }
       starting.value = false;
       ingestion.value = job;
       const deadline = Date.now() + POLL_LIMIT_MS;
@@ -206,6 +304,7 @@ export function useGithubConnection({ immediate = true } = {}) {
     enabled: !!api,
     repos,
     installations,
+    revoked,
     branches,
     repo,
     branch,
@@ -215,6 +314,17 @@ export function useGithubConnection({ immediate = true } = {}) {
     installHref,
     awaitingGithub,
     error,
+    keyProblem,
+    provider,
+    extras,
+    primary,
+    primaryRepo,
+    selection,
+    selectionError,
+    canAddRepo,
+    addRepo,
+    setExtraRepo,
+    removeRepo,
     returnError,
     running,
     done,

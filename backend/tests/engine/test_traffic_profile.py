@@ -118,3 +118,38 @@ def test_template_cyberday_with_pico():
     assert run.series[0].target_rps == pytest.approx(262.4 * (0.35 + 0.65 * 0.5 / 30), abs=0.1)
     assert max(q[30:84]) > q[5]
     assert run.traffic_profile[1].from_rps == run.traffic_profile[1].to_rps == pytest.approx(262.4)
+
+
+# --- JAJ-104: llegadas uniformes que cruzan bordes de tramo ----------------------------------------
+
+
+@pytest.mark.parametrize("rps", [0.8, 3, 10.5, 37])
+@pytest.mark.parametrize("seg_s", [0.25, 1.0, 4.0])
+def test_many_flat_segments_are_the_same_as_no_profile(rps, seg_s):
+    """BE-12: antes, la cuenta se reiniciaba en cada borde. Con 0,8 req/s y tramos de 1 s no llegaba
+    nadie (0 contra 39), y con 10,5 req/s y tramos de 0,25 s llegaban 100 contra 131."""
+    n = min(50, int(40 / seg_s))  # hasta 50 tramos (MAX_SEGMENTS)
+    with_profile = simulate(model(), "base", rps=rps, arrivals="uniform", traffic_profile=profile(*[(seg_s, 1, 1)] * n))
+    without = simulate(model(), "base", rps=rps, duration_s=n * seg_s, arrivals="uniform")
+    assert abs(with_profile.requests - without.requests) <= 1
+
+
+@pytest.mark.parametrize(
+    "segments",
+    [
+        [(30, 0.0, 1.0)],  # rampa desde 0
+        [(10, 1.0, 0.2), (10, 0.2, 1.0), (10, 1.0, 1.0)],  # baja, sube y meseta
+        [(0.5, 0.3, 1.0)] * 40,  # dientes de sierra cortos
+    ],
+)
+def test_ramps_deliver_rate_times_the_mean_multiplier(segments):
+    """Dentro de un tramo la tasa cambia: la siguiente llegada sale de la integral, no de la tasa del
+    instante. El total es tasa × duración × multiplicador medio."""
+    p = profile(*segments)
+    run = simulate(model(), "base", rps=20, arrivals="uniform", traffic_profile=p)
+    assert run.requests == pytest.approx(20 * p.duration_s * p.mean, rel=0.01, abs=1)
+
+
+def test_slope_at():
+    p = profile((10, 0.0, 1.0), (5, 1.0, 1.0))
+    assert p.slope_at(3) == pytest.approx(0.1) and p.slope_at(12) == 0 and p.slope_at(99) == 0

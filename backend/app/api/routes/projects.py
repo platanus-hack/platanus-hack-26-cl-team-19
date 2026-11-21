@@ -26,6 +26,7 @@ from app.api.schemas import (
     CreateVersionRequest,
     OpsVersionDetail,
     ProjectDetail,
+    ProjectRepository,
     Region,
     RunParams,
     ScenarioIn,
@@ -35,6 +36,7 @@ from app.api.schemas import (
 )
 from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
 from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
+from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
 
@@ -57,8 +59,15 @@ def _summary(v: Version) -> VersionSummary:
 
 
 def _detail(p: Project) -> ProjectDetail:
+    # JAJ-92 e IA-5: todos los repos del proyecto, el principal primero
+    repos = [ProjectRepository(id=p.id, full_name=r.full_name, branch=r.branch, primary=r.primary) for r in p.repos()]
     return ProjectDetail(
-        id=p.id, name=p.name, sample=p.sample, created_at=p.created_at, versions=[_summary(v) for v in p.versions]
+        id=p.id,
+        name=p.name,
+        sample=p.sample,
+        created_at=p.created_at,
+        versions=[_summary(v) for v in p.versions],
+        repositories=repos or None,
     )
 
 
@@ -269,18 +278,35 @@ def compare(
         cost_delta=delta,
         failure_a=fa,
         failure_b=fb,
-        summary=compare_summary(va.number, vb.number, delta, fa, fb),
+        summary=compare_summary(va.number, vb.number, delta, fa, fb, run_a, run_b),
     )
 
 
-def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
+def compare_summary(
+    a: int,
+    b: int,
+    cost: CostDelta,
+    fa: FailureCost | None,
+    fb: FailureCost | None,
+    run_a: Run | None = None,
+    run_b: Run | None = None,
+) -> str:
     """'v2 cuesta +US$57,66/mes y evita entre US$X y US$Y por hora en ventas en juego' (JAJ-74).
 
     La diferencia se calcula con cada cota (piso y techo) y se ordena de menor a mayor: cuando las dos
     versiones fallan mucho, sus techos se acercan a "si fallara todo" y esa diferencia queda cerca de 0.
+
+    Con los ``Run``, agrega si alguna versión no alcanza a atender el tráfico (JAJ-89): su tasa de
+    error no cuenta las requests que siguen en fila, y sin este aviso una versión colapsada se lee sana.
     """
+    return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b)
+
+
+def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
     sign = "+" if cost.diff >= 0 else "−"
     text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
+    if cost.missing:  # JAJ-88: sin esto, "+US$0.00" con la API en local se lee como "no cambia el costo"
+        text += " sin contar " + _missing_clause(a, b, cost)
     if fa is None or fb is None:
         return text + "."
     if fa.too_short or fb.too_short:
@@ -292,6 +318,39 @@ def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb:
     if hi <= 0:
         return text + f" y suma entre US${-hi:,.0f} y US${-lo:,.0f} por hora en ventas en juego{floor}."
     return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
+
+
+def _missing_clause(a: int, b: int, cost: CostDelta) -> str:
+    """Qué no cuenta la diferencia y por qué (JAJ-88). Ejemplos:
+
+    * 'la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)'
+    * 'la API (con precio solo en v2)'
+    * 'la DB, que no tiene precio (…), ni la API (con precio solo en v2)'
+    """
+    both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
+    only = [
+        f"{COMPONENT_NAMES[c]} (con precio solo en v{b if c in cost.missing_a else a})"
+        for c in cost.missing
+        if c not in both
+    ]
+    if not both:
+        return " ni ".join(only)
+    head = f"{describe_missing(both)} (despliegue local o proveedor sin precios)"
+    return head + (", ni " + " ni ".join(only) if only else "")
+
+
+def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -> str:
+    saturated = [
+        (n, r.saturation)
+        for n, r in ((a, run_a), (b, run_b))
+        if r is not None and r.saturation and r.saturation.saturated
+    ]
+    if not saturated:
+        return ""
+    parts = " y ".join(f"v{n} deja {s.unanswered_rate * 100:.0f} % de las requests sin respuesta" for n, s in saturated)
+    who = "Ninguna versión alcanza" if len(saturated) == 2 else f"v{saturated[0][0]} no alcanza"
+    floor = "sus tasas de error son un piso" if len(saturated) == 2 else "su tasa de error es un piso"
+    return f" Ojo: {who} a atender este tráfico ({parts} al terminar): {floor}."
 
 
 @router.get(

@@ -148,12 +148,31 @@ class OpsVersionDetail(VersionDetail):
     warnings: list[str] = Field(description="Lo que el agente debería decirle al usuario o preguntarle.")
 
 
+class ProjectRepository(BaseModel):
+    """Un repo del proyecto, como lo lee "Mis proyectos" (JAJ-92).
+
+    Las claves siguen el tipo ``ProjectRepository`` del editor (``fullName`` en camelCase). ``id`` es
+    el **id del proyecto** que abre ese repo: el editor lo usa para abrir el proyecto con
+    ``GET /projects/{id}``. Hoy cada proyecto tiene un solo repo, así que es el mismo proyecto.
+    """
+
+    id: str = Field(description="Id del proyecto que abre este repo (hoy, el mismo proyecto).")
+    full_name: str = Field(serialization_alias="fullName", description='"owner/nombre" en GitHub.')
+    branch: str | None = Field(None, description="Rama analizada para la v1.")
+    primary: bool = Field(True, description="El repo que simula el motor (IA-5). Va primero en la lista.")
+
+
 class ProjectDetail(BaseModel):
     id: str
     name: str
     sample: str | None
     created_at: str
     versions: list[VersionSummary]
+    repositories: list[ProjectRepository] | None = Field(
+        None,
+        description="Los repos de los que salió la v1, el principal primero (JAJ-92, IA-5). null si el proyecto "
+        "salió de un ejemplo o de un modelo subido a mano: así el editor usa su fallback (el nombre del proyecto).",
+    )
 
 
 class ScenarioIn(BaseModel):
