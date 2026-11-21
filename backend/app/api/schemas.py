@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +25,15 @@ class TrafficSegmentIn(BaseModel):
     duration_s: float = Field(gt=0, le=3600, description="Segundos que dura el tramo.")
     from_multiplier: float = Field(ge=0, le=100, description="Multiplicador de la tasa al inicio del tramo.")
     to_multiplier: float = Field(ge=0, le=100, description="Multiplicador de la tasa al final del tramo.")
+
+
+class ScenarioBusiness(BaseModel):
+    """Datos de negocio de un escenario (JAJ-131), para el costo de fallar de esa corrida (JAJ-74)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversion: float | None = Field(None, gt=0, le=1, description="Fracción de sesiones que compran. Ej. 0.03.")
+    ticket_usd: float | None = Field(None, gt=0, description="Ticket promedio en US$. Ej. 40.")
 
 
 class RunParams(BaseModel):
@@ -61,6 +70,33 @@ class RunParams(BaseModel):
             "tramos: la duración es la suma de los tramos y duration_s no se usa. Sin él, tasa constante."
         ),
     )
+    # JAJ-131: reemplazos del escenario. Cambian la situación, no la arquitectura: solo esta corrida, sin
+    # crear versión. Sin ellos se usan los del escenario del proyecto, si los tiene.
+    endpoint_weights: dict[str, Annotated[float, Field(ge=0)]] | None = Field(
+        None,
+        description=(
+            "Mezcla de endpoints: peso por id de endpoint (ej. {'POST /checkout': 3}). Los que no aparecen "
+            "conservan su peso; se normaliza como siempre."
+        ),
+    )
+    slowdowns: dict[str, Annotated[float, Field(gt=0, le=100)]] | None = Field(
+        None,
+        description=(
+            "Dependencias más lentas: multiplicador del tiempo de los pasos de un nodo del grafo (POST /graph): "
+            "db, cache, external o external:<servicio>. Ej. {'external:pagos': 10, 'db': 1.5}."
+        ),
+    )
+    business: ScenarioBusiness | None = Field(
+        None, description="Conversión y ticket promedio para el costo de fallar de esta corrida."
+    )
+
+    def override_args(self) -> dict[str, Any]:
+        """Los reemplazos del escenario para ``apply_overrides`` (JAJ-131)."""
+        return {
+            "endpoint_weights": self.endpoint_weights,
+            "slowdowns": self.slowdowns,
+            "business": self.business.model_dump(exclude_none=True) if self.business else None,
+        }
 
     def build_profile(self) -> TrafficProfile | None:
         if self.traffic_profile is None:
@@ -185,6 +221,10 @@ class ScenarioIn(BaseModel):
     )
     rps: float | None = Field(None, gt=0, description="O req/s fijas, iguales en todas las versiones.")
     description: str | None = Field(None, max_length=500, description="La situación en palabras del usuario.")
+    # JAJ-131: los reemplazos que trae el escenario (los mismos campos de RunParams)
+    endpoint_weights: dict[str, Annotated[float, Field(ge=0)]] | None = None
+    slowdowns: dict[str, Annotated[float, Field(gt=0, le=100)]] | None = None
+    business: ScenarioBusiness | None = None
 
 
 class ScenarioOut(BaseModel):
@@ -192,6 +232,9 @@ class ScenarioOut(BaseModel):
     multiplier: float | None
     rps: float | None
     description: str | None
+    endpoint_weights: dict[str, float] | None = None
+    slowdowns: dict[str, float] | None = None
+    business: ScenarioBusiness | None = None
 
 
 Region = Literal["us-east-1", "sa-east-1"]  # regiones con precios de AWS en el snapshot de JAJ-11

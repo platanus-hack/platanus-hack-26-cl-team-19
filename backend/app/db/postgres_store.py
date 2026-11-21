@@ -110,6 +110,7 @@ def _scenario(row: dict[str, Any]) -> ProjectScenario:
         multiplier=float(row["multiplier"]) if row["multiplier"] is not None else None,
         rps=float(row["rps"]) if row["rps"] is not None else None,
         description=row["description"],
+        **(row.get("overrides") or {}),  # JAJ-131
     )
 
 
@@ -360,7 +361,7 @@ class PostgresProjectStore:
             return []
         with self._conn() as conn:
             rows = conn.execute(
-                "select name, multiplier, rps, description from scenarios where project_id = %s order by name",
+                "select name, multiplier, rps, description, overrides from scenarios where project_id = %s order by name",
                 (pid,),
             ).fetchall()
         return [_scenario(r) for r in rows]
@@ -371,11 +372,19 @@ class PostgresProjectStore:
             if pid is None or conn.execute("select 1 from projects where id = %s", (pid,)).fetchone() is None:
                 raise KeyError(project_id)
             row = conn.execute(
-                "insert into scenarios (project_id, name, multiplier, rps, description) values (%s, %s, %s, %s, %s)"
+                "insert into scenarios (project_id, name, multiplier, rps, description, overrides)"
+                " values (%s, %s, %s, %s, %s, %s)"
                 " on conflict (project_id, name) do update set multiplier = excluded.multiplier,"
-                " rps = excluded.rps, description = excluded.description"
-                " returning name, multiplier, rps, description",
-                (pid, scenario.name, scenario.multiplier, scenario.rps, scenario.description),
+                " rps = excluded.rps, description = excluded.description, overrides = excluded.overrides"
+                " returning name, multiplier, rps, description, overrides",
+                (
+                    pid,
+                    scenario.name,
+                    scenario.multiplier,
+                    scenario.rps,
+                    scenario.description,
+                    Jsonb(scenario.overrides()) if scenario.overrides() else None,
+                ),
             ).fetchone()
         return _scenario(row)
 

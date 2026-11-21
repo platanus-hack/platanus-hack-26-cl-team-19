@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
-import { Ellipsis, Loader2, Play } from "@lucide/vue";
+import { Ellipsis, Loader2, Pause, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
@@ -12,6 +12,7 @@ import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
 import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
+import ScenarioOverrideControls from "@/components/editor/ScenarioOverrideControls.vue";
 import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
@@ -53,6 +54,11 @@ import {
   toPlayback,
   toVersionChanges,
 } from "@/services/editor-view";
+
+import {
+  emptyScenarioOverrideDraft,
+  toScenarioOverrides,
+} from "@/services/scenario-overrides";
 
 definePageMeta({
   middleware: "supabase-session",
@@ -136,8 +142,34 @@ const inspected = computed(() => {
     toInspectedNode(node, run.value, provenance)
   );
 });
+const overrideDraft = ref(emptyScenarioOverrideDraft());
+const runOverrides = computed(() => toScenarioOverrides(overrideDraft.value));
+const dependencies = computed(() =>
+  (graph.value?.nodes ?? []).filter(({ id }) =>
+    graph.value?.slowdown_targets?.includes(id),
+  ),
+);
+const selectedDependency = computed(() =>
+  dependencies.value.find(({ id }) => id === selectedNode.value),
+);
+const overrideError =
+  "Usa pesos desde 0, una demora mayor que 0 y hasta ×100, una conversión mayor que 0 y hasta 100 % y un ticket mayor que 0.";
+
 const displayedCosts = computed(() => results.value?.cost ?? costs.value);
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
+const simulating = computed(() => pending.value === "Simulando…");
+const lastRunOverrides = ref<string>();
+const canResume = computed(
+  () =>
+    !!playback.value &&
+    cursor.value < playback.value.frames.length - 1 &&
+    lastRunOverrides.value === JSON.stringify(runOverrides.value),
+);
+const simulationLabel = computed(() => {
+  if (simulating.value) return "Simulando…";
+  if (playing.value) return "Pausar";
+  return canResume.value ? "Reanudar" : "Simular";
+});
 const rows = computed(() =>
   comparison.value ? toComparisonRows(comparison.value, provenance) : [],
 );
@@ -187,8 +219,12 @@ watch([base, target], () => {
 watch(run, (value) => {
   cursor.value = 0;
   playing.value = !!value;
+  lastRunOverrides.value = value
+    ? JSON.stringify(runOverrides.value)
+    : undefined;
 });
 watch(version, (detail) => {
+  overrideDraft.value = emptyScenarioOverrideDraft();
   selectedNode.value = null;
   replicas.value = detail?.model.deployment.api.replicas.value ?? "";
 });
@@ -202,6 +238,18 @@ function showCompare(baseId?: string) {
       versions.value.find((entry) => entry.id !== target.value)?.id ?? "";
   }
   view.value = "compare";
+}
+
+function toggleSimulation() {
+  if (playing.value) {
+    playing.value = false;
+    return;
+  }
+  if (!runOverrides.value || busy.value) return;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (canResume.value) playing.value = true;
+  else void simulate(runOverrides.value);
 }
 
 async function createExample(sample: string) {
@@ -298,6 +346,26 @@ async function saveVersion() {
           </TabsTrigger>
         </TabsList>
       </Tabs>
+      <Button
+        size="sm"
+        class="w-8 sm:w-28"
+        :disabled="busy || (!playing && (!scenario || !graph || !runOverrides))"
+        @click="toggleSimulation"
+      >
+        <Loader2
+          v-if="simulating"
+          data-icon="inline-start"
+          class="animate-spin"
+          aria-hidden="true"
+        />
+        <Pause
+          v-else-if="playing"
+          data-icon="inline-start"
+          aria-hidden="true"
+        />
+        <Play v-else data-icon="inline-start" aria-hidden="true" />
+        <span class="sr-only sm:not-sr-only">{{ simulationLabel }}</span>
+      </Button>
     </template>
 
     <template v-if="projectId" #sidebar>
@@ -323,7 +391,7 @@ async function saveVersion() {
 
     <template #status>
       <p
-        v-if="pending"
+        v-if="pending && !simulating"
         role="status"
         class="border-b border-border px-4 py-2 text-sm text-muted-foreground"
       >
@@ -393,10 +461,20 @@ async function saveVersion() {
         :disabled="busy"
       >
         <div class="flex flex-col gap-3">
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
           <Button
             class="self-start"
-            :disabled="busy || !scenario"
-            @click="compare(base, target)"
+            :disabled="busy || !scenario || !runOverrides"
+            @click="runOverrides && compare(base, target, runOverrides)"
           >
             Ejecutar comparación
           </Button>
@@ -460,22 +538,16 @@ async function saveVersion() {
             :disabled="busy"
             hide-label
           />
-          <Button
-            :disabled="busy || !scenario || !graph"
-            @click="
-              panel = 'simulation';
-              simulate();
-            "
-          >
-            <Loader2
-              v-if="pending === 'Simulando…'"
-              data-icon="inline-start"
-              class="animate-spin"
-              aria-hidden="true"
-            />
-            <Play v-else data-icon="inline-start" aria-hidden="true" />
-            {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
-          </Button>
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
         </template>
         <ComponentList
           v-else-if="section === 'components'"
@@ -527,6 +599,25 @@ async function saveVersion() {
             : "Simula un escenario para ver el uso del componente."
         }}
       </p>
+      <div
+        v-if="!isMock && selectedDependency"
+        class="flex flex-col gap-2 border-t border-border p-4"
+      >
+        <Label for="editor-node-delay">Demora en la corrida (×)</Label>
+        <Input
+          id="editor-node-delay"
+          v-model="overrideDraft.slowdowns[selectedDependency.id]"
+          type="number"
+          min="0"
+          max="100"
+          step="any"
+          placeholder="Base"
+          :disabled="busy"
+        />
+        <p class="text-xs text-muted-foreground">
+          {{ selectedDependency.label }} · Mayor que 0 y hasta ×100
+        </p>
+      </div>
     </template>
 
     <template #canvas>
@@ -685,6 +776,16 @@ async function saveVersion() {
             <p v-else class="text-sm text-muted-foreground">
               Elige un escenario y pulsa Simular para reproducir el resultado.
             </p>
+            <section v-if="run?.overrides?.length" class="flex flex-col gap-1">
+              <h3 class="text-sm font-semibold">Ajustes aplicados</h3>
+              <ul
+                class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+              >
+                <li v-for="adjustment in run.overrides" :key="adjustment">
+                  {{ adjustment }}
+                </li>
+              </ul>
+            </section>
             <ul
               v-if="run?.warnings.length"
               class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"

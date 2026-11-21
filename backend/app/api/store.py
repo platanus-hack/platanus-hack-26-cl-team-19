@@ -76,6 +76,15 @@ class ProjectScenario:
     multiplier: float | None
     rps: float | None
     description: str | None = None
+    # JAJ-131: reemplazos que trae el escenario (mezcla de endpoints, dependencias más lentas, negocio)
+    endpoint_weights: dict[str, float] | None = None
+    slowdowns: dict[str, float] | None = None
+    business: dict[str, float] | None = None
+
+    def overrides(self) -> dict[str, Any]:
+        """Los reemplazos no vacíos, como se guardan en ``scenarios.overrides``."""
+        found = {"endpoint_weights": self.endpoint_weights, "slowdowns": self.slowdowns, "business": self.business}
+        return {k: v for k, v in found.items() if v}
 
     def rate_for(self, model: dict[str, Any]) -> float:
         """Las req/s del escenario para el modelo de una versión. ``ValueError`` si es un

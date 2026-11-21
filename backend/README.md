@@ -277,7 +277,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente), `failure_a` y `failure_b` (ventas en juego por hora, JAJ-74) y `summary`, la comparación en una frase. `region` opcional para los costos. |
 | `GET` | `/projects/{id}/scenarios` | Los escenarios del proyecto (`name`, `multiplier` o `rps`, `description`). Ver "Escenarios del proyecto" abajo. |
 | `GET` | `/projects/{id}/scenarios/{name}` | Un escenario. 404 si el proyecto no lo tiene. |
-| `PUT` | `/projects/{id}/scenarios/{name}` | Crea o reemplaza el escenario. Body: `{"multiplier": 20}` (× el pico de cada versión) o `{"rps": 300}` (req/s fijas), y `description` opcional. |
+| `PUT` | `/projects/{id}/scenarios/{name}` | Crea o reemplaza el escenario. Body: `{"multiplier": 20}` (× el pico de cada versión) o `{"rps": 300}` (req/s fijas), y `description` opcional. También `endpoint_weights`, `slowdowns` y `business` (ver "Reemplazos del escenario" abajo). |
 | `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
 | `POST` | `/projects/{id}/versions/{n}/results` | Lo que necesita la pantalla de resultados, en una llamada (JAJ-128): el `run` (el mismo de `…/runs`, del guardado si ya existe), el `cost` (el de `…/costs`) y el `failure` (ventas en juego por hora, antes solo en `compare`), con `failure_missing` y `summary`. Body: el de `…/runs` más `region`. Ver "Resultados de una versión" abajo. |
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
@@ -311,6 +311,20 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 - **`POST /projects/{id}/versions/{n}/runs` y `compare`** buscan el escenario por nombre en el proyecto, no en el modelo. Uno creado con `PUT` sirve para cualquier versión, aunque no esté en su `traffic.scenarios`. Si no existe, responden 422 `unknown_scenario` con `available`. Con `rps` en la request, el escenario es solo un nombre y no se busca.
 - **Al editar un escenario** cambia la tasa final y, con ella, la clave del run guardado: se vuelve a simular y nunca se devuelve un run con la tasa vieja.
 - **Duración, llegadas y timeout** siguen saliendo de la request. Las columnas de la tabla para eso (`duration_s`, `arrivals`…) todavía no se usan.
+
+**Reemplazos del escenario (JAJ-131):** un escenario puede cambiar más que la tasa. Son tres reemplazos opcionales que cambian la situación, no la arquitectura: se aplican a una copia del modelo solo para esa corrida, sin crear versiones (`app/models/overrides.py`). Van en el body de `…/runs`, `…/results`, `compare` y `POST /runs`, o guardados en el escenario con `PUT /projects/{id}/scenarios/{name}`.
+
+| Campo | Ejemplo | Qué cambia |
+| -- | -- | -- |
+| `endpoint_weights` | `{"POST /checkout": 3}` | La mezcla de endpoints. Los que no aparecen conservan su peso del modelo, y el motor normaliza como siempre. |
+| `slowdowns` | `{"external:pagos": 10, "db": 1.5}` | Multiplica el tiempo de los pasos de un nodo del grafo (los ids de `POST /graph`): `db`, `cache`, `external` (llamadas externas sin servicio) o `external:<servicio>`. Un valor menor que 1 lo hace más rápido. Va de más de 0 a 100. |
+| `business` | `{"conversion": 0.04, "ticket_usd": 60}` | La conversión y el ticket del costo de fallar (JAJ-74). Puede completar un modelo que no los trae. |
+
+- **Guardados en el escenario**, se aplican al simular y comparar cualquier versión con él. Si la request trae uno de los tres, ese reemplaza al guardado.
+- **El `Run` dice con qué se simuló:** `overrides` trae una frase por reemplazo, por ejemplo *"Dependencias del escenario: external:pagos ×10 el tiempo de sus pasos."* El `summary` de `…/results` y de `compare` también las incluye, para que un resultado con pagos ×10 no se lea como el de la arquitectura tal cual.
+- **Procedencia:** los números que pone el escenario quedan `SUPUESTO`, con fuente "Escenario: …" o "Declarado en el escenario: …". El costo de fallar nombra de dónde salen su conversión y su ticket.
+- **Un reemplazo que no calza** con el modelo (un endpoint o un nodo que no tiene, o una mezcla con todos los pesos en 0) responde 422 `invalid_parameters`, con `available` cuando hay valores que sí sirven.
+- **Entran en la clave del run guardado** (JAJ-75): otro reemplazo simula de nuevo y el mismo vuelve del guardado.
 
 **Runs guardados (JAJ-75):** `POST /projects/{id}/versions/{n}/runs` y `compare` guardan cada `Run` y, si se pide lo mismo otra vez, devuelven el guardado sin simular. Funciona así porque las versiones no se editan y el motor es determinista con la misma semilla.
 - **La clave** (`cache_key`, en `app/api/run_cache.py`) es el sha256 del proyecto, el número de versión, los `RunParams` (escenario, semilla, duración, tasa, perfil, créditos de CPU…) y `ENGINE_VERSION`. La tasa es la final: si viene de un escenario del proyecto, ya va calculada con el pico de la versión (JAJ-76).
