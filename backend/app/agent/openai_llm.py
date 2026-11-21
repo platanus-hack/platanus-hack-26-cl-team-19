@@ -5,7 +5,18 @@ from typing import Any
 
 from openai import OpenAI
 
-from app.agent.loop import MAX_TOKENS, Turn
+from app.agent.loop import MAX_TOKENS, Turn, model_for
+
+
+def _user_part(block: dict[str, Any]) -> dict[str, Any] | None:
+    """Un bloque ``text`` o ``image`` del historial (forma de Anthropic) como parte de la Responses API."""
+    if block["type"] == "text":
+        return {"type": "input_text", "text": block["text"]}
+    if block["type"] == "image":
+        source = block["source"]
+        url = f"data:{source['media_type']};base64,{source['data']}"
+        return {"type": "input_image", "image_url": url, "detail": "auto"}
+    return None
 
 
 def response_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -15,6 +26,7 @@ def response_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if isinstance(content, str):
             items.append(message)
             continue
+        parts = []
         for block in content:
             if block["type"] == "openai_output":
                 items.extend(block["items"])
@@ -22,6 +34,11 @@ def response_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 items.append(
                     {"type": "function_call_output", "call_id": block["tool_use_id"], "output": block["content"]}
                 )
+            elif message["role"] == "user" and (part := _user_part(block)):
+                parts.append(part)
+        if parts:
+            # texto e imágenes del usuario: un solo mensaje, después de los resultados de tools del mismo turno
+            items.append({"role": "user", "content": parts})
     return items
 
 
@@ -35,10 +52,9 @@ def tool_input(arguments: str) -> dict[str, Any]:
 
 
 class OpenAILLM:
-    model = "gpt-4.1-mini"
-
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str | None = None) -> None:
         self._api_key = api_key
+        self.model = model or model_for("openai", "chat")
 
     def complete(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Turn:
         schemas = [

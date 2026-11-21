@@ -13,6 +13,7 @@ falso que devuelve tool calls fijas.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -26,8 +27,31 @@ from app.agent.tools import AgentTools
 from app.costs.prices import manual
 
 MODEL = "claude-opus-5-5"
+OPENAI_MODEL = "gpt-4.1-mini"
+DEFAULT_MODELS = {"anthropic": MODEL, "openai": OPENAI_MODEL}
+IMAGE_MEDIA_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 MAX_ITERATIONS = 8  # vueltas LLM → tools por mensaje del usuario
 MAX_TOKENS = 16_000
+
+
+def model_for(provider: str, purpose: str) -> str:
+    """El modelo de cada proveedor para el chat (``chat``) o para leer el repo (``extract``).
+
+    Se configura con ``BRANCHPOINT_<PROVIDER>_<PURPOSE>_MODEL``, por ejemplo
+    ``BRANCHPOINT_ANTHROPIC_EXTRACT_MODEL``. Sin la variable, el modelo de siempre del proveedor."""
+    if provider not in DEFAULT_MODELS or purpose not in ("chat", "extract"):
+        raise ValueError(f"proveedor o propósito desconocido: {provider!r}, {purpose!r}")
+    value = os.environ.get(f"BRANCHPOINT_{provider.upper()}_{purpose.upper()}_MODEL", "").strip()
+    return value or DEFAULT_MODELS[provider]
+
+
+def image_block(media_type: str, data_base64: str) -> dict[str, Any]:
+    """Bloque de imagen para un mensaje del usuario, con la forma de la API de Anthropic.
+
+    Es la forma del historial interno: ``AnthropicLLM`` lo manda tal cual y ``OpenAILLM`` lo traduce."""
+    if media_type not in IMAGE_MEDIA_TYPES:
+        raise ValueError(f"tipo de imagen no soportado: {media_type}")
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data_base64}}
 
 
 @dataclass
@@ -48,8 +72,8 @@ class LLM(Protocol):
 class AnthropicLLM:
     """Claude por la API, con la API key seleccionada para el turno."""
 
-    def __init__(self, api_key: str | None = None, model: str = MODEL) -> None:
-        self.model = model
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+        self.model = model or model_for("anthropic", "chat")
         self._client = (
             anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=180.0)
             if api_key
