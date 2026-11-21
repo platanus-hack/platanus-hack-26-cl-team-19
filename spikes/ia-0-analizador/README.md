@@ -4,7 +4,10 @@ Spec: [`docs/specs/ia-00-medir-analizador.md`](../../docs/specs/ia-00-medir-anal
 
 **Pregunta.** El agente es el único camino para importar un repo. ¿`analyze_repo` entrega una arquitectura correcta, en un tiempo y a un costo aceptables, con un LLM real?
 
-**Estado.** El script, la referencia y la estimación previa están listos. **La matriz con Anthropic y OpenAI no se corrió**: en el entorno donde se armó no había `ANTHROPIC_API_KEY` ni `OPENAI_API_KEY`. Las tablas de resultados de abajo quedan vacías hasta correrla, con los comandos de [Cómo correrlo](#cómo-correrlo).
+**Estado.**
+
+* **Calidad con un LLM real: medida** en los 4 repos chicos, con Claude (Fable 5.2) leyendo cada repo en modo CLI (ADR 0002). Encontró 80 de 80 endpoints, no inventó ninguno y el 100 % de la evidencia es válida (193 citas). Ver [Resultados](#resultados).
+* **Tokens, tiempo y costo por la API: sin medir.** En el entorno no había `ANTHROPIC_API_KEY` ni `OPENAI_API_KEY`, así que `analyze_repo` no corrió contra un proveedor. Esa parte queda con la estimación previa y los comandos de [Cómo correrlo](#cómo-correrlo).
 
 ## Qué hay
 
@@ -22,7 +25,7 @@ Spec: [`docs/specs/ia-00-medir-analizador.md`](../../docs/specs/ia-00-medir-anal
 | [nsidnev/fastapi-realworld-example-app](https://github.com/nsidnev/fastapi-realworld-example-app) | `029eb77` | FastAPI | 19 | El modelo de `backend/app/samples/` (extractor AST) y `grep @router.<método>`: coinciden | sí |
 | [fastapi/full-stack-fastapi-template](https://github.com/fastapi/full-stack-fastapi-template) | `77e550a` | FastAPI | 23 | El fixture de `backend/tests/fixtures/` y `grep`: coinciden | sí |
 | [gothinkster/node-express-realworld-example-app](https://github.com/gothinkster/node-express-realworld-example-app) | `30b68e1` | Express + Prisma | 19 | `grep router.<método>(` en `src/`, montados en `/api` | no, solo Dockerfile |
-| [gothinkster/django-realworld-example-app](https://github.com/gothinkster/django-realworld-example-app) | `29c9d42` | Django REST | 19 | `urls.py` de `conduit/apps` contra la spec RealWorld | no |
+| [gothinkster/django-realworld-example-app](https://github.com/gothinkster/django-realworld-example-app) | `29c9d42` | Django REST | 19 | `urls.py` y las vistas de `conduit/apps`, leídos a mano. No coincide con la spec RealWorld: `ArticleViewSet` no define `destroy` (no hay `DELETE /api/articles/{slug}`) y `RetrieveUpdateAPIView` expone `PATCH /api/user` | no |
 | [mealie-recipes/mealie](https://github.com/mealie-recipes/mealie) | `d84deca` | FastAPI (grande) | 292 | `grep @<router>.<método>(` en `mealie/` | sí |
 
 La spec pedía un repo Node con Docker Compose. El de RealWorld no lo trae; si se quiere medir la detección del Compose en otro lenguaje, cambiarlo por uno que lo tenga.
@@ -89,7 +92,44 @@ Después, completar a mano la columna `shape_ok` de los CSV de `results/` y llen
 
 ## Resultados
 
-Pendientes: se llenan con `results/runs.jsonl`.
+### Calidad con un LLM real: Claude en modo CLI
+
+Cómo se midió: Claude (el agente de Claude Code, Fable 5.2) leyó cada repo con `grep` y lectura de archivos, la misma información que dan las tools del analizador, y armó la arquitectura con el schema de `submit_architecture` ([ADR 0002](../../docs/adr/0002-la-ia-lee-la-arquitectura-del-repo.md), modo CLI). Las entregas están en `claude-cli/` (las escribe `claude-cli/build.py`).
+
+`score.py` las puntúa sin LLM:
+
+* valida cada entrega con el schema;
+* compara los endpoints con `reference.json`, sin el prefijo de montaje (`/api`, `/api/v1`);
+* revisa **toda** la evidencia, no una muestra de 20: el archivo existe, la línea está en rango y alguna parte de la ruta aparece a ±30 líneas.
+
+Cada entrega se armó además con `build_from_ai` y se simuló CyberDay con el motor.
+
+| Repo | Endpoints / reales | Inventados | Pasos | Evidencia válida | Arma un modelo que simula |
+|---|---|---|---|---|---|
+| fastapi-realworld (FastAPI + asyncpg) | 19 / 19 | 0 | 19 | 38 / 38 | sí (p95 5,9 ms) |
+| full-stack-fastapi (FastAPI + SQLModel) | 23 / 23 | 0 | 37 | 60 / 60 | sí (p95 25,5 ms) |
+| node-express (Express + Prisma) | 19 / 19 | 0 | 31 | 50 / 50 | sí (p95 44,1 ms) |
+| django (Django REST) | 19 / 19 | 0 | 26 | 45 / 45 | sí (p95 7,4 ms) |
+
+```bash
+cd backend && .venv/bin/python ../spikes/ia-0-analizador/score.py --repos ~/ia0-repos ../spikes/ia-0-analizador/claude-cli/*.json
+```
+
+**Lo que encontró la medición:**
+
+1. **Un falso positivo en la regla de evidencia de IA-4.** `check_evidence` exigía que el segmento fijo más largo de la ruta apareciera cerca de la línea citada. En FastAPI, `@router.delete("/{id}")` solo trae el parámetro: el segmento (`items`) viene del `prefix=` del `APIRouter`, a 89 líneas. Con esa regla, 3 de 80 endpoints bien citados salían como evidencia inválida (96,7 % y 97,4 % en los repos de FastAPI). La corrección, que va en la PR de IA-4: vale cualquier segmento fijo o el nombre de un parámetro. Con ella, 100 %.
+2. **La referencia de Django estaba mal.** La armé desde la spec RealWorld sin leer las vistas; tiene un endpoint distinto. Se corrigió leyendo el repo.
+
+**Límites de esta medición:**
+
+* El modo CLI no pasa por `analyze_repo`. No hay vueltas, tokens ni tiempo de la API que medir, y el agente pudo leer sin el tope de 40 vueltas.
+* La forma (`shape`) de cada paso la puso el mismo agente que se evalúa: no hay revisión independiente.
+* No se midió mealie (292 endpoints) en este modo: no cabe leerlo entero en el contexto del agente, y en ese repo lo crítico es el costo por la API.
+* OpenAI no se midió.
+
+### Por la API (`analyze_repo` con Anthropic y OpenAI)
+
+Pendiente de key. Se llena con `results/runs.jsonl`.
 
 | Repo | Proveedor | Corrida | Endpoints / reales | Inventados | Evidencia válida (20) | `shape` ok (20) | Vueltas | Tokens | Segundos | US$ | Falló |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -97,14 +137,14 @@ Pendientes: se llenan con `results/runs.jsonl`.
 
 | Medida | Umbral | Resultado |
 |---|---|---|
-| Endpoints encontrados / reales | ≥ 80 % | pendiente |
-| Endpoints inventados | 0 | pendiente |
-| Evidencia válida en la muestra | ≥ 95 % | pendiente |
-| `shape` correcto en la muestra | ≥ 80 % | pendiente |
-| Tiempo por repo | < 3 min | pendiente |
+| Endpoints encontrados / reales | ≥ 80 % | **100 %** en los 4 chicos (Claude, modo CLI); por la API, pendiente |
+| Endpoints inventados | 0 | **0** (Claude, modo CLI) |
+| Evidencia válida en la muestra | ≥ 95 % | **100 %** de 193 citas, con la regla corregida; 98,4 % con la regla original de IA-4 |
+| `shape` correcto en la muestra | ≥ 80 % | sin revisión independiente |
+| Tiempo por repo | < 3 min | pendiente (API) |
 | Costo por repo | < US$1 | estimado: sí en los 4 chicos; no en mealie sin caché |
-| `AnalysisFailed` en repos de hasta 50 endpoints | 0 | pendiente |
-| Componentes del Compose detectados | todos | pendiente |
+| `AnalysisFailed` en repos de hasta 50 endpoints | 0 | pendiente (API) |
+| Componentes del Compose detectados | todos | la base sí (3 de 3 repos con Compose); el resto lo lee `iac.py`, que es determinista |
 
 ## Ajustes para IA-4
 
@@ -120,4 +160,7 @@ Salen de la estimación y del código, no todavía de la medición. IA-4 (JAJ-12
 
 ## Conclusión
 
-**Pendiente de medir.** Con la estimación: **listo con los ajustes de IA-4** para repos de hasta ~50 endpoints. Para un repo de ~300 endpoints, **no alcanza** sin caché de prompt: el costo estimado (~US$25) pasa 25 veces el umbral.
+**Listo con los ajustes de IA-4** para repos de hasta ~50 endpoints.
+
+* **Calidad:** medida con un LLM real (Claude, modo CLI). 100 % de los endpoints, 0 inventados y 100 % de la evidencia válida en 4 frameworks, con la regla de evidencia corregida.
+* **Costo y tiempo por la API:** solo estimados, falta medir con una key. Para un repo de ~300 endpoints, **no alcanza** sin caché de prompt: unos US$25 estimados, 25 veces el umbral. IA-4 agrega la caché.
