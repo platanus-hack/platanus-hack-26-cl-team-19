@@ -26,7 +26,10 @@ backend/
 │   │   ├── simulate.py      #   arma los recursos desde el modelo y recorre los pasos de cada request
 │   │   └── metrics.py       #   percentiles y series por segundo
 │   ├── agent/               # lo que usa el agente de IA (ADR 0001)
-│   │   └── ops.py           #   operaciones tipadas que proponen versiones (JAJ-68)
+│   │   ├── ops.py           #   operaciones tipadas que proponen versiones (JAJ-68)
+│   │   ├── tools.py         #   las tools del agente sobre los proyectos, con límites (JAJ-67)
+│   │   ├── mcp.py           #   /mcp: las tools para la CLI de IA del usuario (JAJ-54, JAJ-67)
+│   │   └── loop.py          #   el loop del chat del editor con Claude (JAJ-67)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
 │   ├── costs/               # costo mensual por componente (JAJ-72)
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
@@ -40,7 +43,7 @@ backend/
 └── tests/
     ├── fixtures/            # versión fija del modelo del template (anterior a JAJ-47) para los tests del motor
     ├── engine/              # tests del kernel y del motor
-    ├── agent/               # tests de las operaciones
+    ├── agent/               # tests de las operaciones, las tools, el MCP y el loop (con un LLM falso)
     ├── costs/               # tests de los precios y del costo (contra el spike de JAJ-11)
     ├── ingest/              # tests del lector de archivos de despliegue
     └── api/                 # tests de la API
@@ -333,6 +336,49 @@ Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran 
 curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "replicas": 3}, {"op": "add_pooler"}]}' localhost:8000/projects/$P/versions/1/ops
 curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "scenario": "cyberday"}' localhost:8000/projects/$P/compare
 ```
+
+### Agente: tools, MCP y chat (JAJ-67)
+
+El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las ejecuta. Las tools están una sola vez, en `app/agent/tools.py`, y se exponen de dos formas (JAJ-54):
+
+1. **MCP en `/mcp` (modo principal).** El loop corre en la CLI de IA del usuario, por ejemplo Claude Code con su suscripción, y el backend solo ejecuta las tools. Branchpoint no ve ninguna credencial de IA.
+
+   ```bash
+   claude mcp add --transport http branchpoint http://localhost:8000/mcp --header "Authorization: Bearer <token de sesión de Supabase>"
+   ```
+
+   - **Con login:** el token es el mismo que usa el editor (JAJ-78), y cada usuario ve solo sus proyectos. Sin token, `/mcp` responde 401. El token de larga duración para emparejar la CLI llega con JAJ-81.
+   - **Sin login** (`BRANCHPOINT_AUTH=off`): no hace falta el header.
+
+2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`), con un máximo de 8 vueltas por mensaje. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage` y `cost` de la tabla de precios) y `error`.
+   - **Credencial del usuario:** su API key en el header `X-Anthropic-Api-Key`. Se usa en esa request y no se guarda.
+   - **Modo demo:** con `BRANCHPOINT_CHAT_DEMO=on` y sin header, se usa la credencial del equipo (el SDK la resuelve del entorno), con 30 mensajes por usuario y por día.
+   - **Sin ninguna de las dos:** responde 422.
+
+| Tool | Qué hace |
+| -- | -- |
+| `list_projects` | Los proyectos del usuario y sus versiones |
+| `get_model`, `list_assumptions` | Resumen de una versión (despliegue, tráfico, endpoints con `archivo:línea`, metas) y sus `SUPUESTO` |
+| `list_scenarios` | Los escenarios del proyecto |
+| `simulate` | Simula una versión con un escenario del proyecto: p95, errores, cuello de botella con su línea, procedencia y si cumple las metas |
+| `compare` | Dos versiones con el mismo escenario y semilla: delta de p95, errores y costo, ventas en juego y metas |
+| `estimate_cost`, `ops_schema` | Costo mensual por componente; schema de las operaciones |
+| `propose_version` | Aplica operaciones (JAJ-68) y guarda una versión con origen `agente`. No simula: después va `compare` |
+| `set_traffic` | Tráfico del usuario → pico en req/s y escenario del evento, como versión nueva |
+| `set_deployment` | Réplicas, vCPU o plan de DB del usuario, como versión nueva |
+| `set_goals` | Metas del proyecto: p95, errores y presupuesto |
+
+Reglas, iguales en los dos modos:
+
+- **Ningún número libre del LLM.** `set_traffic`, `set_deployment` y `set_goals` piden `quote`, la frase textual del usuario, y cada número tiene que aparecer en ella (se aceptan 100.000, 100k, 1 % = 0,01, 300 ms = 0,3 s). `simulate` y `compare` no reciben req/s ni duración: la tasa sale del escenario, y la duración la fija el servidor (60 s, o menos si la tasa no cabe en el tope de requests por llamada).
+- **Procedencia en cada resultado** (`label`, fuente con escenario, semilla, req/s y segundos simulados) y todas las advertencias del motor.
+- **Errores con la forma `{"error": "..."}`,** también para argumentos desconocidos o mal tipados. En MCP, un middleware los rechaza antes de la tool, porque el SDK los descarta en silencio.
+- **Límites por usuario:** 60 llamadas por minuto y 300 simulaciones por día (`compare` cuenta 2). Son en memoria, por instancia de la API.
+- **Metas:** `projects.slo_p95_ms`, `slo_error_rate` y `budget_usd_month` del modelo de datos (JAJ-55). El p95 solo mide las requests exitosas. Por eso, si el usuario no declaró una meta de errores, `simulate` y `compare` exigen un piso de 1 % (`SUPUESTO`, y lo dicen): una versión que rechaza el 85 % de las requests nunca cumple, aunque su p95 sea bajo.
+
+`read_file` y `grep` no están. En el modo MCP sobran, porque la CLI del usuario lee su repo local. Para el chat haría falta guardar el repo extraído.
+
+`BRANCHPOINT_MCP_ALLOWED_HOSTS` (separados por coma; por defecto localhost) define los `Host` que acepta `/mcp`, como protección contra DNS rebinding. En producción va el dominio de la API.
 
 ### Costos (JAJ-72)
 

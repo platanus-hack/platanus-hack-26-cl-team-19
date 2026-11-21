@@ -91,3 +91,22 @@ def test_saved_model_is_independent_of_the_caller(store, model):
     store.add_version(project.id, edited, "manual", 1, None)
     edited["deployment"]["api"]["replicas"]["value"] = 99
     assert store.get_version(project.id, 2).model["deployment"]["api"]["replicas"]["value"] != 99
+
+
+def test_goals_survive_a_restart(database_url, store, model):
+    """Metas del proyecto (JAJ-67): projects.slo_p95_ms, slo_error_rate y budget_usd_month."""
+    from app.api.store import ProjectGoals
+    from app.db.postgres_store import PostgresProjectStore
+
+    project = store.create("tienda", model, None)
+    assert store.get_goals(project.id) == ProjectGoals()
+    saved = store.set_goals(project.id, ProjectGoals(slo_p95_ms=300, slo_error_rate=0.01, budget_usd_month=400))
+    assert saved == ProjectGoals(300.0, 0.01, 400.0)
+    other = PostgresProjectStore.from_url(database_url)
+    try:
+        assert other.get_goals(project.id) == ProjectGoals(300.0, 0.01, 400.0)
+    finally:
+        other.close()
+    with pytest.raises(KeyError):
+        store.set_goals("00000000-0000-0000-0000-000000000000", ProjectGoals(slo_p95_ms=1))
+    assert store.get_goals("no-es-uuid") == ProjectGoals()

@@ -1,5 +1,7 @@
 # JAJ-54: cómo usamos la IA del usuario (Bring Your Own Subscription)
 
+> **La versión productiva está en el backend (JAJ-67).** Las tools están en `backend/app/agent/tools.py`, el MCP en `/mcp` y el chat en `POST /projects/{id}/chat`; ver la sección "Agente" de `backend/README.md`. Este spike queda como registro de la decisión.
+
 ## Resultado en 5 líneas
 
 1. **Decisión: Branchpoint es un servidor MCP. El agente corre en la CLI de IA del propio usuario**, por ejemplo Claude Code con su plan Pro/Max. El usuario conecta su CLI a Branchpoint con un comando. Desde ahí, el loop con el LLM y los tokens son suyos, y Branchpoint solo ejecuta las tools: simular, proponer y costear.

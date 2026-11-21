@@ -71,6 +71,16 @@ class ProjectScenario:
 
 
 @dataclass(frozen=True)
+class ProjectGoals:
+    """Las metas del proyecto (JAJ-67): con ellas el agente decide si una versión sirve. Las declara el
+    usuario (``set_goals`` con su frase); ``None`` = sin meta."""
+
+    slo_p95_ms: float | None = None
+    slo_error_rate: float | None = None  # fracción, 0 a 1
+    budget_usd_month: float | None = None
+
+
+@dataclass(frozen=True)
 class RepoSource:
     """De qué repo, rama y commit salió una v1 analizada (JAJ-57)."""
 
@@ -154,6 +164,14 @@ class ProjectStore(Protocol):
         """Crea el escenario o reemplaza el que tiene ese nombre (JAJ-76)."""
         ...
 
+    def get_goals(self, project_id: str) -> ProjectGoals:
+        """Las metas del proyecto (todo ``None`` si no se declararon)."""
+        ...
+
+    def set_goals(self, project_id: str, goals: ProjectGoals) -> ProjectGoals:
+        """Reemplaza las metas. ``KeyError`` si el proyecto no existe."""
+        ...
+
     def find_run(self, cache_key: str) -> dict[str, Any] | None:
         """El ``Run`` guardado con esa clave (como dict ``branchpoint.run/v1``), o ``None`` (JAJ-75)."""
         ...
@@ -224,6 +242,7 @@ class InMemoryProjectStore:
         self._projects: dict[str, Project] = {}
         self._runs: dict[str, dict[str, Any]] = {}  # cache_key → Run como dict (JAJ-75)
         self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
+        self._goals: dict[str, ProjectGoals] = {}  # proyecto → metas (JAJ-67)
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
         self._installations: dict[int, tuple[str | None, str]] = {}  # id → (owner, cuenta)
         self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
@@ -277,6 +296,16 @@ class InMemoryProjectStore:
                 raise KeyError(project_id)
             self._scenarios[project_id][scenario.name] = scenario
         return scenario
+
+    def get_goals(self, project_id: str) -> ProjectGoals:
+        return self._goals.get(project_id, ProjectGoals())
+
+    def set_goals(self, project_id: str, goals: ProjectGoals) -> ProjectGoals:
+        with self._lock:
+            if project_id not in self._projects:
+                raise KeyError(project_id)
+            self._goals[project_id] = goals
+        return goals
 
     def find_run(self, cache_key: str) -> dict[str, Any] | None:
         run = self._runs.get(cache_key)
