@@ -37,11 +37,12 @@ from app.agent.openai_llm import OpenAILLM
 from app.agent.tools import Limiter
 from app.api.auth import SupabaseAuth, auth_from_env
 from app.api.errors import install_error_handlers
-from app.api.routes import chat, costs, credentials, github, health, models, projects, runs
+from app.api.routes import attachments, chat, costs, credentials, github, health, models, projects, runs
 from app.api.run_cache import RUN_CACHE_HEADER
 from app.api.store import InMemoryProjectStore, ProjectStore
 from app.github import GitHubApp, GitHubAppConfig
 from app.github.ingestion import IngestionJobs
+from app.storage.attachments import attachment_storage_from_env
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 
@@ -63,14 +64,18 @@ def create_app(
     store: ProjectStore | None = None,
     auth: SupabaseAuth | None = _FROM_ENV,
     github_app: GitHubApp | None = _FROM_ENV,
+    attachment_storage: Any = _FROM_ENV,
 ) -> FastAPI:
     """``auth=None`` corre sin login (los tests de las rutas, y ``BRANCHPOINT_AUTH=off``).
-    ``github_app=None`` deja ``/github/*`` sin configurar (503)."""
+    ``github_app=None`` deja ``/github/*`` sin configurar (503). ``attachment_storage=None`` deja los
+    adjuntos del chat sin configurar (503); del entorno sale con ``SUPABASE_URL`` y ``SUPABASE_SECRET_KEY``."""
     if auth is _FROM_ENV:
         auth = auth_from_env()
     if github_app is _FROM_ENV:
         config = GitHubAppConfig.from_env()
         github_app = GitHubApp(config) if config else None
+    if attachment_storage is _FROM_ENV:
+        attachment_storage = attachment_storage_from_env()
     if cors_origins is None:
         env = os.environ.get("BRANCHPOINT_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
         cors_origins = [o.strip() for o in env.split(",") if o.strip()]
@@ -108,6 +113,7 @@ def create_app(
     app.state.github = github_app
     app.state.ingestions = IngestionJobs()  # ingestas en curso (JAJ-57)
     app.state.limiter = limiter
+    app.state.attachments = attachment_storage  # adjuntos del chat en Supabase Storage (IA-6)
     app.state.openai_llm_factory = OpenAILLM
     app.state.llm_factory = chat.default_llm_factory  # los tests lo reemplazan por un LLM falso
     app.include_router(health.router)
@@ -118,6 +124,7 @@ def create_app(
     app.include_router(github.router)
     app.include_router(chat.router)
     app.include_router(credentials.router)
+    app.include_router(attachments.router)
 
     app.mount("/", mcp_app)  # /mcp: el servidor MCP del agente (al final: las rutas de arriba tienen prioridad)
     return app

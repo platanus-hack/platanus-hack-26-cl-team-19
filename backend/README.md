@@ -430,6 +430,24 @@ Reglas, iguales en los dos modos:
 
 `BRANCHPOINT_MCP_ALLOWED_HOSTS` (separados por coma; por defecto localhost) define los `Host` que acepta `/mcp`, como protección contra DNS rebinding. En producción va el dominio de la API.
 
+### Adjuntos del chat (IA-6)
+
+El usuario sube imágenes y logs para que el agente los use como evidencia. El archivo va del navegador a Supabase Storage con una URL firmada: el backend no lo recibe, solo firma, registra y descarga cuando una tool lo pide (`app/storage/attachments.py`, rutas en `app/api/routes/attachments.py`).
+
+| Ruta | Hace |
+| -- | -- |
+| `POST /projects/{id}/attachments` con `{filename, media_type, bytes}` | Valida tipo, tamaño y tope; deja la fila `pending` y devuelve `{id, kind, upload_url, content_type, expires_at}` |
+| `PUT upload_url` (desde el navegador, con `Content-Type: content_type`) | Sube el archivo a Storage |
+| `POST /projects/{id}/attachments/{aid}/complete` | Compara tamaño y tipo con lo declarado y lo marca `ready` (204). Si no calza, lo borra (422) |
+| `GET /projects/{id}/attachments` | Los `ready` vigentes |
+| `DELETE /projects/{id}/attachments/{aid}` | Borra objeto y fila |
+
+- Imágenes PNG, JPEG, WebP o GIF hasta 5 MB; logs `.log`, `.txt`, `.csv`, `.json` o `.ndjson` hasta 10 MB. Máximo 20 vigentes por proyecto.
+- Vencen a las `BRANCHPOINT_ATTACHMENT_TTL_HOURS` horas (24). Sin cron: cada `POST` y `GET` borra antes los vencidos del usuario; `purge_expired(store, storage, None)` limpia los de todos.
+- Bucket privado `chat-attachments` y tabla `chat_attachments`, sin políticas para `anon` ni `authenticated` (migración `20261121181000_chat_attachments.sql`). Ruta del objeto: `<owner>/<proyecto>/<adjunto>/<nombre saneado>`.
+- Piden sesión: sin login responden 401. Sin `SUPABASE_URL` y `SUPABASE_SECRET_KEY`, 503.
+- `tests/storage/test_supabase_storage.py` prueba el cliente contra el Storage del stack local con `TEST_SUPABASE_URL` y `TEST_SUPABASE_SECRET_KEY`.
+
 ### Costos (JAJ-72)
 
 `estimate_cost(modelo, region)` (`app/costs/estimate.py`) devuelve el costo mensual de una arquitectura, por componente. Las fórmulas son las del spike de JAJ-11 (`spikes/jaj-11-costos/costs.py`) y los precios son sus snapshots fechados (`app/costs/prices/`). La diferencia es que se aplican a lo que dice el modelo, no a un escenario genérico:
