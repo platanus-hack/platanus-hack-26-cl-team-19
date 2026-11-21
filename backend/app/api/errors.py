@@ -17,6 +17,7 @@ UNKNOWN_SCENARIO = "unknown_scenario"  # el escenario no está en el modelo
 INVALID_PARAMETERS = "invalid_parameters"  # parámetros fuera de rango o combinación inválida
 RUN_TOO_LARGE = "run_too_large"  # la simulación pedida es demasiado grande para una request
 NOT_FOUND = "not_found"  # el modelo de ejemplo, proyecto o versión no existe (trae ``resource``)
+INVALID_OPERATIONS = "invalid_operations"  # una operación de propose_version no se puede aplicar (JAJ-68)
 
 
 class ApiError(Exception):

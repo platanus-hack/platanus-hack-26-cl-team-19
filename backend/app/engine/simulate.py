@@ -6,6 +6,7 @@ Recursos que se arman desde el ``deployment`` del modelo:
   request y los pasos de CPU (ej. hash de contraseña, que libera el GIL pero usa un núcleo).
 * ``api_threads``: hilos del threadpool para endpoints ``def`` (síncronos). Los async no los usan.
 * ``db_pool``: conexiones, ``pool por worker × workers × réplicas`` (tope: conexiones de la DB).
+  Sin pooler, pasar el tope de la DB es un error al conectarse; con pooler, la request espera.
   Esperar más que el timeout del pool es un error.
 * ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo.
 * ``queue:<nombre>``: workers de cada cola (``deployment.queues``). Encolar es casi instantáneo
@@ -47,7 +48,14 @@ from itertools import accumulate
 from typing import Any
 
 from app.engine.kernel import Resource, Sim
-from app.engine.metrics import ERROR_POOL_TIMEOUT, ERROR_QUEUE_FULL, Recorder, UsageTracker, latency_stats
+from app.engine.metrics import (
+    ERROR_DB_REFUSED,
+    ERROR_POOL_TIMEOUT,
+    ERROR_QUEUE_FULL,
+    Recorder,
+    UsageTracker,
+    latency_stats,
+)
 from app.models.architecture import (
     RESOURCE_API_CPU,
     RESOURCE_BACKGROUND,
@@ -139,13 +147,7 @@ def simulate(
     api_scale *= cpu.api_core_factor
     db_scale *= cpu.db_core_factor
     threads = Resource(sim, "api_threads", model.api.threads)
-    pool_capacity = model.app_connections
-    if model.db.max_connections and pool_capacity > model.db.max_connections:
-        warnings.append(
-            f"La app puede abrir {pool_capacity} conexiones y la DB acepta {model.db.max_connections}: "
-            f"se simula con {model.db.max_connections} (las demás fallarían al conectarse)."
-        )
-        pool_capacity = model.db.max_connections
+    pool_capacity, refuse_at = _connection_limits(model, warnings)
     pool = Resource(sim, "db_pool", pool_capacity)
     queues = {
         name: _QueueCounters(q, Resource(sim, QUEUE_PREFIX + name, q.workers)) for name, q in model.queues.items()
@@ -178,6 +180,8 @@ def simulate(
             for _ in range(step.repeat):
                 if res == RESOURCE_DB_CONNECTION:
                     if conn is not None and not conn[0]:
+                        if refuse_at is not None and pool.busy + pool.waiting >= refuse_at:
+                            return ERROR_DB_REFUSED
                         if not (yield pool.acquire(pool_timeout_s)):
                             return ERROR_POOL_TIMEOUT
                         conn[:] = [True, sim.now, step.at]
@@ -353,6 +357,35 @@ def _cpu_adjustment(model: ArchitectureModel, cpu_credits: str, warnings: list[s
         db_vcpu_effective=db_vcpu,
         cpu_credits=credits,
     )
+
+
+def _connection_limits(model: ArchitectureModel, warnings: list[str]) -> tuple[int, int | None]:
+    """Conexiones que se simulan y desde cuántas en uso (o esperando) se rechaza una nueva.
+
+    * La app abre como máximo ``app_connections`` (pool por worker × workers × réplicas). Si llega a
+      ese tope, la request espera en el pool de la app, con su timeout.
+    * Sin pooler, la app se conecta directo a la DB: si puede abrir más de las que la DB acepta,
+      nunca llega a esperar en su pool, y la conexión que pasa el límite falla (``db_refused``).
+    * Con pooler (modo transacción), la app se conecta al pooler, que acepta ``pooler_connections``
+      clientes y los reparte en las ``max_connections`` de la DB: los que no tienen una, esperan.
+    """
+    app, db_max, pooler = model.app_connections, model.db.max_connections, model.db.pooler_connections
+    capacity = min(app, db_max) if db_max else app
+    if pooler is None:
+        if db_max and app > db_max:
+            warnings.append(
+                f"La app puede abrir {app} conexiones y la DB acepta {db_max}: las que pasen de {db_max} "
+                f"fallan al conectarse (error db_refused). Un pooler las haría esperar en vez de fallar."
+            )
+            return capacity, db_max
+        return capacity, None
+    if app > pooler:
+        warnings.append(
+            f"La app puede abrir {app} conexiones y el pooler acepta {pooler} clientes: las que pasen de "
+            f"{pooler} fallan al conectarse (error db_refused)."
+        )
+        return capacity, pooler
+    return capacity, None
 
 
 def _cores(sim: Sim, name: str, vcpu: float) -> tuple[Resource, float]:

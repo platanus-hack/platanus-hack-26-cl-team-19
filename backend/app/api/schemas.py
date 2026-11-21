@@ -87,6 +87,20 @@ class CreateVersionRequest(BaseModel):
     note: str | None = Field(None, max_length=500, description="Qué cambió, para el historial.")
 
 
+class ApplyOpsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ops: list[dict[str, Any]] = Field(
+        min_length=1,
+        max_length=20,
+        description=(
+            "Operaciones en orden: scale_api, change_db_plan, add_pooler, add_cache, move_to_queue "
+            "(ver app/agent/ops.py)."
+        ),
+    )
+    note: str | None = Field(None, max_length=500, description="Por qué se propone. Por defecto, los cambios.")
+
+
 class VersionSummary(BaseModel):
     number: int
     label: str = Field(description="v1, v2, ...")
@@ -98,6 +112,11 @@ class VersionSummary(BaseModel):
 
 class VersionDetail(VersionSummary):
     model: dict[str, Any]
+
+
+class OpsVersionDetail(VersionDetail):
+    changes: list[str] = Field(description="Una línea por operación aplicada.")
+    warnings: list[str] = Field(description="Lo que el agente debería decirle al usuario o preguntarle.")
 
 
 class ProjectDetail(BaseModel):

@@ -125,6 +125,8 @@ class DbDeployment:
     plan: str | None = None
     # instancias con créditos de CPU (db.t4g.*): vCPU que aguanta con carga sostenida
     sustained_vcpu: float | None = None
+    # con pooler (``deployment.db.pooler``), conexiones de clientes que acepta; None = sin pooler
+    pooler_connections: int | None = None
 
 
 @dataclass(frozen=True)
@@ -183,11 +185,14 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         processor=_processor(db_raw),
         plan=db_raw.get("plan"),
         sustained_vcpu=_opt_float(value(db_raw.get("cpu_credits", {}).get("sustained_vcpu"))),
+        pooler_connections=_opt_int(value(db_raw["pooler"].get("client_connections"))) if "pooler" in db_raw else None,
     )
     if db.sustained_vcpu is not None and not 0 < db.sustained_vcpu <= db.vcpu:
         raise ValueError(
             f"deployment.db.cpu_credits.sustained_vcpu debe estar entre 0 y los vCPU ({db.vcpu}); es {db.sustained_vcpu}"
         )
+    if "pooler" in db_raw and db.pooler_connections is None:
+        raise ValueError("deployment.db.pooler necesita client_connections (conexiones de clientes que acepta)")
 
     queues = {
         name: QueueDeployment(

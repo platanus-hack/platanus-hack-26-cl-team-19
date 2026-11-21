@@ -251,5 +251,32 @@ def test_openapi_lists_editor_routes(client):
         "/projects/{project_id}/versions",
         "/projects/{project_id}/versions/{number}",
         "/projects/{project_id}/versions/{number}/runs",
+        "/projects/{project_id}/versions/{number}/ops",
         "/projects/{project_id}/compare",
     } <= set(paths)
+
+
+# --- operaciones del agente (JAJ-68) ------------------------------------------------------------
+
+
+def test_apply_ops_creates_agent_version(client, project):
+    pid = project["id"]
+    ops = [{"op": "scale_api", "replicas": 3}, {"op": "add_pooler"}]
+    r = client.post(f"/projects/{pid}/versions/1/ops", json={"ops": ops})
+    assert r.status_code == 201, r.text
+    v = r.json()
+    assert (v["label"], v["origin"], v["parent"]) == ("v2", "agente", 1)
+    assert len(v["changes"]) == 2 and v["note"] == "; ".join(v["changes"])
+    assert v["model"]["deployment"]["db"]["pooler"]["client_connections"]["value"] == 200
+    d = client.post(f"/projects/{pid}/compare", json={**RUN, "a": 1, "b": 2}).json()["delta"]
+    assert {"path": "deployment.api.replicas", "a": 1, "b": 3} in d["model_changes"]
+
+
+def test_apply_ops_invalid_is_422_and_saves_nothing(client, project):
+    pid = project["id"]
+    r = client.post(f"/projects/{pid}/versions/1/ops", json={"ops": [{"op": "change_db_plan", "plan": "huge"}]})
+    assert r.status_code == 422
+    err = r.json()["error"]
+    assert err["code"] == "invalid_operations" and "micro" in err["message"]
+    assert len(client.get(f"/projects/{pid}").json()["versions"]) == 1
+    assert client.post(f"/projects/{pid}/versions/9/ops", json={"ops": [{"op": "add_pooler"}]}).status_code == 404
