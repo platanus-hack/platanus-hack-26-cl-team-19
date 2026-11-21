@@ -1,6 +1,6 @@
 """``POST /runs``: simula un modelo bajo un escenario y devuelve el ``Run`` completo.
 
-No guarda nada (la persistencia es JAJ-17): cada llamada simula de nuevo. Con 60 s simulados en
+No guarda nada (la persistencia es JAJ-56): cada llamada simula de nuevo. Con 60 s simulados en
 ~200 ms, una respuesta completa alcanza para el MVP (el streaming es JAJ-20).
 """
 

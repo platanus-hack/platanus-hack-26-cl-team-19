@@ -1,6 +1,6 @@
 # Backend de Branchpoint
 
-Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49, JAJ-52). La persistencia va a ir en `app/db`, que ya está reservada.
+Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49, JAJ-52). El modelo de datos persistente está definido en `app/db` (JAJ-55) y lo implementa JAJ-56.
 
 ## Estructura
 
@@ -12,7 +12,7 @@ backend/
 │   │   ├── main.py          #   arma la app: CORS, errores y rutas
 │   │   ├── schemas.py       #   lo que recibe y devuelve cada ruta
 │   │   ├── errors.py        #   formato de los errores ({"error": {"code", "message"}})
-│   │   ├── store.py         #   proyectos y versiones (en memoria hasta JAJ-17)
+│   │   ├── store.py         #   proyectos y versiones (en memoria hasta JAJ-56)
 │   │   └── routes/          #   rutas por tema: health, runs, models, projects
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
@@ -24,7 +24,7 @@ backend/
 │   │   ├── simulate.py      #   arma los recursos desde el modelo y recorre los pasos de cada request
 │   │   └── metrics.py       #   percentiles y series por segundo
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
-│   ├── db/                  # persistencia: vacía por ahora (JAJ-17), ver su README
+│   ├── db/                  # modelo de datos persistente (JAJ-55): README.md y schema.sql
 │   └── cli.py               # correr una simulación desde la terminal
 └── tests/
     ├── fixtures/            # modelos de ejemplo (full-stack-fastapi-template, generado por JAJ-45)
@@ -105,7 +105,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | Método | Ruta | Qué hace |
 | -- | -- | -- |
 | `GET` | `/health` | Revisa que la API está arriba. |
-| `POST` | `/runs` | Simula un modelo y devuelve el `Run` (`branchpoint.run/v1`). No guarda nada (eso es JAJ-17). |
+| `POST` | `/runs` | Simula un modelo y devuelve el `Run` (`branchpoint.run/v1`). No guarda nada (eso es JAJ-56). |
 | `GET` | `/models` | Modelos de ejemplo para abrir el editor sin ingerir un repo: id, repo, despliegue y req/s de cada escenario. |
 | `GET` | `/models/{id}` | Un modelo de ejemplo completo (`branchpoint.model/v1`). |
 | `POST` | `/graph` | Grafo del diagrama desde `{"model": ...}`: nodos, aristas con sus endpoints y `archivo:línea`, y el peso de cada endpoint. |
@@ -116,7 +116,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. |
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). |
 
-**Proyectos en memoria:** se pierden al reiniciar la API. `ProjectStore` (`app/api/store.py`) es la interfaz que va a implementar la persistencia (JAJ-17) sin cambiar las rutas.
+**Proyectos en memoria:** se pierden al reiniciar la API. `ProjectStore` (`app/api/store.py`) es la interfaz que va a implementar la persistencia (JAJ-56) sin cambiar las rutas.
 
 ```bash
 # abrir el editor con v1, guardar una v2 y comparar

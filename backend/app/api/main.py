@@ -38,7 +38,7 @@ def create_app(cors_origins: list[str] | None = None, store: ProjectStore | None
         allow_headers=["Content-Type"],
     )
     install_error_handlers(app)
-    # proyectos y versiones en memoria hasta que exista la persistencia (JAJ-17)
+    # proyectos y versiones en memoria hasta que exista la persistencia (JAJ-56)
     app.state.store = store if store is not None else InMemoryProjectStore()
     app.include_router(health.router)
     app.include_router(runs.router)

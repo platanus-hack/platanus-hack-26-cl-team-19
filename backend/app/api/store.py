@@ -2,7 +2,7 @@
 
 Cada proyecto parte con la **v1** (el modelo del repo) y cada cambio guardado es una versión nueva
 con su antecesora, como un commit. Por ahora viven en memoria (se pierden al reiniciar la API):
-``ProjectStore`` es la interfaz que la persistencia en Postgres (JAJ-17) implementa sin cambiar
+``ProjectStore`` es la interfaz que la persistencia en Postgres (JAJ-56) implementa sin cambiar
 las rutas.
 """
 
