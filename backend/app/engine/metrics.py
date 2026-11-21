@@ -16,6 +16,7 @@ from app.models.run import LatencyStats
 ERROR_POOL_TIMEOUT = "pool_timeout"  # esperó una conexión más que el timeout del pool
 ERROR_CLIENT_TIMEOUT = "client_timeout"  # tardó más que el timeout del cliente (el servidor igual hizo el trabajo)
 ERROR_QUEUE_FULL = "queue_full"  # quiso encolar un trabajo y la cola estaba en su largo máximo
+ERROR_DB_REFUSED = "db_refused"  # la DB (o el pooler) rechazó la conexión: ya tenía todas las que acepta
 
 
 def percentile(sorted_values: Sequence[float], p: float) -> float | None:
@@ -50,7 +51,7 @@ class Recorder:
         self.ok = [0] * self.seconds
         self.errors = [0] * self.seconds
         self.latencies_ms: list[list[float]] = [[] for _ in range(self.seconds)]
-        self.error_types = {ERROR_POOL_TIMEOUT: 0, ERROR_CLIENT_TIMEOUT: 0, ERROR_QUEUE_FULL: 0}
+        self.error_types = {ERROR_POOL_TIMEOUT: 0, ERROR_CLIENT_TIMEOUT: 0, ERROR_QUEUE_FULL: 0, ERROR_DB_REFUSED: 0}
         self.by_endpoint = {e.id: EndpointCounters() for e in endpoints}
         self.resources = list(resources)
         self.queue_samples: list[dict[str, int]] = []

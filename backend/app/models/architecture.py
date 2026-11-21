@@ -117,6 +117,8 @@ class DbDeployment:
     max_connections: int | None
     pool_per_worker: int  # pool_size + max_overflow de cada worker
     pool_timeout_s: float | None
+    # con pooler (``deployment.db.pooler``), conexiones de clientes que acepta; None = sin pooler
+    pooler_connections: int | None = None
 
 
 @dataclass(frozen=True)
@@ -169,7 +171,10 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         max_connections=_opt_int(value(db_raw.get("max_connections"))),
         pool_per_worker=int(value(pool.get("pool_size"), 5)) + int(value(pool.get("max_overflow"), 0)),
         pool_timeout_s=_opt_float(value(pool.get("pool_timeout_s"))),
+        pooler_connections=_opt_int(value(db_raw["pooler"].get("client_connections"))) if "pooler" in db_raw else None,
     )
+    if "pooler" in db_raw and db.pooler_connections is None:
+        raise ValueError("deployment.db.pooler necesita client_connections (conexiones de clientes que acepta)")
 
     queues = {
         name: QueueDeployment(

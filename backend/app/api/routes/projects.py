@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
-from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
+from app.agent import OpError, apply_ops
+from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, ApiError
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422, run_model
 from app.api.schemas import (
+    ApplyOpsRequest,
     CompareRequest,
     CompareResponse,
     CreateProjectRequest,
     CreateVersionRequest,
+    OpsVersionDetail,
     ProjectDetail,
     RunParams,
     VersionDetail,
@@ -93,6 +96,27 @@ def create_version(
     load_or_422(req.model)
     version = store.add_version(project_id, req.model, req.origin, parent, req.note)
     return VersionDetail(**_summary(version).model_dump(), model=version.model)
+
+
+@router.post(
+    "/{project_id}/versions/{number}/ops",
+    response_model=OpsVersionDetail,
+    status_code=201,
+    summary="Aplicar operaciones a una versión y guardar el resultado como versión nueva (origen agente)",
+)
+def apply_version_ops(
+    project_id: str, number: int, req: ApplyOpsRequest, store: ProjectStore = Depends(get_store)
+) -> OpsVersionDetail:
+    base = _version(_project(store, project_id), number)
+    try:
+        result = apply_ops(base.model, req.ops)
+    except OpError as e:
+        raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
+    note = req.note or "; ".join(result.changes)
+    version = store.add_version(project_id, result.model, "agente", number, note[:500])
+    return OpsVersionDetail(
+        **_summary(version).model_dump(), model=version.model, changes=result.changes, warnings=result.warnings
+    )
 
 
 @router.get("/{project_id}/versions/{number}", response_model=VersionDetail, summary="Una versión con su modelo")

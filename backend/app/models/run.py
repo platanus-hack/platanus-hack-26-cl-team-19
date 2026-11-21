@@ -97,7 +97,7 @@ class Run:
     arrivals: str
     requests: int
     ok: int
-    errors: dict[str, int]  # por tipo: pool_timeout, client_timeout, queue_full
+    errors: dict[str, int]  # por tipo: pool_timeout, client_timeout, queue_full, db_refused
     in_flight: int  # requests que seguían en curso al terminar (sin superar el timeout del cliente)
     error_rate: float
     throughput_rps: float
