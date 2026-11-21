@@ -127,7 +127,8 @@ def keys():
 def client(github, store, keys, monkeypatch):
     monkeypatch.setenv("BRANCHPOINT_FRONTEND_URL", "http://front.test")
     app = create_app(store=store, auth=None, github_app=github)
-    app.state.llm_factory = lambda key: keys.append(key) or FakeAnalyst()
+    app.state.llm_factory = lambda key, model=None: keys.append(key) or FakeAnalyst()
+    app.state.openai_llm_factory = lambda key, model=None: keys.append(("openai", key, model)) or FakeAnalyst()
     return TestClient(app, follow_redirects=False, headers={"X-Anthropic-Api-Key": KEY})
 
 
@@ -363,18 +364,35 @@ def test_the_token_never_reaches_a_response(client):
     assert all(TOKEN not in b and KEY not in b for b in bodies)
 
 
-def test_ingestion_uses_the_users_key_or_the_demo(client, keys, monkeypatch):
+def test_ingestion_uses_the_header_key_and_needs_one_without_login(client, keys, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-branchpoint")  # sin sesión no hay cuota: no se usa
     connect(client)
-    client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"})
+    assert client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).status_code == 202
     assert keys == [KEY]
     del client.headers["X-Anthropic-Api-Key"]
     r = client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"})
-    assert r.status_code == 422 and "API key de Anthropic" in r.json()["error"]["message"]
-    monkeypatch.setenv("BRANCHPOINT_CHAT_DEMO", "on")
-    for _ in range(5):
-        assert client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).status_code == 202
-    assert client.post("/github/ingestions", json={"repo_full_name": "acme/tienda"}).status_code == 429
-    assert keys[1:] == [None] * 5  # demo: la credencial del equipo
+    assert r.status_code == 422
+    message = r.json()["error"]["message"]
+    assert "API key de Anthropic" in message and "MCP" in message
+    assert keys == [KEY]  # no se encoló nada
+
+
+def test_ingestion_with_openai_uses_its_factory_and_extract_model(client, store, keys, monkeypatch):
+    monkeypatch.setenv("BRANCHPOINT_OPENAI_EXTRACT_MODEL", "gpt-5-mini")
+    connect(client)
+    del client.headers["X-Anthropic-Api-Key"]
+    r = client.post(
+        "/github/ingestions",
+        json={"repo_full_name": "acme/tienda", "provider": "openai"},
+        headers={"X-OpenAI-Api-Key": "sk-openai-usuario"},
+    )
+    assert r.status_code == 202
+    assert keys == [("openai", "sk-openai-usuario", "gpt-5-mini")]
+    job = client.get(f"/github/ingestions/{r.json()['id']}").json()
+    assert job["status"] == "done", job
+    model = store.get_version(job["project_id"], 1).model
+    assert model["repo"]["source"]["analysis"]["provider"] == "openai"
+    assert "sk-openai-usuario" not in json.dumps(model) + json.dumps(job)
 
 
 # ---------- extracción segura ----------

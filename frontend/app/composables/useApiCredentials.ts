@@ -1,10 +1,12 @@
 import type { ChatProvider } from "@/services/chat-stream";
 
-type ChatKeySettings = {
+export type ChatKeySettings = {
   personal: ChatProvider[];
   team: ChatProvider[];
   remaining: number;
   limit: number;
+  // cuota de repos analizados con la key de Branchpoint (IA-2)
+  extract?: { remaining: number; limit: number };
 };
 
 export function useApiCredentials() {

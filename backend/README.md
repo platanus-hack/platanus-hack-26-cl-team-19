@@ -454,7 +454,7 @@ CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingesti
 - **La IaC manda.** Si un archivo de despliegue declara un servicio con el mismo nombre que un componente de la IA, se queda el de la IaC. Los workers de la IaC ganan sobre los que cita la IA.
 - **Volver a mandar.** Con `project_id`, `submit_architecture` guarda una versión nueva (origen `agente`) con la arquitectura nueva, y conserva el despliegue, el tráfico y lo que dijo la IaC.
 - **Diagrama.** `POST /graph` dibuja cada servicio externo con su nombre y los componentes declarados (caché, storage, colas) con su tecnología, `archivo:línea` y procedencia, aunque ningún paso los use.
-- **Ingesta de GitHub.** Usa la API key del usuario (header `X-Anthropic-Api-Key`, no se guarda) o, con `BRANCHPOINT_CHAT_DEMO=on`, la credencial del equipo, con 5 análisis por usuario y por día. Sin ninguna de las dos responde 422. Hasta 40 vueltas de lectura; el modelo guarda los tokens usados en `repo.source.analysis`.
+- **Ingesta de GitHub.** `POST /github/ingestions` acepta `provider` (`anthropic` u `openai`). La key sale como en el chat (`llm_key(..., purpose="extract")`): la del header (`X-Anthropic-Api-Key` o `X-OpenAI-Api-Key`, no se guarda), la personal elegida o la de Branchpoint, que descuenta 1 de la cuota de extracción. Sin ninguna, 422; sin cuota, 429 `team_extract_quota`. El modelo de cada proveedor sale de `model_for(provider, "extract")`. Hasta 40 vueltas de lectura; el modelo guarda proveedor, modelo y tokens en `repo.source.analysis`.
 
 El chat del editor no ofrece `submit_architecture`, porque no ve el repo.
 

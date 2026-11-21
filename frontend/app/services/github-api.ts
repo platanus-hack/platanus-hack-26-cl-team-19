@@ -1,4 +1,5 @@
 // Cliente de /github/* del backend (JAJ-57): conectar la GitHub App, elegir repo y rama, y analizarlo.
+import type { ChatProvider } from "@/services/chat-stream";
 
 export interface GithubRepo {
   id: number;
@@ -65,10 +66,16 @@ export function createGithubApi(
         `/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`,
       );
     },
-    startIngestion: (repoFullName: string, branch: string) =>
+    // La IA que lee el repo (IA-3): la key sale con la misma regla que el chat (header, personal o
+    // la de Branchpoint con cuota). Sin credencial responde 422; sin cuota, 429 team_extract_quota.
+    startIngestion: (
+      repoFullName: string,
+      branch: string,
+      provider: ChatProvider = "anthropic",
+    ) =>
       fetchApi<Ingestion>("/github/ingestions", {
         method: "POST",
-        body: { repo_full_name: repoFullName, branch },
+        body: { repo_full_name: repoFullName, branch, provider },
       }),
     getIngestion: (id: string) =>
       fetchApi<Ingestion>(`/github/ingestions/${encodeURIComponent(id)}`),
@@ -77,6 +84,6 @@ export function createGithubApi(
 
 export const STAGE_LABELS: Record<IngestionStage, string> = {
   acceso: "Descargando el código desde GitHub…",
-  analisis: "Analizando endpoints, queries y despliegue…",
+  analisis: "La IA está leyendo el código y el despliegue…",
   preparacion: "Guardando la v1 del proyecto…",
 };

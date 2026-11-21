@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IngestionCredential from "@/components/projects/IngestionCredential.vue";
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowRight, Check } from "@lucide/vue";
@@ -43,6 +44,7 @@ const busy = ref(false);
 const error = ref(false);
 const demoRepo = "fastapi/full-stack-fastapi-template";
 const github = useGithubConnection({ immediate: false });
+const credentialUsable = ref(true);
 
 async function addDemoRepository() {
   if (busy.value || repositoryState.value !== "choose") return;
@@ -79,7 +81,15 @@ async function addDemoRepository() {
           <AlertDescription>{{ github.returnError.value }}</AlertDescription>
         </Alert>
         <Alert v-if="github.error.value" variant="destructive">
-          <AlertDescription>{{ github.error.value }}</AlertDescription>
+          <AlertDescription
+            >{{ github.error.value }}
+            <NuxtLink
+              v-if="github.keyProblem.value"
+              to="/settings"
+              class="underline underline-offset-4"
+              >Ir a Configuración</NuxtLink
+            ></AlertDescription
+          >
         </Alert>
 
         <Alert v-if="github.revoked.value" data-testid="github-revoked">
@@ -230,6 +240,11 @@ async function addDemoRepository() {
             </p>
           </div>
 
+          <IngestionCredential
+            v-model:provider="github.provider.value"
+            :disabled="github.running.value"
+            @usable="credentialUsable = $event"
+          />
           <Alert
             v-if="github.ingestion.value?.status === 'failed'"
             variant="destructive"
@@ -245,7 +260,8 @@ async function addDemoRepository() {
               :disabled="
                 github.running.value ||
                 !github.repo.value ||
-                !github.branch.value
+                !github.branch.value ||
+                !credentialUsable
               "
               @click="github.analyze()"
             >

@@ -5,6 +5,7 @@
 // (si el onboarding ya se hizo, /onboarding lo reenvía a /settings). Al volver a esta pestaña, la
 // lista de repos se refresca sola.
 import { useEventListener } from "@vueuse/core";
+import type { ChatProvider } from "@/services/chat-stream";
 import {
   STAGE_LABELS,
   createGithubApi,
@@ -53,6 +54,9 @@ export function useGithubConnection({ immediate = true } = {}) {
   const awaitingGithub = ref(false);
   const starting = ref(false); // el POST revisa el acceso en GitHub antes de responder (~1 s)
   const error = ref("");
+  const provider = ref<ChatProvider>("anthropic"); // la IA que lee el repo (IA-3)
+  // el backend rechazó la credencial (422) o se acabó la cuota (429): la UI ofrece ir a Configuración
+  const keyProblem = ref(false);
 
   const returnError = computed(() => {
     if (route.query.github !== "error") return "";
@@ -167,10 +171,22 @@ export function useGithubConnection({ immediate = true } = {}) {
   async function analyze() {
     if (!api || !repo.value || !branch.value || running.value) return;
     error.value = "";
+    keyProblem.value = false;
     ingestion.value = null;
     starting.value = true;
     try {
-      let job = await api.startIngestion(repo.value, branch.value);
+      let job: Ingestion;
+      try {
+        job = await api.startIngestion(
+          repo.value,
+          branch.value,
+          provider.value,
+        );
+      } catch (cause) {
+        const status = (cause as { statusCode?: number }).statusCode;
+        keyProblem.value = status === 422 || status === 429;
+        throw cause;
+      }
       starting.value = false;
       ingestion.value = job;
       const deadline = Date.now() + POLL_LIMIT_MS;
@@ -217,6 +233,8 @@ export function useGithubConnection({ immediate = true } = {}) {
     installHref,
     awaitingGithub,
     error,
+    keyProblem,
+    provider,
     returnError,
     running,
     done,
