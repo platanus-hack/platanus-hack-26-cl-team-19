@@ -37,6 +37,7 @@ from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
 from app.catalog import load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
+from app.costs.estimate import describe_missing
 from app.models import load_model
 from app.models.compare import run_delta
 from app.models.run import Run
@@ -227,7 +228,11 @@ def _saturation_provenance(run: Run) -> dict[str, Any]:
     return {"label": s.label, "source": s.source} if s is not None else {}
 
 
-def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[str, Any] | None:
+def _goal_check(
+    goals: ProjectGoals, run: Run, monthly: float | None, missing: list[str] | None = None
+) -> dict[str, Any] | None:
+    """Si la versión cumple las metas del proyecto. ``missing``: componentes sin precio (JAJ-88), con los
+    que el presupuesto no se puede evaluar."""
     if goals == ProjectGoals():
         return None
     out: dict[str, Any] = {}
@@ -270,8 +275,28 @@ def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[st
             "las requests exitosas. Pregúntale al usuario cuántos errores acepta (set_goals slo_error_rate).",
         }
     if goals.budget_usd_month is not None and monthly is not None:
-        out["budget"] = {"goal_usd_month": goals.budget_usd_month, "ok": monthly <= goals.budget_usd_month}
-    out["meets_all"] = all(v["ok"] for v in out.values() if isinstance(v, dict))
+        if missing and monthly > goals.budget_usd_month:
+            # JAJ-88: lo que falta solo puede sumar, así que si el parcial ya se pasa, no cumple
+            out["budget"] = {
+                "goal_usd_month": goals.budget_usd_month,
+                "ok": False,
+                "basis": f"no cumple: solo lo que tiene precio ya suma US${monthly:,.2f}/mes, y falta "
+                f"{describe_missing(missing)}.",
+            }
+        elif missing:
+            # JAJ-88: el total no incluye la API o la DB (en local o sin precio): no se puede decir que
+            # cumple el presupuesto contando solo, por ejemplo, la caché
+            out["budget"] = {
+                "goal_usd_month": goals.budget_usd_month,
+                "ok": None,
+                "basis": f"no evaluable: el total (US${monthly:,.2f}/mes) no incluye {describe_missing(missing)}. "
+                "Pregúntale al usuario dónde se desplegaría (set_deployment).",
+            }
+        else:
+            out["budget"] = {"goal_usd_month": goals.budget_usd_month, "ok": monthly <= goals.budget_usd_month}
+    checks = [v["ok"] for v in out.values() if isinstance(v, dict)]
+    # None si nada falla pero algo no se pudo evaluar (el presupuesto sin precio, JAJ-88)
+    out["meets_all"] = False if False in checks else (None if None in checks else True)
     return out
 
 
@@ -312,10 +337,15 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "list_assumptions": "Los números SUPUESTO de una versión, con su fuente: lo que conviene preguntarle al usuario.",
     "list_scenarios": "Los escenarios del proyecto (pico_normal, cyberday...) y su tasa (× el pico o req/s fijas).",
     "simulate": "Simula una versión bajo un escenario del proyecto. Devuelve p95, errores, throughput, el cuello "
-    "de botella con su archivo:línea, la procedencia y si cumple las metas.",
+    "de botella con su archivo:línea, la procedencia y si cumple las metas (goals.meets_all: true, false, o null "
+    "si nada falla pero algo no se pudo evaluar, como el presupuesto sin precio; dilo así). Si saturation.saturated "
+    "es true, la tasa de error es un piso: dilo.",
     "compare": "Simula dos versiones con el mismo escenario y semilla. Devuelve el delta de p95, errores y costo "
-    "mensual, las ventas en juego y si cada una cumple las metas.",
-    "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada.",
+    "mensual (sin los componentes de delta.usd_month_missing, que no tienen precio en alguna versión), las ventas "
+    "en juego y si cada una cumple las metas (meets_all puede ser null: no evaluable).",
+    "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada. Si missing no "
+    "está vacío, la API o la DB no tienen precio (en local o sin precios) y el total no las incluye: dilo, "
+    "citando el primer aviso de warnings, y no presentes el total como el costo completo.",
     "ops_schema": "JSON Schema de las operaciones que acepta propose_version.",
     "propose_version": "Aplica operaciones de arquitectura (ops_schema) a una versión y guarda el resultado como "
     "versión nueva con origen agente. No simula: después usa compare.",
@@ -524,11 +554,11 @@ class AgentTools:
         version = self._version(project, a.version)
         self.limiter.simulations(self.owner or "anon", 1)
         run = self._run(project, version, a.scenario, a.seed)
-        monthly = estimate_cost(version.model).total["value"]
+        cost = estimate_cost(version.model)
         return {
             "version": version.number,
             **_run_summary(run, version.model),
-            "goals": _goal_check(self.store.get_goals(project.id), run, monthly),
+            "goals": _goal_check(self.store.get_goals(project.id), run, cost.total["value"], cost.missing),
         }
 
     def _compare(self, a: CompareArgs) -> dict[str, Any]:
@@ -548,19 +578,21 @@ class AgentTools:
                 "version": va.number,
                 **_run_summary(run_a, va.model),
                 "usd_month": cost_a.total,
-                "goals": _goal_check(goals, run_a, cost_a.total["value"]),
+                "goals": _goal_check(goals, run_a, cost_a.total["value"], cost_a.missing),
             },
             "b": {
                 "version": vb.number,
                 **_run_summary(run_b, vb.model),
                 "usd_month": cost_b.total,
-                "goals": _goal_check(goals, run_b, cost_b.total["value"]),
+                "goals": _goal_check(goals, run_b, cost_b.total["value"], cost_b.missing),
             },
             "delta": {
                 "p95_ms": {"a": d.p95_ms.a, "b": d.p95_ms.b, "pct": d.p95_ms.pct},
                 "error_rate": {"a": d.error_rate.a, "b": d.error_rate.b},
                 "throughput_rps": {"a": d.throughput_rps.a, "b": d.throughput_rps.b},
                 "usd_month": cdelta.diff,
+                # JAJ-88: componentes sin precio en alguna versión; usd_month no los cuenta
+                "usd_month_missing": cdelta.missing,
                 "bottleneck_changed": d.bottleneck_changed,
             },
             "summary": compare_summary(va.number, vb.number, cdelta, fa, fb, run_a, run_b),
