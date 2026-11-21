@@ -16,7 +16,7 @@ from app.agent import OpError, apply_ops
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
 from app.api.routes.models import sample_or_404
-from app.api.routes.runs import load_or_422
+from app.api.routes.runs import load_or_422, scenario_model
 from app.api.run_cache import RUN_CACHE_HEADER, cached_run
 from app.api.schemas import (
     ApplyOpsRequest,
@@ -205,8 +205,10 @@ def version_results(
     run, hit = cached_run(store, project_id, number, version.model, params, _label(req))
     _cache_header(response, hit)
     cost = estimate_cost(version.model, req.region)
-    failure = failure_cost(version.model, run)
-    missing = failure_missing(version.model)
+    # el costo de fallar con el negocio del escenario, si trae (JAJ-131); el costo de infraestructura no cambia
+    biz_model, _ = scenario_model(version.model, params)
+    failure = failure_cost(biz_model, run)
+    missing = failure_missing(biz_model)
     return VersionResults(
         version=_summary(version),
         run=run,
@@ -228,7 +230,13 @@ def results_summary(
         text += f" sin contar {describe_missing(cost.missing)} (despliegue local o proveedor sin precios)"
     text += "."
     text += " " + (failure.message if failure is not None else describe_failure_missing(missing))
-    return text + _saturation_sentence(number, number, run, None)
+    return text + _saturation_sentence(number, number, run, None) + _overrides_sentence(run)
+
+
+def _overrides_sentence(run: Run | None) -> str:
+    """Con qué reemplazos del escenario se simuló (JAJ-131): sin esto, un resultado con pagos ×10 se lee
+    como el de la arquitectura tal cual."""
+    return (" " + " ".join(run.overrides)) if run is not None and run.overrides else ""
 
 
 def _label(req: RunParams) -> str | None:
@@ -244,6 +252,10 @@ def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, param
     cualquier versión, y ``cyberday`` ×20 da más req/s en una versión con más pico. Las req/s quedan
     en ``rps``, que entra en la ``cache_key`` (JAJ-75): si alguien edita el escenario, la clave cambia
     y no se devuelve un run con la tasa vieja. Con ``rps`` en la request, el escenario es solo un nombre.
+
+    JAJ-131: también trae los reemplazos que guarda el escenario (mezcla de endpoints, dependencias más
+    lentas, negocio). Cada uno que mande la request reemplaza al del escenario. Quedan en los params, así
+    que también entran en la ``cache_key``.
     """
     if params.rps is not None:
         return params
@@ -262,11 +274,24 @@ def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, param
         rate = scenario.rate_for(model)
     except ValueError as e:
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from None
-    return params.model_copy(update={"rps": rate})
+    update: dict = {"rps": rate}
+    for field, saved in scenario.overrides().items():
+        if getattr(params, field) is None:
+            update[field] = saved
+    # model_validate y no model_copy: business guardado es un dict y tiene que volver a ScenarioBusiness
+    return RunParams.model_validate({**params.model_dump(), **update})
 
 
 def _scenario_out(s: ProjectScenario) -> ScenarioOut:
-    return ScenarioOut(name=s.name, multiplier=s.multiplier, rps=s.rps, description=s.description)
+    return ScenarioOut(
+        name=s.name,
+        multiplier=s.multiplier,
+        rps=s.rps,
+        description=s.description,
+        endpoint_weights=s.endpoint_weights,
+        slowdowns=s.slowdowns,
+        business=s.business,
+    )
 
 
 @router.get("/{project_id}/scenarios", response_model=list[ScenarioOut], summary="Los escenarios del proyecto (JAJ-76)")
@@ -299,7 +324,18 @@ def put_scenario(project_id: str, name: str, req: ScenarioIn, store: ProjectStor
         )
     if (req.multiplier is None) == (req.rps is None):
         raise ApiError(422, INVALID_PARAMETERS, "Manda multiplier (× el pico) o rps (req/s fijas), uno de los dos.")
-    saved = store.upsert_scenario(project_id, ProjectScenario(name, req.multiplier, req.rps, req.description))
+    if req.business is not None and not req.business.model_dump(exclude_none=True):
+        req = req.model_copy(update={"business": None})  # {} es lo mismo que no mandarlo
+    scenario = ProjectScenario(
+        name,
+        req.multiplier,
+        req.rps,
+        req.description,
+        endpoint_weights=req.endpoint_weights or None,
+        slowdowns=req.slowdowns or None,
+        business=req.business.model_dump(exclude_none=True) if req.business else None,
+    )
+    saved = store.upsert_scenario(project_id, scenario)
     return _scenario_out(saved)
 
 
@@ -323,7 +359,9 @@ def compare(
     _cache_header(response, hit_a, hit_b)
     cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
     delta = cost_delta(cost_a, cost_b)
-    fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)  # JAJ-74
+    biz_a, _ = scenario_model(va.model, params_a)  # con el negocio del escenario, si trae (JAJ-131)
+    biz_b, _ = scenario_model(vb.model, params_b)
+    fa, fb = failure_cost(biz_a, run_a), failure_cost(biz_b, run_b)  # JAJ-74
     return CompareResponse(
         a=_summary(va),
         b=_summary(vb),
@@ -335,8 +373,8 @@ def compare(
         cost_delta=delta,
         failure_a=fa,
         failure_b=fb,
-        failure_missing_a=failure_missing(va.model),
-        failure_missing_b=failure_missing(vb.model),
+        failure_missing_a=failure_missing(biz_a),
+        failure_missing_b=failure_missing(biz_b),
         summary=compare_summary(va.number, vb.number, delta, fa, fb, run_a, run_b),
     )
 
@@ -358,7 +396,7 @@ def compare_summary(
     Con los ``Run``, agrega si alguna versión no alcanza a atender el tráfico (JAJ-89): su tasa de
     error no cuenta las requests que siguen en fila, y sin este aviso una versión colapsada se lee sana.
     """
-    return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b)
+    return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b) + _overrides_sentence(run_a)
 
 
 def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:

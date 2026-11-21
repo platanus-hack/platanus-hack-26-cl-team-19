@@ -117,6 +117,12 @@ def failure_cost(raw: dict[str, Any], run: Run) -> FailureCost | None:
         f"sesiones/hora × fracción que falla × conversión ({conv:g}) × ticket (US${tick:g}) (JAJ-11); "
         f"sesiones/hora = req/s del Run × 3600 / {k:g} requests por sesión"
     )
+    # de dónde salen la conversión y el ticket: del modelo o del escenario (JAJ-131)
+    origin = "; ".join(
+        f"{name}: {x['source']}" for name, x in (("conversión", conversion), ("ticket", ticket)) if x.get("source")
+    )
+    if origin:
+        src += f" ({origin})"
     lost = {
         "low": _num(round(sessions_h * low * value_per_session, 0), "US$/hora", label, f"{src}. Piso: fracción = e"),
         "high": _num(
