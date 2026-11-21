@@ -24,9 +24,12 @@ export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
   const { result } = event;
   if (result?.error)
     return { status: "error" as const, output: String(result.error) };
-  let output = "Resultado disponible";
+  let output: string | undefined;
   if (typeof result?.p95_ms === "number")
-    output = [`p95 ${result.p95_ms} ms`, result.bottleneck?.resource]
+    output = [
+      result.scenario === "cyberday" ? "CyberDay" : result.scenario,
+      `Latencia p95 de ${number(result.p95_ms)} ms`,
+    ]
       .filter(Boolean)
       .join(" · ");
   else if (event.name === "analyze_log" && result?.peak_rps)

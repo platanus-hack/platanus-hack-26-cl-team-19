@@ -65,7 +65,7 @@ withDefaults(
         class="grid min-h-0 flex-1 overflow-y-auto @3xl:overflow-hidden"
         :class="
           $slots.agent
-            ? '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)_18rem] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)_22rem]'
+            ? '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)_19rem] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)_24rem]'
             : '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)]'
         "
       >
