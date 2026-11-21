@@ -116,20 +116,32 @@ export function createGithubApi(
       repoFullName: string,
       branch: string,
       provider: ChatProvider = "anthropic",
+      useBranchpointKey = false,
     ) =>
       fetchApi<Ingestion>("/github/ingestions", {
         method: "POST",
-        body: { repo_full_name: repoFullName, branch, provider },
+        body: {
+          repo_full_name: repoFullName,
+          branch,
+          provider,
+          use_branchpoint_key: useBranchpointKey,
+        },
       }),
     // Varios repos (IA-5): el motor simula el principal; cada repo descuenta 1 análisis de la cuota.
     startMultiIngestion: (
       repos: RepoSelection[],
       primary: string,
       provider: ChatProvider = "anthropic",
+      useBranchpointKey = false,
     ) =>
       fetchApi<Ingestion>("/github/ingestions", {
         method: "POST",
-        body: { repos, primary, provider },
+        body: {
+          repos,
+          primary,
+          provider,
+          use_branchpoint_key: useBranchpointKey,
+        },
       }),
     getIngestion: (id: string) =>
       fetchApi<Ingestion>(`/github/ingestions/${encodeURIComponent(id)}`),

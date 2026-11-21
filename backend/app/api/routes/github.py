@@ -77,6 +77,7 @@ class StartIngestion(BaseModel):
     """Un repo (``repo_full_name`` y ``branch``, la forma de siempre) o varios (``repos`` y ``primary``, IA-5)."""
 
     provider: Provider = Field("anthropic", description="Quién lee el repo: Anthropic (Claude) u OpenAI.")
+    use_branchpoint_key: bool = False
     repo_full_name: str | None = Field(None, pattern=REPO_NAME, examples=["acme/tienda"])
     branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
     repos: list[RepoChoice] | None = Field(
@@ -343,7 +344,16 @@ def start_ingestion(
     # o la de Branchpoint, que descuenta 1 análisis por repo, todos o ninguno (IA-5). El 422 y el 429 salen
     # acá, antes de encolar.
     header = x_openai_api_key if req.provider == "openai" else x_anthropic_api_key
-    key = llm_key(request, user, req.provider, header, None, purpose="extract", units=len(found))
+    key = llm_key(
+        request,
+        user,
+        req.provider,
+        header,
+        None,
+        purpose="extract",
+        units=len(found),
+        use_branchpoint_key=req.use_branchpoint_key,
+    )
     factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
     llms = [factory(key.key, model=model_for(req.provider, "extract")) for _ in found]  # uno por repo
     repo, llm = found[0], llms[0]
