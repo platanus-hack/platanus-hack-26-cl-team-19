@@ -31,7 +31,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.agent.tools import AgentTools, Limiter, ToolError
 from app.api.auth import AuthError, SupabaseAuth
 from app.api.store import ProjectStore
-from app.ingest.ai_graph import AiComponent, AiEndpoint
+from app.ingest.ai_graph import AiComponent, AiEndpoint, AiJob, AiObservation
 
 INSTRUCTIONS = (
     "Branchpoint simula la arquitectura de un repo con un motor de eventos discretos y propone cambios. "
@@ -40,10 +40,9 @@ INSTRUCTIONS = (
     "réplicas) van en set_traffic, set_goals y set_deployment con su frase textual en quote; si no los dijo, "
     "pregúntaselos. Para cambiar la arquitectura usa propose_version con operaciones de ops_schema y después "
     "compare con la versión anterior. Cita el archivo:línea del cuello de botella. "
-    "Si el usuario quiere analizar un repo que tienes en local y no es FastAPI (o list_projects no lo tiene), "
-    "léelo tú: busca las rutas, sigue cada handler y clasifica sus accesos a la DB, caché, servicios externos y "
-    "colas, con archivo:línea; después mándalo con submit_architecture. No pongas tiempos ni números: los pone "
-    "el catálogo."
+    "Si el usuario quiere analizar un repo que tienes en local, léelo tú, sea del framework que sea: busca las "
+    "rutas, sigue cada handler y clasifica sus accesos a la DB, caché, servicios externos y colas, con "
+    "archivo:línea; después mándalo con submit_architecture. No pongas tiempos ni números: los pone el catálogo."
 )
 DEFAULT_ALLOWED_HOSTS = "localhost:*,127.0.0.1:*,[::1]:*,testserver"
 
@@ -217,6 +216,8 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
         endpoints: list[AiEndpoint],
         ctx: Context,
         components: list[AiComponent] | None = None,
+        jobs: list[AiJob] | None = None,
+        observations: list[AiObservation] | None = None,
         commit: str | None = None,
         project_id: str | None = None,
         name: str | None = None,
@@ -229,6 +230,8 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
             language=language,
             endpoints=[e.model_dump() for e in endpoints],
             components=[c.model_dump() for c in components] if components else None,
+            jobs=[j.model_dump() for j in jobs] if jobs else None,
+            observations=[o.model_dump() for o in observations] if observations else None,
             commit=commit,
             project_id=project_id,
             name=name,

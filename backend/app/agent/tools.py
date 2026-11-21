@@ -15,8 +15,8 @@ Reglas, iguales en los dos modos:
 * **Errores con una sola forma:** ``{"error": "..."}``, con un mensaje que el LLM lee y corrige. Los
   argumentos desconocidos o mal tipados también se rechazan así.
 * **Límites por usuario** (``Limiter``): llamadas por minuto y simulaciones por día.
-* **La arquitectura de un repo sin extractor** (JAJ-85, JAJ-86) la manda la IA de la CLI, que lee el
-  repo local, con ``submit_architecture``: clasifica con evidencia y el catálogo pone los números
+* **La arquitectura de un repo** (ADR 0002) la manda la IA de la CLI, que lee el repo local, con
+  ``submit_architecture``: clasifica con evidencia y el catálogo pone los números
   (``app/ingest/ai_graph.py``). Esa tool no se ofrece en el chat del editor, que no ve el repo.
 """
 
@@ -40,7 +40,7 @@ from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
 from app.catalog import load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
-from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai, merge_into
+from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai, replace_architecture
 from app.models import load_model
 from app.models.compare import run_delta
 from app.models.run import Run
@@ -165,8 +165,8 @@ class SetDeploymentArgs(VersionRef):
 class SubmitArchitectureArgs(ArchitectureSubmission):
     project_id: str | None = Field(
         None,
-        description="Sin valor, crea un proyecto nuevo con esta arquitectura como v1. Con un project_id, la suma "
-        "como versión nueva: lo que ya encontró el extractor de código manda y la propuesta solo agrega lo que falta.",
+        description="Sin valor, crea un proyecto nuevo con esta arquitectura como v1. Con un project_id, guarda una "
+        "versión nueva con esta arquitectura y conserva el despliegue, el tráfico y lo que dijo la IaC.",
     )
     name: str | None = Field(None, max_length=120, description="Nombre del proyecto nuevo. Por defecto, repo.")
 
@@ -306,11 +306,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "set_deployment": "Cambia réplicas, vCPU o plan de DB con los valores que dijo el usuario (en quote), como "
     "versión nueva.",
     "set_goals": "Guarda las metas del proyecto (p95, errores, presupuesto) que dijo el usuario (en quote).",
-    "submit_architecture": "Manda la arquitectura de un repo que leíste en local, para frameworks que Branchpoint no "
-    "extrae solo (todo lo que no es FastAPI: Express, Django, Spring, Go...) o para sumar componentes que el "
-    "extractor no vio. Lista cada endpoint con sus pasos en orden (db, cache, external, background, cpu) y los "
-    "componentes (caché, colas, servicios externos, storage). Todo con archivo:línea y why. No mandes tiempos, "
-    "filas ni costos: el catálogo pone los números y todo queda ESTIMADO o SUPUESTO con procedencia IA.",
+    "submit_architecture": "Manda la arquitectura de un repo que leíste en local, de cualquier framework. Lista cada "
+    "endpoint con sus pasos en orden (db, cache con on_miss, external, background, cpu), los trabajos de cola, los "
+    "componentes (caché, colas, servicios externos, storage) y, si están escritos en el repo, los workers y el pool "
+    "(observations). Todo con archivo:línea y why. No mandes tiempos, filas ni costos: el catálogo pone los números "
+    "y todo queda ESTIMADO o SUPUESTO con procedencia IA.",
 }
 
 
@@ -670,7 +670,6 @@ class AgentTools:
         self.limiter.daily(self.owner or "anon", DAILY_SUBMISSIONS, "arquitecturas enviadas")
         sub = ArchitectureSubmission.model_validate(a.model_dump(exclude={"project_id", "name"}))
         note = f"Arquitectura propuesta por la IA del usuario ({sub.framework}, {sub.language})"
-        ignored: dict[str, list[str]] = {"endpoints": [], "components": []}
         if a.project_id is None:
             model = build_from_ai(sub)
             try:
@@ -682,8 +681,7 @@ class AgentTools:
         else:
             project = self._project(a.project_id)
             base = self._version(project, None)
-            model, ignored = merge_into(base.model, sub)
-            version = self._save(project, base, model, note)
+            version = self._save(project, base, replace_architecture(base.model, sub), note)
         saved = version.model
         ai_eps = [ep for ep in saved["endpoints"] if ep.get("origin")]
         return {
@@ -692,7 +690,6 @@ class AgentTools:
             "endpoints": len(saved["endpoints"]),
             "endpoints_from_ai": len(ai_eps),
             "components_from_ai": sum(1 for s in saved["deployment"].get("services", []) if s.get("origin")),
-            "ignored_because_code_found_them": ignored,
             "assumptions": saved.get("assumptions", {}).get("total"),
             "provenance": {
                 "label": "ESTIMADO",

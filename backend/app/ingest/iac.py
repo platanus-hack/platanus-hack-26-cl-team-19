@@ -1,12 +1,12 @@
 """Lee los archivos de despliegue de un repo para completar el ``deployment`` del modelo (JAJ-60).
 
-Antes de preguntarle la infraestructura al usuario, se busca en el repo. Es determinista, como el
-extractor (ADR 0001): no hay LLM ni red. Lee:
+Antes de preguntarle la infraestructura al usuario, se busca en el repo. Es determinista: no hay LLM
+ni red, y no depende del framework del backend (lee archivos de despliegue, no el código). Lee:
 
 * Docker Compose (``compose*.yml``, ``docker-compose*.yml``): servicios y su rol (API, DB, caché, cola,
   worker, proxy), réplicas (``deploy.replicas``, ``scale``) y límites (``deploy.resources.limits``).
-* ``Dockerfile``, ``Procfile`` y el ``command`` de cada servicio: workers de uvicorn, gunicorn o
-  ``fastapi run``.
+* ``Dockerfile``, ``Procfile`` y el ``command`` de cada servicio: qué servidor corre (Node, PM2,
+  uvicorn, gunicorn, Puma, Java, Go...) y cuántos procesos levanta.
 * Kubernetes (``Deployment``, ``StatefulSet``, ``HorizontalPodAutoscaler``): réplicas y ``resources``.
 * ``fly.toml``, ``render.yaml`` y Terraform de AWS (RDS, ECS, ElastiCache, SQS).
 * Workflows de GitHub Actions: a dónde se despliega (solo como pista).
@@ -43,8 +43,18 @@ ROLE_BY_IMAGE = [
     ("queue", re.compile(r"(^|/)(rabbitmq|nats|kafka|bitnami/kafka|confluentinc/cp-kafka|localstack)")),
     ("proxy", re.compile(r"(^|/)(traefik|nginx|caddy|haproxy|envoy)")),
 ]
-WORKER_CMD = re.compile(r"\b(celery\b.*\bworker|rq\s+worker|arq\b|dramatiq|huey_consumer|taskiq\s+worker)")
-API_CMD = re.compile(r"\b(uvicorn|gunicorn|hypercorn|fastapi\s+(run|dev)|granian)\b")
+WORKER_CMD = re.compile(
+    r"\b(celery\b.*\bworker|rq\s+worker|arq\b|dramatiq|huey_consumer|taskiq\s+worker|sidekiq|resque|good_job"
+    r"|solid_queue|artisan\s+queue:work|bullmq|worker\.(js|ts|mjs))"
+)
+# Servidores HTTP de cualquier runtime: un servicio que corre uno de estos es la API.
+API_CMD = re.compile(
+    r"\b(uvicorn|gunicorn|hypercorn|granian|daphne|fastapi\s+(run|dev)|manage\.py\s+runserver|flask\s+run"
+    r"|node|nodemon|ts-node|tsx|bun|deno|pm2(-runtime)?|(npm|yarn|pnpm)\s+(run\s+)?(start|serve|prod)"
+    r"|(nest|next|nuxt)\s+start|java\b.*-jar|go\s+run|rails\s+s(erver)?|puma|unicorn|dotnet"
+    r"|php-fpm|artisan\s+serve|frankenphp)\b"
+)
+PM2_INSTANCES = re.compile(r"\bpm2(?:-runtime)?\b.*?(?:\s-i|--instances)[\s=]+(\d+)")
 WORKERS_FLAG = re.compile(r"(?:--workers|--concurrency|(?<![\w-])-w|(?<![\w-])-c)[\s=\"',]+(\d+)")
 CELERY_QUEUES_FLAG = re.compile(r"(?:^|\s)(?:--queues|-Q)[\s=]+['\"]?([^\s'\"]+)")
 
@@ -152,17 +162,15 @@ def _line(mapping: dict, key: str) -> int:
 # ---------- workers en comandos ----------
 
 
-# Sin --workers, uvicorn, gunicorn, hypercorn y `fastapi run` levantan un solo proceso.
-SINGLE_PROCESS_DEFAULT = re.compile(r"\b(uvicorn|gunicorn|hypercorn|fastapi\s+run)\b")
-
-
 def _workers_in(cmd: str) -> int | None:
+    """Procesos del servidor: ``--workers N`` (uvicorn, gunicorn, Puma...) o ``pm2 -i N``. Sin la opción,
+    los servidores de ``API_CMD`` levantan un solo proceso."""
     if not API_CMD.search(cmd) and not WORKER_CMD.search(cmd):
         return None
-    m = WORKERS_FLAG.search(cmd)
+    m = PM2_INSTANCES.search(cmd) or WORKERS_FLAG.search(cmd)
     if m:
         return int(m.group(1))
-    return 1 if SINGLE_PROCESS_DEFAULT.search(cmd) and not WORKER_CMD.search(cmd) else None
+    return 1 if not WORKER_CMD.search(cmd) else None
 
 
 def _dedicated_celery_queue(cmd: str) -> str | None:
@@ -175,7 +183,7 @@ def _dedicated_celery_queue(cmd: str) -> str | None:
 
 
 def _workers_source(w: int, cmd: str, where: str) -> str:
-    if WORKERS_FLAG.search(cmd):
+    if PM2_INSTANCES.search(cmd) or WORKERS_FLAG.search(cmd):
         return f"{w} workers en {where}"
     return f"{where} no pasa --workers: el servidor levanta 1 proceso por defecto"
 
@@ -633,7 +641,7 @@ QUESTIONS = {
     "api.replicas": "¿Cuántas réplicas de la API corren en producción (o cuántas como máximo con autoescalado)?",
     "api.vcpu": "¿Cuántos vCPU tiene cada réplica de la API?",
     "api.memory_gb": "¿Cuánta memoria tiene cada réplica de la API?",
-    "api.workers": "¿Cuántos workers de uvicorn/gunicorn corre cada réplica?",
+    "api.workers": "¿Cuántos procesos de la API corre cada réplica (workers, cluster, PM2)?",
     "api.provider": "¿Dónde corre la API (Fargate, Fly, Render, un servidor propio...)?",
     "db.plan": "¿Qué plan o tamaño de base de datos usan (por ejemplo Supabase Micro o RDS db.t4g.medium)?",
 }

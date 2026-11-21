@@ -1,7 +1,6 @@
-"""La arquitectura que propone la IA del usuario para repos que no son FastAPI (JAJ-85, JAJ-86)."""
+"""La arquitectura que propone la IA, para cualquier framework (JAJ-85, JAJ-86, ADR 0002)."""
 
 import copy
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -9,10 +8,9 @@ from pydantic import ValidationError
 from app.agent.tools import AgentTools
 from app.api.store import InMemoryProjectStore
 from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai
-from app.ingest.build_model import NoEndpoints, build
+from app.ingest.iac import scan_deployment
 from app.models import load_model
 from app.models.graph import build_graph
-from app.samples import load_sample
 
 EXPRESS = {
     "repo": "acme/tienda-express",
@@ -128,6 +126,7 @@ def test_express_repo_gets_a_v1_with_ai_provenance():
     load_model(model)  # el motor lo carga
     assert model["repo"]["source"] == {
         "kind": "ia",
+        "via": "cli",
         "framework": "express",
         "language": "typescript",
         "commit": "77e550a",
@@ -146,7 +145,7 @@ def test_express_repo_gets_a_v1_with_ai_provenance():
     assert api["workers"]["needs_review"] and "express" in api["workers"]["source"]
     assert "uvicorn" not in api["workers"]["source"]
     assert pool["library"] == "desconocida" and pool["pool_size"]["needs_review"]
-    assert "Prisma" in pool["pool_size"]["source"]
+    assert "ORM o driver" in pool["pool_size"]["source"]
     services = {s["name"]: s for s in model["deployment"]["services"]}
     assert services["uploads"]["at"] == "src/lib/s3.ts:4" and services["uploads"]["origin"]["why"]
 
@@ -161,7 +160,7 @@ def test_every_ai_endpoint_step_and_component_has_provenance():
         assert service["origin"]["kind"] == "ia" and service["at"]
 
 
-def test_diagram_shows_named_components_the_extractor_cannot_see():
+def test_diagram_shows_named_components():
     model = build_from_ai(ArchitectureSubmission.model_validate(EXPRESS))
     graph = build_graph(load_model(model), model).to_dict()
     nodes = {n["id"]: n for n in graph["nodes"]}
@@ -171,13 +170,6 @@ def test_diagram_shows_named_components_the_extractor_cannot_see():
     assert nodes["component:uploads"]["kind"] == "storage"  # sin aristas, pero en el diagrama
     edges = {e["id"]: e for e in graph["edges"]}
     assert edges["api->external:stripe"]["refs"] == ["src/routes/checkout.ts:20"]
-
-
-def test_fastapi_models_do_not_change():
-    raw = load_sample("full-stack-fastapi-template")
-    assert "origin" not in json.dumps(raw)
-    nodes = [n["id"] for n in build_graph(load_model(raw), raw).to_dict()["nodes"]]
-    assert nodes == ["api", "db"]
 
 
 @pytest.mark.parametrize(
@@ -195,6 +187,12 @@ def test_fastapi_models_do_not_change():
         # formas del catálogo, no inventadas
         (("endpoints", 0, "effects", 0, "shape"), "fast_query", "shape de db"),
         (("endpoints", 1, "effects", 0, "service"), None, "necesita service"),
+        # on_miss solo con lecturas a la DB
+        (
+            ("endpoints", 1, "effects", 2, "on_miss"),
+            [{"kind": "cpu", "shape": "password_hash", "detail": "x", "file": "a.ts", "line": 1, "why": "xxx"}],
+            "on_miss lleva",
+        ),
     ],
 )
 def test_submission_rejects_numbers_missing_evidence_and_unknown_shapes(path, value, message):
@@ -217,12 +215,6 @@ def test_repeated_endpoints_are_rejected():
         ArchitectureSubmission.model_validate(data)
 
 
-def test_no_endpoints_message_points_to_the_cli(tmp_path):
-    (tmp_path / "server.js").write_text("app.get('/x', (req, res) => res.send('ok'))\n")
-    with pytest.raises(NoEndpoints, match="submit_architecture"):
-        build(tmp_path, {})
-
-
 def test_submit_architecture_creates_a_project_that_simulates():
     tools = AgentTools(InMemoryProjectStore(), None)
     out = tools.call("submit_architecture", EXPRESS)
@@ -232,24 +224,57 @@ def test_submit_architecture_creates_a_project_that_simulates():
     assert sim["provenance"]["label"] == "SUPUESTO"
 
 
-def test_code_wins_when_adding_to_an_extracted_project():
-    store = InMemoryProjectStore()
-    project = store.create("tienda", load_sample("full-stack-fastapi-template"), None)
-    v1 = store.get_version(project.id, 1).model
-    taken = next(ep for ep in v1["endpoints"] if ep["method"] == "GET")
-    data = submission(framework="fastapi", language="python")
-    data["endpoints"][0].update(method="GET", path=taken["path"])  # ya lo encontró el extractor
-    out = AgentTools(store, None).call("submit_architecture", {**data, "project_id": project.id})
-    assert out["version"] == 2
-    assert out["ignored_because_code_found_them"]["endpoints"] == [taken["id"]]
-    v2 = store.get_version(project.id, 2)
-    assert v2.origin == "agente"
-    same = next(ep for ep in v2.model["endpoints"] if ep["id"] == taken["id"])
-    assert "origin" not in same  # el del extractor quedó intacto
-    assert len(v2.model["endpoints"]) == len(v1["endpoints"]) + 1
-
-
 def test_editor_chat_does_not_offer_submit_architecture():
     tools = AgentTools(InMemoryProjectStore(), None)
     assert "submit_architecture" in [s["name"] for s in tools.schemas()]
     assert "submit_architecture" not in [s["name"] for s in tools.schemas(cli=False)]
+
+
+def test_resubmitting_replaces_the_architecture_and_keeps_the_deployment():
+    store = InMemoryProjectStore()
+    tools = AgentTools(store, None)
+    first = tools.call("submit_architecture", EXPRESS)
+    pid = first["project_id"]
+    declared = tools.call(
+        "set_deployment", {"project_id": pid, "field": "api.replicas", "value": "3", "quote": "corremos 3 réplicas"}
+    )
+    assert "error" not in declared, declared
+    data = submission()
+    data["endpoints"] = data["endpoints"][:1]
+    out = tools.call("submit_architecture", {**data, "project_id": pid})
+    v3 = store.get_version(pid, out["version"])
+    assert v3.origin == "agente" and [ep["id"] for ep in v3.model["endpoints"]] == ["GET /orders"]
+    assert v3.model["deployment"]["api"]["replicas"]["value"] == 3  # lo que dijo el usuario se queda
+
+
+def test_iac_wins_over_ai_components(tmp_path):
+    (tmp_path / "compose.yml").write_text("services:\n  redis:\n    image: redis:7.2\n", encoding="utf-8")
+    model = build_from_ai(ArchitectureSubmission.model_validate(EXPRESS), iac=scan_deployment(tmp_path).to_dict())
+    redis = [s for s in model["deployment"]["services"] if s["name"] == "redis"]
+    assert len(redis) == 1 and "origin" not in redis[0] and redis[0]["at"].startswith("compose.yml")
+
+
+@pytest.mark.parametrize(
+    "written, label",
+    [("const pool = new Pool({ max: 20 })", "OBSERVADO"), ("const pool = new Pool({ max: 10 })", None)],
+    ids=["el-numero-esta", "la-ia-se-equivoco"],
+)
+def test_observations_are_checked_against_the_cited_line(tmp_path, written, label):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "db.ts").write_text(f"import {{ Pool }} from 'pg'\n{written}\n", encoding="utf-8")
+    obs = {"field": "db.pool_size", "value": 20, "file": "src/db.ts", "line": 2, "why": "max del Pool de pg"}
+    sub = ArchitectureSubmission.model_validate(submission(observations=[obs]))
+    model = build_from_ai(sub, via="ingesta", root=tmp_path)
+    pool = model["deployment"]["db"]["pool_per_worker"]["pool_size"]
+    if label:
+        assert (pool["value"], pool["label"], pool["at"]) == (20, "OBSERVADO", "src/db.ts:2")
+    else:
+        assert pool["label"] == "SUPUESTO"  # se descartó: el número no está en esa línea
+        assert any("no está en esa línea" in w for w in model["deployment"]["iac"]["warnings"])
+
+
+def test_observations_from_the_cli_stay_estimated():
+    obs = {"field": "api.workers", "value": 4, "file": "ecosystem.config.js", "line": 5, "why": "instances: 4"}
+    model = build_from_ai(ArchitectureSubmission.model_validate(submission(observations=[obs])))
+    workers = model["deployment"]["api"]["workers"]
+    assert (workers["value"], workers["label"], workers["needs_review"]) == (4, "ESTIMADO", True)

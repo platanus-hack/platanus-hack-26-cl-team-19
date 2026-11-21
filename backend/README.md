@@ -36,9 +36,9 @@ backend/
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
 │   │   └── failure.py       #   failure_cost(modelo, run): ventas en juego por hora (JAJ-74)
 │   ├── ingest/              # del repo al modelo (ADR 0001, pasos 1 y 3)
-│   │   ├── extract.py       #   extractor AST de FastAPI → grafo intermedio (JAJ-7)
-│   │   ├── build_model.py   #   grafo + catálogo + IaC → model/v1, sin importar el framework (JAJ-45, JAJ-85)
-│   │   ├── ai_graph.py      #   la arquitectura que manda la IA de la CLI para otros frameworks (JAJ-85, JAJ-86)
+│   │   ├── analyzer.py      #   Claude lee el repo en la ingesta de GitHub (ADR 0002)
+│   │   ├── ai_graph.py      #   schema de la arquitectura que propone la IA → grafo intermedio (JAJ-85, JAJ-86)
+│   │   ├── build_model.py   #   grafo + catálogo + IaC → model/v1, sin importar el framework (JAJ-45)
 │   │   └── iac.py           #   archivos de despliegue → servicios y números OBSERVADO (JAJ-60)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos (JAJ-55) y ProjectStore sobre Postgres (JAJ-56)
@@ -74,7 +74,7 @@ Los recursos se arman desde el `deployment` del modelo:
 
 ### Caché y colas
 
-La ingesta de repos genera los campos opcionales de caché y colas para los patrones que reconoce. Las llamadas sin un patrón identificado conservan su tiempo de espera.
+La ingesta genera los campos opcionales de caché y colas cuando la IA los reconoce en el código. Las llamadas sin un patrón identificado conservan su tiempo de espera.
 
 ```jsonc
 // paso de caché: GET; si acierta, se salta on_miss; si falla, hace on_miss y luego SET
@@ -95,7 +95,7 @@ La ingesta de repos genera los campos opcionales de caché y colas para los patr
 - Si la cola está en su `max_length`, encolar falla y la request termina con error `queue_full`. Sin `max_length`, la cola crece sin límite.
 - El `Run` trae `cache` (aciertos y fallos) y `queues` (encolados, procesados, rechazados, cola al final y latencia de los trabajos).
 
-La ingesta genera `on_miss` cuando encuentra un `get` de caché, una rama que consulta la DB solo si falla y un `set` o `setex` de la misma clave. Para Celery, el extractor resuelve las funciones de `.delay()` o `.apply_async()` con cola explícita y devuelve sus efectos en `jobs`, un mapa por identificador de función. El generador usa esos efectos para producir `job_steps` cuando la cola tiene un solo perfil de trabajo. Lee la concurrencia de workers dedicados declarados en Compose o Kubernetes.
+La IA marca `on_miss` en una lectura de caché cuando el código consulta la DB solo si la clave falta (cache-aside). Para colas (Celery, BullMQ, Sidekiq...), los pasos `background` llevan `task` y `queue`, y `jobs` trae los pasos de cada trabajo. El generador los usa para producir `job_steps` cuando la cola tiene un solo perfil de trabajo. La concurrencia de los workers sale de Compose o Kubernetes.
 
 Los datos que falten quedan como preguntas en `deployment.iac.missing`. Al construir el modelo, `--answers` admite `overrides.cache_hit_ratio` como mapa de `archivo:línea` a fracción y `deployment.queues` como mapa de nombre de cola a `workers` y `max_length`. Un `max_length` explícito de `null` indica una cola sin límite.
 
@@ -381,25 +381,30 @@ Reglas, iguales en los dos modos:
 - **Límites por usuario:** 60 llamadas por minuto y 300 simulaciones por día (`compare` cuenta 2). Son en memoria, por instancia de la API.
 - **Metas:** `projects.slo_p95_ms`, `slo_error_rate` y `budget_usd_month` del modelo de datos (JAJ-55). El p95 solo mide las requests exitosas. Por eso, si el usuario no declaró una meta de errores, `simulate` y `compare` exigen un piso de 1 % (`SUPUESTO`, y lo dicen): una versión que rechaza el 85 % de las requests nunca cumple, aunque su p95 sea bajo.
 
-#### Repos que no son FastAPI (JAJ-85, JAJ-86)
+#### La arquitectura del repo la lee una IA (ADR 0002, JAJ-85, JAJ-86)
 
-El extractor AST solo lee FastAPI. Para otro framework, la IA de la CLI del usuario lee el repo local y manda su arquitectura con `submit_architecture`:
+No hay extractores por framework: Branchpoint funciona igual con Express, Django, FastAPI, Spring, Go o Rails. Una IA lee el repo y entrega su arquitectura con un schema estricto (`app/ingest/ai_graph.py`), y el backend le pone los números:
 
 ```
-CLI del usuario: lee rutas y handlers → submit_architecture(endpoints → pasos, componentes)
-  ai_graph.py: valida el schema → grafo intermedio de extract.py (con origin: ia)
-  build_model.build_from_graph: catálogo → model/v1 → proyecto nuevo o versión nueva
+CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingestions)
+  lee el repo local                        Claude lee el tarball: list_files, read_file, grep (analyzer.py)
+  submit_architecture ───────┐   ┌──────── submit_architecture (mismo schema)
+                             ▼   ▼
+              ai_graph: valida → grafo intermedio (origin: ia)   + iac.py (archivos de despliegue)
+              build_model.build_from_graph: catálogo → model/v1
 ```
 
-- **La IA clasifica, no pone números.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache`, `external` (con el nombre del servicio), `background` o `cpu`. El schema no acepta tiempos, filas ni costos: el único número es la línea de la evidencia.
-- **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`). Los tiempos de sus pasos son `ESTIMADO` como máximo, y la CPU base del framework, el pool y los workers quedan `SUPUESTO` por revisar.
-- **El código manda.** Con `project_id`, la propuesta se suma como versión nueva (origen `agente`): los endpoints y componentes que encontraron el extractor o la IaC quedan intactos, y la respuesta dice qué se ignoró. Sin `project_id`, crea un proyecto con la propuesta como v1.
+- **La IA clasifica; los números salen del catálogo.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache` (con `on_miss`), `external` (con el nombre del servicio), `background` (con `task` y `queue`) o `cpu`. El schema no acepta tiempos, filas ni costos.
+- **La configuración se cita, no se inventa.** Los workers de la API y el pool de conexiones van en `observations`, con el `archivo:línea` donde está escrito el número. En la ingesta, el servidor revisa que el número esté en esa línea: si está, queda `OBSERVADO`, y si no, se descarta con un aviso. Desde la CLI no puede revisarlo, así que queda `ESTIMADO` y por revisar.
+- **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`, `via: "cli"` o `"ingesta"`). Los tiempos de sus pasos son `ESTIMADO` como máximo. La CPU base queda `SUPUESTO` si el framework no es en el que la midió el catálogo.
+- **La IaC manda.** Si un archivo de despliegue declara un servicio con el mismo nombre que un componente de la IA, se queda el de la IaC. Los workers de la IaC ganan sobre los que cita la IA.
+- **Volver a mandar.** Con `project_id`, `submit_architecture` guarda una versión nueva (origen `agente`) con la arquitectura nueva, y conserva el despliegue, el tráfico y lo que dijo la IaC.
 - **Diagrama.** `POST /graph` dibuja cada servicio externo con su nombre y los componentes declarados (caché, storage, colas) con su tecnología, `archivo:línea` y procedencia, aunque ningún paso los use.
-- **Sin IA,** los repos FastAPI siguen con el extractor y el modelo de siempre (mismo JSON byte a byte), y la ingesta de otro framework falla con un mensaje que apunta a la CLI.
+- **Ingesta de GitHub.** Usa la API key del usuario (header `X-Anthropic-Api-Key`, no se guarda) o, con `BRANCHPOINT_CHAT_DEMO=on`, la credencial del equipo, con 5 análisis por usuario y por día. Sin ninguna de las dos responde 422. Hasta 40 vueltas de lectura; el modelo guarda los tokens usados en `repo.source.analysis`.
 
 El chat del editor no ofrece `submit_architecture`, porque no ve el repo.
 
-`read_file` y `grep` no están. En el modo MCP sobran, porque la CLI del usuario lee su repo local. Para el chat haría falta guardar el repo extraído.
+`read_file` y `grep` no están entre las tools del agente: en el modo MCP sobran, porque la CLI lee su repo local, y en la ingesta las usa el analizador. Para el chat haría falta guardar el repo extraído.
 
 `BRANCHPOINT_MCP_ALLOWED_HOSTS` (separados por coma; por defecto localhost) define los `Host` que acepta `/mcp`, como protección contra DNS rebinding. En producción va el dominio de la API.
 

@@ -4,18 +4,13 @@ Transmite el loop (``app/agent/loop.py``) como NDJSON: una línea JSON por event
 ``tool_call``, ``tool_result``, ``done``, ``error``), para que el editor muestre cada tool call y su
 resultado a medida que ocurren.
 
-**Credencial.**
-* **Del usuario:** su API key de Anthropic en el header ``X-Anthropic-Api-Key``. Se usa solo en esta
-  request: no se guarda, no se escribe en logs y no vuelve en la respuesta.
-* **Demo:** sin header y con ``BRANCHPOINT_CHAT_DEMO=on``, la del equipo (el SDK la resuelve del
-  entorno), con un tope de mensajes por usuario y por día.
-* **Sin ninguna de las dos:** 422 con instrucciones. El modo principal es MCP desde la CLI del usuario.
+**Credencial:** la API key del usuario o, en modo demo, la del equipo (``app/api/llm_access.py``). El
+modo principal es MCP desde la CLI del usuario.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterator
 from typing import Literal
 
@@ -24,9 +19,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.loop import AnthropicLLM, run_agent
-from app.agent.tools import AgentTools, ToolError
+from app.agent.tools import AgentTools
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
+from app.api.llm_access import resolve_llm
 
 router = APIRouter(prefix="/projects", tags=["agent"])
 
@@ -48,10 +44,6 @@ class ChatRequest(BaseModel):
     )
 
 
-def _demo_on() -> bool:
-    return os.environ.get("BRANCHPOINT_CHAT_DEMO", "").strip().lower() == "on"
-
-
 @router.post("/{project_id}/chat", summary="Chat con el agente: transmite cada tool call (NDJSON)")
 def chat(
     project_id: str,
@@ -67,20 +59,16 @@ def chat(
     if req.messages[-1].role != "user":
         raise ApiError(422, INVALID_PARAMETERS, "El último mensaje tiene que ser del usuario.")
     limiter = request.app.state.limiter
-    key = (x_anthropic_api_key or "").strip() or None
-    if key is None:
-        if not _demo_on():
-            raise ApiError(
-                422,
-                INVALID_PARAMETERS,
-                "Para usar el chat del editor manda tu API key de Anthropic (header X-Anthropic-Api-Key), o "
-                "conecta tu CLI de IA por MCP (ver docs).",
-            )
-        try:  # modo demo: tope de mensajes por usuario y día
-            limiter.daily(f"chat-demo:{owner or 'anon'}", DEMO_MESSAGES_PER_DAY, "mensajes del chat de demo")
-        except ToolError as e:
-            raise ApiError(429, INVALID_PARAMETERS, str(e)) from None
-    llm = request.app.state.llm_factory(key)
+    llm = resolve_llm(
+        request,
+        owner,
+        x_anthropic_api_key,
+        bucket="chat-demo",
+        cap=DEMO_MESSAGES_PER_DAY,
+        what="mensajes del chat de demo",
+        missing="Para usar el chat del editor manda tu API key de Anthropic (header X-Anthropic-Api-Key), o "
+        "conecta tu CLI de IA por MCP (ver docs).",
+    )
     tools = AgentTools(store, owner, limiter)
     messages = [m.model_dump() for m in req.messages]
 

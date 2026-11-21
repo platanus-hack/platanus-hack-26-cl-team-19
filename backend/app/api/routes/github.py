@@ -22,12 +22,13 @@ import os
 import urllib.parse
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import NOT_FOUND, ApiError
+from app.api.llm_access import resolve_llm
 from app.github.client import GitHubApp, GitHubError, Repo
 from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion
 from app.github.state import InvalidState, sign_state, verify_state
@@ -240,6 +241,9 @@ def get_jobs(request: Request) -> IngestionJobs:
     return request.app.state.ingestions
 
 
+DEMO_INGESTIONS_PER_DAY = 5  # cada análisis lee el repo con Claude: cuesta más que un mensaje del chat
+
+
 @router.post("/ingestions", response_model=IngestionOut, status_code=202)
 def start_ingestion(
     req: StartIngestion,
@@ -248,12 +252,24 @@ def start_ingestion(
     github: GitHubApp = Depends(get_github),
     jobs: IngestionJobs = Depends(get_jobs),
     user: User | None = Depends(current_user),
+    x_anthropic_api_key: str | None = Header(default=None),
 ) -> IngestionOut:
     owner = owner_of(user)
     repo = _repo_or_404(request, github, owner, req.repo_full_name)
+    # La arquitectura la lee Claude (ADR 0002): con la key del usuario o, en modo demo, la del equipo
+    llm = resolve_llm(
+        request,
+        owner,
+        x_anthropic_api_key,
+        bucket="ingest-demo",
+        cap=DEMO_INGESTIONS_PER_DAY,
+        what="análisis de repos de demo",
+        missing="Para analizar el repo, Branchpoint lee el código con Claude: manda tu API key de Anthropic "
+        "(header X-Anthropic-Api-Key), o analízalo desde tu CLI de IA conectada por MCP (submit_architecture).",
+    )
     job = jobs.start(owner, repo.full_name, req.branch or repo.default_branch)
     name = req.name or repo.full_name.split("/", 1)[1]
-    tasks.add_task(run_ingestion, jobs, job.id, github, request.app.state.store, repo, name)
+    tasks.add_task(run_ingestion, jobs, job.id, github, request.app.state.store, repo, name, llm)
     return _out(job)
 
 
