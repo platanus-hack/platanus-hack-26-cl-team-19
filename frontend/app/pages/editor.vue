@@ -693,20 +693,17 @@ async function saveVersion() {
                 {{ warning }}
               </li>
             </ul>
-            <div
-              v-if="results"
-              class="flex flex-col gap-4 border-t border-border pt-4"
-            >
-              <EditorVersionCosts :costs="results.cost" />
-              <EditorFailureCost
-                :failure="results.failure"
-                :missing="results.failure_missing"
-              />
-            </div>
           </div>
         </TabsContent>
         <TabsContent value="costs" class="min-h-0 overflow-y-auto p-4">
-          <EditorVersionCosts v-if="displayedCosts" :costs="displayedCosts" />
+          <div v-if="displayedCosts" class="flex flex-col gap-4">
+            <EditorVersionCosts :costs="displayedCosts" />
+            <EditorFailureCost
+              v-if="results"
+              :failure="results.failure"
+              :missing="results.failure_missing"
+            />
+          </div>
           <div v-else-if="costsError" class="flex flex-col items-start gap-3">
             <p class="text-sm text-muted-foreground">{{ costsError }}</p>
             <Button variant="outline" @click="loadCosts">Reintentar</Button>
