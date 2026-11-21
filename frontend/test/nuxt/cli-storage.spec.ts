@@ -51,4 +51,16 @@ describe("cli-storage", () => {
     expect(parseSaved("{roto")).toEqual({});
     expect(parseSaved(null)).toEqual({});
   });
+
+  it("descarta entradas mal formadas o de CLIs desconocidas", () => {
+    const raw = JSON.stringify({
+      claude: { selected: true, state: "verified" },
+      codex: { selected: "sí", state: "verified" },
+      gemini: { selected: true, state: "verified" },
+    });
+    expect(parseSaved(raw)).toEqual({
+      claude: { selected: true, state: "verified" },
+    });
+    expect(parseSaved("[1,2]")).toEqual({});
+  });
 });

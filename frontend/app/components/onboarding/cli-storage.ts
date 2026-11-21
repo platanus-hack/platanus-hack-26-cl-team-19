@@ -43,13 +43,32 @@ export function serializeConnections(
   );
 }
 
+const STATES: CliConnectionState[] = ["missing", "pending", "verified"];
+
+function isEntry(value: unknown): value is SavedEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.selected === "boolean" &&
+    STATES.includes(entry.state as CliConnectionState)
+  );
+}
+
+// Solo acepta entradas bien formadas de CLIs conocidas; lo demás se ignora.
 export function parseSaved(raw: string | null): SavedConnections {
+  let value: unknown;
   try {
-    const value = JSON.parse(raw ?? "{}");
-    return value && typeof value === "object" ? value : {};
+    value = JSON.parse(raw ?? "{}");
   } catch {
     return {};
   }
+  if (!value || typeof value !== "object") return {};
+  const saved: SavedConnections = {};
+  for (const provider of cliProviders) {
+    const entry = (value as Record<string, unknown>)[provider.id];
+    if (isEntry(entry)) saved[provider.id] = entry;
+  }
+  return saved;
 }
 
 export function connectedProviders(
