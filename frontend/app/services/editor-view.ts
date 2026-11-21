@@ -267,17 +267,13 @@ export function toComparisonRows(
       verdict: { lower: "peor", higher: "mejor" },
     },
     {
-      label: "Costo mensual",
+      label: result.cost_delta.missing.length
+        ? "Costo mensual comparable"
+        : "Costo mensual",
       unit: "/mes",
       format: "currency",
-      base: reading(
-        result.cost_a.total.value,
-        toProvenance(result.cost_a.total),
-      ),
-      target: reading(
-        result.cost_b.total.value,
-        toProvenance(result.cost_b.total),
-      ),
+      base: reading(result.cost_delta.a, toProvenance(result.cost_a.total)),
+      target: reading(result.cost_delta.b, toProvenance(result.cost_b.total)),
     },
   ];
 }
@@ -296,4 +292,10 @@ export function toVersionChanges(result: Comparison) {
         to: display(b),
       };
     });
+}
+
+export function costComponentLabel(component: string) {
+  if (component === "api") return "API";
+  if (component === "db") return "base de datos";
+  return component;
 }

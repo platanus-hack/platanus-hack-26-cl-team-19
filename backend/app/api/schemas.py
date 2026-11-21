@@ -203,6 +203,29 @@ class CompareRequest(RunParams):
     region: Region = Field("us-east-1", description="Región de AWS para los costos (JAJ-72).")
 
 
+class VersionResultsRequest(RunParams):
+    """Body de ``POST /projects/{id}/versions/{n}/results`` (JAJ-128): los de ``runs`` más la región."""
+
+    region: Region = Field("us-east-1", description="Región de AWS para los costos (JAJ-72).")
+
+
+class VersionResults(BaseModel):
+    """Todo lo que hace falta para leer el resultado de una versión, en una llamada (JAJ-128): la
+    simulación, el costo mensual con su desglose y el costo de fallar."""
+
+    version: VersionSummary
+    run: Run
+    # costo mensual en US$ (las unidades vienen en cada número), por componente, con región, fuente y
+    # procedencia. ``cost.missing`` dice qué componentes no tienen precio: el total es parcial (JAJ-88)
+    cost: CostEstimate
+    # ventas en juego por hora según la tasa de error del Run (JAJ-74); None sin datos de negocio
+    failure: FailureCost | None = None
+    failure_missing: list[str] = Field(
+        default_factory=list, description="Si failure es null, los datos que le faltan al modelo para calcularlo."
+    )
+    summary: str = Field(description="El resultado en una o dos frases, para mostrar tal cual.")
+
+
 class CompareResponse(BaseModel):
     a: VersionSummary
     b: VersionSummary
@@ -217,6 +240,9 @@ class CompareResponse(BaseModel):
     # no trae conversión, ticket o requests por sesión)
     failure_a: FailureCost | None = None
     failure_b: FailureCost | None = None
+    # JAJ-128: si failure_x es None, qué datos de negocio le faltan a ese modelo (ej. business.conversion)
+    failure_missing_a: list[str] = Field(default_factory=list)
+    failure_missing_b: list[str] = Field(default_factory=list)
     summary: str | None = Field(None, description="La comparación en una frase: costo extra y ventas que se evitan.")
 
 

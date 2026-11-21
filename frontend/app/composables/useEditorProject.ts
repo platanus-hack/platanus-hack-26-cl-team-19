@@ -4,7 +4,7 @@ import type {
   Graph,
   ModelSummary,
   Project,
-  Run,
+  VersionResults,
   VersionDetail,
 } from "@/services/editor-api";
 import { toScenarios, toVersionEntry } from "@/services/editor-view";
@@ -43,7 +43,8 @@ export function useEditorProject() {
   const projectGroup = shallowRef<Project | null>(null);
   const version = shallowRef<VersionDetail | null>(null);
   const graph = shallowRef<Graph | null>(null);
-  const run = shallowRef<Run | null>(null);
+  const results = shallowRef<VersionResults | null>(null);
+  const run = computed(() => results.value?.run ?? null);
   const costs = shallowRef<CostEstimate | null>(null);
   const costsError = ref("");
   const comparison = shallowRef<Comparison | null>(null);
@@ -72,7 +73,7 @@ export function useEditorProject() {
   }
 
   function resetResults() {
-    run.value = null;
+    results.value = null;
     costs.value = null;
     costsError.value = "";
     comparison.value = null;
@@ -180,8 +181,10 @@ export function useEditorProject() {
     const id = project.value?.id;
     const number = version.value?.number;
     if (!id || number === undefined || !scenario.value) return;
+    const selectedScenario = scenario.value;
     await request("Simulando…", async () => {
-      run.value = await api.run(id, number, scenario.value);
+      const result = await api.results(id, number, selectedScenario);
+      if (scenario.value === selectedScenario) results.value = result;
     });
   }
 
@@ -205,7 +208,7 @@ export function useEditorProject() {
   watch(
     scenario,
     () => {
-      run.value = null;
+      results.value = null;
       comparison.value = null;
     },
     { flush: "sync" },
@@ -219,6 +222,7 @@ export function useEditorProject() {
     version,
     graph,
     run,
+    results,
     costs,
     costsError,
     comparison,

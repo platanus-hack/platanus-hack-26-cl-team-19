@@ -5,6 +5,7 @@ import { Ellipsis, Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
+import EditorFailureCost from "@/components/editor/EditorFailureCost.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
@@ -41,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  costComponentLabel,
   simulationProvenance,
   toBottleneck,
   toComparisonRows,
@@ -67,6 +69,7 @@ const {
   graph,
   scenario,
   run,
+  results,
   costs,
   costsError,
   comparison,
@@ -133,6 +136,7 @@ const inspected = computed(() => {
     toInspectedNode(node, run.value, provenance)
   );
 });
+const displayedCosts = computed(() => results.value?.cost ?? costs.value);
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
 const rows = computed(() =>
   comparison.value ? toComparisonRows(comparison.value, provenance) : [],
@@ -406,6 +410,40 @@ async function saveVersion() {
             El backend devolvió solo los primeros 100 cambios.
           </p>
         </div>
+        <template v-if="comparison" #results>
+          <p
+            v-if="comparison.cost_delta.missing.length"
+            class="text-sm text-muted-foreground"
+          >
+            La diferencia de costo incluye solo los componentes con precio en
+            ambas versiones. Quedan fuera:
+            {{
+              comparison.cost_delta.missing.map(costComponentLabel).join(", ")
+            }}.
+          </p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <section
+              class="flex min-w-0 flex-col gap-4 rounded-md border border-border p-4"
+            >
+              <h3 class="font-mono text-sm font-semibold">v{{ base }}</h3>
+              <EditorVersionCosts :costs="comparison.cost_a" />
+              <EditorFailureCost
+                :failure="comparison.failure_a"
+                :missing="comparison.failure_missing_a"
+              />
+            </section>
+            <section
+              class="flex min-w-0 flex-col gap-4 rounded-md border border-border p-4"
+            >
+              <h3 class="font-mono text-sm font-semibold">v{{ target }}</h3>
+              <EditorVersionCosts :costs="comparison.cost_b" />
+              <EditorFailureCost
+                :failure="comparison.failure_b"
+                :missing="comparison.failure_missing_b"
+              />
+            </section>
+          </div>
+        </template>
       </VersionCompare>
     </template>
 
@@ -624,35 +662,48 @@ async function saveVersion() {
     </template>
 
     <template #metrics>
-      <Tabs v-model="panel" class="gap-0">
-        <TabsList variant="line" aria-label="Panel de análisis" class="mx-4">
+      <Tabs v-model="panel" class="min-h-0 flex-1 gap-0">
+        <TabsList
+          variant="line"
+          aria-label="Panel de análisis"
+          class="mx-4 shrink-0"
+        >
           <TabsTrigger value="simulation">Simulación</TabsTrigger>
           <TabsTrigger value="costs">Costos</TabsTrigger>
         </TabsList>
-        <TabsContent value="simulation" class="flex flex-col gap-3 p-4">
-          <SimulationPanel
-            v-if="playback"
-            v-model:minute="cursor"
-            v-model:playing="playing"
-            :frames="playback.frames"
-            :phases="playback.phases"
-            :provenance="provenance"
-            time-unit="second"
-          />
-          <p v-else class="text-sm text-muted-foreground">
-            Elige un escenario y pulsa Simular para reproducir el resultado.
-          </p>
-          <ul
-            v-if="run?.warnings.length"
-            class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
-          >
-            <li v-for="warning in run.warnings" :key="warning">
-              {{ warning }}
-            </li>
-          </ul>
+        <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
+          <div class="flex flex-col gap-3">
+            <SimulationPanel
+              v-if="playback"
+              v-model:minute="cursor"
+              v-model:playing="playing"
+              :frames="playback.frames"
+              :phases="playback.phases"
+              :provenance="provenance"
+              time-unit="second"
+            />
+            <p v-else class="text-sm text-muted-foreground">
+              Elige un escenario y pulsa Simular para reproducir el resultado.
+            </p>
+            <ul
+              v-if="run?.warnings.length"
+              class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+            >
+              <li v-for="warning in run.warnings" :key="warning">
+                {{ warning }}
+              </li>
+            </ul>
+          </div>
         </TabsContent>
-        <TabsContent value="costs" class="p-4">
-          <EditorVersionCosts v-if="costs" :costs="costs" />
+        <TabsContent value="costs" class="min-h-0 overflow-y-auto p-4">
+          <div v-if="displayedCosts" class="flex flex-col gap-4">
+            <EditorVersionCosts :costs="displayedCosts" />
+            <EditorFailureCost
+              v-if="results"
+              :failure="results.failure"
+              :missing="results.failure_missing"
+            />
+          </div>
           <div v-else-if="costsError" class="flex flex-col items-start gap-3">
             <p class="text-sm text-muted-foreground">{{ costsError }}</p>
             <Button variant="outline" @click="loadCosts">Reintentar</Button>
