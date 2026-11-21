@@ -655,7 +655,8 @@ def checks(model: dict) -> dict:
     for name, sc in t["scenarios"].items():
         rps = sc["rps"]["value"]
         valid = {k: v for k, v in caps.items() if v["value"]}
-        bottleneck = min(valid, key=lambda k: valid[k]["value"])
+        # sin ninguna capacidad con valor (ej. sin consultas y sin CPU), no hay cuello que nombrar (JAJ-108)
+        bottleneck = min(valid, key=lambda k: valid[k]["value"]) if valid else None
         sessions_h = rps * 3600 / t["requests_per_session"]["value"]
         at_stake = derived(
             round(sessions_h * biz["conversion"]["value"] * biz["ticket_usd"]["value"], 0),

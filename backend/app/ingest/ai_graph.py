@@ -164,6 +164,15 @@ OBSERVABLE = {
     "db.max_overflow": ("conexiones", "conexiones extra del pool por proceso"),
     "db.pool_timeout_s": ("s", "segundos de espera por una conexión del pool"),
 }
+# El mínimo que el motor acepta para cada valor citado (JAJ-108), y por qué uno menor no sirve. Un valor
+# menor se descarta con un aviso y queda el de por defecto, por revisar: antes, workers=0 armaba un modelo
+# que la API rechaza (JAJ-101) o, sin consultas a la DB, rompía checks() con min() vacío.
+OBSERVABLE_MIN = {
+    "api.workers": (1, "con 0 procesos la API no atiende requests"),
+    "db.pool_size": (1, "en SQLAlchemy, pool_size=0 es un pool sin límite, que el motor no modela"),
+    "db.max_overflow": (0, ""),
+    "db.pool_timeout_s": (1, "con 0 s ninguna request espera una conexión del pool"),
+}
 
 
 class AiObservation(_Evidence):
@@ -461,6 +470,13 @@ def observed_values(sub: ArchitectureSubmission, root: Path | None) -> tuple[dic
     warnings: list[str] = []
     for o in sub.observations:
         unit, what = OBSERVABLE[o.field]
+        minimum, why = OBSERVABLE_MIN[o.field]
+        if o.value < minimum:
+            warnings.append(
+                f"La IA citó {o.field}={o.value} en {o.at}: se descarta porque {why}. "
+                "Queda el valor por defecto, por revisar."
+            )
+            continue
         if root is None:
             values[o.field] = bm.num(
                 o.value,
