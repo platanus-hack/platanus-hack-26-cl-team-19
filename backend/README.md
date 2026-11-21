@@ -12,7 +12,7 @@ backend/
 │   │   ├── main.py          #   arma la app: CORS, errores y rutas
 │   │   ├── schemas.py       #   lo que recibe y devuelve cada ruta
 │   │   ├── errors.py        #   formato de los errores ({"error": {"code", "message"}})
-│   │   ├── store.py         #   proyectos y versiones (en memoria hasta JAJ-56)
+│   │   ├── store.py         #   interfaz ProjectStore y su versión en memoria
 │   │   └── routes/          #   rutas por tema: health, runs, models, projects
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
@@ -27,7 +27,7 @@ backend/
 │   │   └── ops.py           #   operaciones tipadas que proponen versiones (JAJ-68)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
-│   ├── db/                  # modelo de datos persistente (JAJ-55): README.md y schema.sql
+│   ├── db/                  # modelo de datos (JAJ-55) y ProjectStore sobre Postgres (JAJ-56)
 │   └── cli.py               # correr una simulación desde la terminal
 └── tests/
     ├── fixtures/            # versión fija del modelo del template (anterior a JAJ-47) para los tests del motor
@@ -149,6 +149,12 @@ python -m app.cli app/samples/fastapi-realworld-example-app.model.json --scenari
 
 # levantar la API en http://localhost:8000 (documentación interactiva en /docs)
 uvicorn app.api.main:app --reload
+
+# lo mismo, guardando los proyectos en el Supabase local (ver docs/supabase-local.md)
+uvicorn app.api.main:app --reload --env-file .env
+
+# tests, incluidos los de Postgres (con el Supabase local arriba)
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres python -m pytest -q
 ```
 
 Sin instalar Python, con Docker (en Git Bash de Windows, antepongan `MSYS_NO_PATHCONV=1` y usen `$(pwd -W)` en vez de `$PWD`):
@@ -174,7 +180,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/projects/{id}/versions/{n}/ops` | Aplica `{"ops": [...], "note"}` a la versión `n` y guarda el resultado como versión nueva (`origin: agente`, antecesora `n`). Devuelve la versión con `changes` (una línea por operación) y `warnings`. Ver "Operaciones" abajo. |
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). |
 
-**Proyectos en memoria:** se pierden al reiniciar la API. `ProjectStore` (`app/api/store.py`) es la interfaz que va a implementar la persistencia (JAJ-56) sin cambiar las rutas.
+**Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
 
 ```bash
 # abrir el editor con v1, guardar una v2 y comparar

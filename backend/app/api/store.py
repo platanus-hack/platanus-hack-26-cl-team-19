@@ -1,9 +1,9 @@
 """Proyectos y versiones del editor.
 
 Cada proyecto parte con la **v1** (el modelo del repo) y cada cambio guardado es una versión nueva
-con su antecesora, como un commit. Por ahora viven en memoria (se pierden al reiniciar la API):
-``ProjectStore`` es la interfaz que la persistencia en Postgres (JAJ-56) implementa sin cambiar
-las rutas.
+con su antecesora, como un commit. ``ProjectStore`` es la interfaz que usan las rutas. Tiene dos
+implementaciones: ``InMemoryProjectStore`` (se pierde al reiniciar; la usan los tests) y
+``PostgresProjectStore`` en ``app/db/postgres_store.py`` (JAJ-56).
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ class Version:
     parent: int | None
     note: str | None
     created_at: str
-    model: dict[str, Any]
+    # el modelo completo pesa ~100 KB: get() trae las versiones sin él y get_version() con él
+    model: dict[str, Any] | None
 
 
 @dataclass
@@ -43,7 +44,13 @@ class Project:
 class ProjectStore(Protocol):
     def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project: ...
 
-    def get(self, project_id: str) -> Project | None: ...
+    def get(self, project_id: str) -> Project | None:
+        """El proyecto con el historial de versiones. Las versiones pueden venir sin ``model``."""
+        ...
+
+    def get_version(self, project_id: str, number: int) -> Version | None:
+        """Una versión con su ``model``."""
+        ...
 
     def list(self) -> list[Project]: ...
 
@@ -72,6 +79,10 @@ class InMemoryProjectStore:
 
     def get(self, project_id: str) -> Project | None:
         return self._projects.get(project_id)
+
+    def get_version(self, project_id: str, number: int) -> Version | None:
+        project = self._projects.get(project_id)
+        return project.version(number) if project is not None else None
 
     def list(self) -> list[Project]:
         return sorted(self._projects.values(), key=lambda p: p.created_at, reverse=True)
