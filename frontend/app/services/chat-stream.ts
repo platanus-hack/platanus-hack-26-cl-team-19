@@ -4,19 +4,38 @@ export type ChatKeySource = "team" | "personal";
 export type ChatTurn = {
   role: "user" | "assistant";
   content: string;
+  /** Ids de adjuntos (IA-7): solo en mensajes del usuario. */
+  attachments?: string[];
 };
 
 type ToolResult = {
   error?: unknown;
   p95_ms?: number;
   bottleneck?: { resource?: string };
+  // analyze_log y apply_log_traffic (IA-7)
+  peak_rps?: { value: number; unit: string };
+  endpoints?: unknown[];
+  version?: number;
+  note?: string;
+};
+
+/** Lo que el backend calcula que falta respaldar con evidencia (IA-7). */
+export type EvidenceRequest = {
+  field: string;
+  ask: string;
+  accepts: ("log" | "image")[];
+};
+
+export type ChatEvidence = {
+  pending: EvidenceRequest[];
+  total_assumptions: number;
 };
 
 export type ChatEvent =
   | { type: "text"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; id: string; result: ToolResult }
-  | { type: "done" }
+  | { type: "tool_result"; id: string; name?: string; result: ToolResult }
+  | { type: "done"; evidence?: ChatEvidence | null }
   | { type: "error"; message: string };
 
 export async function* readChatEvents(

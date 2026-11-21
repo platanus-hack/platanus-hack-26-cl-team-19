@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
+import type { EvidenceRequest } from "@/services/chat-stream";
 import { Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
@@ -210,9 +212,26 @@ const {
   error: chatError,
   thinking,
   messages,
+  evidence,
   send,
   reset,
+  dismissEvidence,
 } = useEditorChat(computed(() => project.value?.id));
+// adjuntos del chat (IA-9): imágenes y logs que el agente usa como evidencia
+const chatAttachments = useChatAttachments(computed(() => project.value?.id));
+const attachNotice = ref("");
+
+function attachFiles(files: File[]) {
+  const skipped = chatAttachments.add(files);
+  attachNotice.value = skipped
+    ? `Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje: ${skipped} quedaron fuera.`
+    : "";
+}
+
+async function dismissRequest(request: EvidenceRequest) {
+  dismissEvidence(request.field);
+  await sendChat("No tengo ese dato: sigue con los supuestos.");
+}
 
 const usingPersonalKey = computed(() =>
   chatSettings.value?.personal.includes(chatProvider.value),
@@ -229,8 +248,15 @@ const chatDisabled = computed(
     (!usingPersonalKey.value && !teamChatAvailable.value),
 );
 async function sendChat(text: string) {
-  if (chatDisabled.value) return;
-  await send(text, usingPersonalKey.value ? "personal" : "team");
+  if (chatDisabled.value || chatAttachments.uploading.value) return;
+  const attached = chatAttachments.ready.value.map((draft) => ({
+    id: draft.id,
+    filename: draft.name,
+    kind: draft.kind,
+  }));
+  chatAttachments.clear();
+  attachNotice.value = "";
+  await send(text, usingPersonalKey.value ? "personal" : "team", attached);
   await refreshChatSettings();
 }
 async function saveVersion() {
@@ -511,6 +537,9 @@ async function saveVersion() {
           <p v-else class="text-xs text-muted-foreground">
             Inicia sesión con GitHub para usar el chat.
           </p>
+          <p v-if="attachNotice" class="text-xs text-muted-foreground">
+            {{ attachNotice }}
+          </p>
           <Alert v-if="chatError || chatSettingsError" variant="destructive">
             <AlertDescription>{{
               chatError || chatSettingsError
@@ -521,8 +550,14 @@ async function saveVersion() {
           :messages="messages"
           :thinking="thinking"
           :disabled="chatDisabled"
+          :attachments="chatAttachments.drafts.value"
+          :can-attach="chatAttachments.enabled"
+          :evidence="evidence"
           :suggestions="['Simula CyberDay para este proyecto']"
           :next-version="''"
+          @attach="attachFiles"
+          @remove-attachment="chatAttachments.remove"
+          @dismiss-evidence="dismissRequest"
           @send="sendChat"
           @reset="reset"
         >
