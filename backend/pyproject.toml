@@ -1,0 +1,13 @@
+[project]
+name = "branchpoint-backend"
+version = "0.1.0"
+description = "Backend de Branchpoint: motor de simulación y, más adelante, API y persistencia."
+requires-python = ">=3.12"
+dependencies = []  # el motor solo usa la librería estándar
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
