@@ -33,7 +33,7 @@ def without_timing(d):
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "run_schema": "branchpoint.run/v1"}
+    assert r.json() == {"status": "roto a propósito para probar el CI"}
 
 
 def test_run_cyberday_same_as_engine(client, raw):
