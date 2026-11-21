@@ -80,6 +80,18 @@ class SecondSample:
     latency: LatencyStats
     queue: dict[str, int]
     utilization: dict[str, float]
+    # req/s que pide el escenario en ese segundo (JAJ-71): constante sin perfil, la curva con perfil
+    target_rps: float | None = None
+
+
+@dataclass
+class ProfileSegment:
+    """Un tramo del perfil de tráfico en req/s (JAJ-71): de ``from_rps`` a ``to_rps`` entre ``start_s`` y ``end_s``."""
+
+    start_s: float
+    end_s: float
+    from_rps: float
+    to_rps: float
 
 
 @dataclass
@@ -170,6 +182,8 @@ class Run:
     series: list[SecondSample]
     elapsed_ms: float
     schema: str = field(default=RUN_SCHEMA)
+    # tramos del perfil de tráfico en req/s (JAJ-71); None si la tasa fue constante
+    traffic_profile: list[ProfileSegment] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
