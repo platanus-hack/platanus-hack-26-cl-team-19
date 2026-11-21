@@ -23,11 +23,12 @@ concurrency:
   cancel-in-progress: true # si llega otro push, solo se revisa el último
 
 env:
-  # Workload Identity Federation de la Claude Console (no son secretos)
-  CLAUDE_FEDERATION_RULE_ID: "" # fdrl_...
-  CLAUDE_ORGANIZATION_ID: "" # UUID de la organización
-  CLAUDE_SERVICE_ACCOUNT_ID: "" # svac_...
-  CLAUDE_WORKSPACE_ID: "" # wrkspc_...
+  # Workload Identity Federation de la Claude Console (no son secretos). Regla branchpoint-pr-review:
+  # org platanus-hack (189188603), repo platanus-hack-26-cl-team-19, solo el evento pull_request.
+  CLAUDE_FEDERATION_RULE_ID: fdrl_01DRTu4Yxe51Y7ZpfQESSZwj
+  CLAUDE_ORGANIZATION_ID: e3998e2c-da58-46d5-96a3-a10de2e4a1bf
+  CLAUDE_SERVICE_ACCOUNT_ID: svac_015vAv1EDXvYGzoVtLnkgFG5
+  CLAUDE_WORKSPACE_ID: wrkspc_01T4w1qeQpDnNwfdgxcdJ9d2
 
 jobs:
   review:
