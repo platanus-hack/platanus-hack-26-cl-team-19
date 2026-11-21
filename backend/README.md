@@ -377,8 +377,12 @@ Son el vocabulario con que el agente propone versiones (`app/agent/ops.py`, [ADR
 | `add_pooler()` | Agrega `deployment.db.pooler` en modo transacción | `pooler_connections` del plan. Solo Supabase en el MVP |
 | `add_cache(endpoint, at?, hit_ratio?, quote?)` | Las lecturas del endpoint GET pasan a `on_miss` de un paso de caché | Tiempo de Redis del catálogo. `hit_ratio` es un dato del usuario: solo con `quote`; sin él, 0 % de aciertos (el peor caso) |
 | `move_to_queue(endpoint, at, queue, workers, quote?)` | El paso de `at` pasa a `job_steps` de una cola nueva y la request solo encola | Tiempo de encolar del catálogo. `workers`: decisión de diseño, igual que `replicas` |
+| `remove_cache(endpoint)` | Inversa de `add_cache`: el paso de caché desaparece y sus lecturas de `on_miss` vuelven a su lugar | Ninguno nuevo. Una caché del repo sin `on_miss` se rechaza: no se sabe qué vuelve a la DB |
+| `remove_pooler()` | Inversa de `add_pooler`: la app vuelve al límite de conexiones del plan | `max_connections` del plan actual |
+| `move_to_sync(endpoint, step)` | Inversa de `move_to_queue`: el trabajo de la cola vuelve a la request (y su CPU a `api_cpu_ms`). Si la cola queda sin uso, se quita | Ninguno nuevo. Una cola sin `job_steps` se rechaza |
+| `scale_workers(queue, workers, quote?)` | Workers de una cola existente | Decisión de diseño, igual que `replicas` |
 
-Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de Redis y de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`.
+Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`. Una operación existe solo si el motor puede simular su efecto: para lo que no está (réplica de lectura, CDN, cambiar de base de datos), el agente tiene que decir que Branchpoint todavía no lo simula.
 
 ```bash
 # v2 propuesta: 3 réplicas + pooler, y compararla con v1 en CyberDay

@@ -38,7 +38,9 @@ INSTRUCTIONS = (
     "estimate_cost, y cada resultado trae su procedencia (cítala). Los números del usuario (tráfico, metas, "
     "réplicas) van en set_traffic, set_goals y set_deployment con su frase textual en quote; si no los dijo, "
     "pregúntaselos. Para cambiar la arquitectura usa propose_version con operaciones de ops_schema y después "
-    "compare con la versión anterior. Cita el archivo:línea del cuello de botella."
+    "compare con la versión anterior. Cita el archivo:línea del cuello de botella. Si el cambio que piden no está "
+    "en ops_schema (por ejemplo una réplica de lectura, una CDN o cambiar de base de datos), di que Branchpoint "
+    "todavía no lo simula. No lo aproximes con otra operación sin avisar."
 )
 DEFAULT_ALLOWED_HOSTS = "localhost:*,127.0.0.1:*,[::1]:*,testserver"
 
