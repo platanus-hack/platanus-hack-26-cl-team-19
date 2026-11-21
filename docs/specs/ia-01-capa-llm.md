@@ -1,29 +1,21 @@
-# IA-1: Capa LLM: imágenes, modelos configurables y loop genérico
+# IA-1: Capa LLM: imágenes y modelos configurables
 
-**Área:** backend · **Depende de:** nada · **Tamaño:** S · **Bloquea:** IA-4, IA-7
+**Área:** backend · **Depende de:** nada · **Tamaño:** S · **Bloquea:** IA-7
 
 ## Objetivo
 
-Que el mismo loop sirva para el chat y para el extractor, que acepte imágenes en los dos proveedores y que el modelo de cada proveedor se elija por configuración.
+Que los dos adaptadores acepten imágenes y que el modelo de cada proveedor se elija por configuración, por separado para el chat y para la extracción.
 
 ## Leer antes
 
 * `backend/app/agent/loop.py`: `LLM`, `Turn`, `AnthropicLLM`, `run_agent`.
 * `backend/app/agent/openai_llm.py`: `OpenAILLM`, `response_input`.
 * `backend/tests/agent/test_loop.py`: el LLM falso de los tests.
+* La PR #59 también toca `loop.py`: si no está mergeada, coordinar para no chocar.
 
 ## Cambios
 
-### 1. `run_agent` no depende del chat
-
-Hoy `run_agent` recibe `AgentTools` y arma el prompt con `system_prompt(project_id)`.
-
-* Definir en `loop.py` un `Protocol` `Toolset` con `schemas() -> list[dict]` y `call(name, args) -> Any`. `AgentTools` ya lo cumple.
-* Nueva firma: `run_agent(tools: Toolset, llm: LLM, system: str, messages, max_iterations=MAX_ITERATIONS, stop_tool: str | None = None)`.
-* `stop_tool`: si el modelo llama esa tool y el resultado no tiene `error`, el loop emite el `tool_result` y termina con `done` y `stop_reason="stop_tool"`. Lo usa el extractor con `submit_graph`.
-* `routes/chat.py` pasa `system_prompt(project_id)`.
-
-### 2. Imágenes en el historial
+### 1. Imágenes en el historial
 
 El historial interno usa bloques con la forma de Anthropic. Agregar el bloque de imagen en mensajes del usuario:
 
@@ -35,7 +27,7 @@ El historial interno usa bloques con la forma de Anthropic. Agregar el bloque de
 * `OpenAILLM.response_input`: hoy descarta todo bloque del usuario que no sea `tool_result`. Tiene que convertir un mensaje de usuario con lista de bloques en un item `{"role": "user", "content": [...]}` donde `text` pasa a `{"type": "input_text", "text": ...}` e `image` pasa a `{"type": "input_image", "image_url": "data:<media_type>;base64,<data>"}`. Verificar los nombres contra la documentación de la Responses API antes de escribirlo.
 * Tipos aceptados: `image/png`, `image/jpeg`, `image/webp`, `image/gif`.
 
-### 3. Modelo por proveedor y por propósito
+### 2. Modelo por proveedor y por propósito
 
 * Nueva función `model_for(provider, purpose)` con `purpose` en `chat` o `extract`. Lee `BRANCHPOINT_<PROVIDER>_<PURPOSE>_MODEL` (por ejemplo `BRANCHPOINT_ANTHROPIC_EXTRACT_MODEL`) y, si no está, usa el valor de hoy: `claude-opus-5-5` y `gpt-4.1-mini`.
 * `OpenAILLM.__init__(api_key, model=None)`: hoy el modelo es un atributo de clase.
@@ -44,7 +36,7 @@ El historial interno usa bloques con la forma de Anthropic. Agregar el bloque de
 
 ## Criterios de aceptación
 
-* `test_loop.py` pasa con la firma nueva. Hay un test de `stop_tool` con el LLM falso: termina en la vuelta en que se llama y no pide otra vuelta al modelo.
+* Test de `model_for`: sin variables devuelve los modelos de hoy; con `BRANCHPOINT_OPENAI_EXTRACT_MODEL` devuelve ese valor solo para OpenAI y `extract`.
 * Test de `response_input` con un mensaje de usuario con texto e imagen: produce un solo item con `input_text` e `input_image`.
 * Test: un mensaje de usuario que es solo texto (string) sigue funcionando igual en los dos adaptadores.
 * `POST /projects/{id}/chat` se comporta igual que antes (los tests de `tests/api` pasan sin cambios de contrato).

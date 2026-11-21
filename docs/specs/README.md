@@ -7,65 +7,61 @@ Evaluación de dos funcionalidades de IA y el plan para construirlas. Fecha: 202
 
 Y dos formas de pagar la IA: la key de Branchpoint, con cuota, y la key del usuario, sin tope nuestro. Proveedores: Anthropic y OpenAI.
 
+## Decisión sobre la extracción
+
+**El agente se encarga de toda la extracción.** No hay extractor por AST ni camino híbrido: un agente lee el repo con tools de solo lectura y entrega la arquitectura, para cualquier framework, FastAPI incluido.
+
+Es la decisión del ADR 0002 de la [PR #59](https://github.com/platanus-hack/platanus-hack-26-cl-team-19/pull/59) (`docs/adr/0002-la-ia-lee-la-arquitectura-del-repo.md`), que ya la implementa. Las specs de extracción de esta carpeta **parten de esa PR** y cubren lo que le falta. No agregan otro ADR.
+
+Lo que ya trae la PR #59:
+
+| Pieza | Dónde |
+|---|---|
+| Agente que lee el tarball: `list_files`, `read_file`, `grep`, `submit_architecture`, tope de 40 vueltas | `backend/app/ingest/analyzer.py` |
+| Schema estricto de la propuesta, sin campos de tiempo ni costo | `backend/app/ingest/ai_graph.py` (`ArchitectureSubmission`) |
+| Modelo armado con el catálogo; workers y pool verificados contra la línea citada | `build_from_ai`, `build_from_graph` |
+| La misma tool por MCP, para la CLI del usuario | `backend/app/agent/mcp.py` |
+| Extractor AST borrado | `backend/app/ingest/extract.py` |
+
+Lo que le falta, y cubren estas specs:
+
+| Falta | Spec |
+|---|---|
+| Tiene conflictos con `dev` y su credencial (modo demo en `llm_access.py`) no es la cuota que ya está en `dev` (PR #62) | IA-2, IA-3 |
+| Solo Anthropic en la ingesta, y el frontend no manda credencial: en producción la importación responde 422 | IA-3 |
+| El analizador del servidor no se ha probado con un LLM real | IA-0 |
+| La evidencia de endpoints y pasos no se verifica contra los archivos; no hay tope de tokens ni progreso | IA-4 |
+| Un solo repo por proyecto | IA-5, IA-10 |
+
 ## Veredicto
 
 | Parte | ¿Factible? | Por qué |
 |---|---|---|
 | Capa de proveedores (Anthropic y OpenAI) | Sí, ya existe | `app/agent/loop.py` define la interfaz `LLM`, con `AnthropicLLM` y `OpenAILLM` (80 líneas). Faltan imágenes y modelos configurables. |
-| Key de Branchpoint con cuota y key del usuario | Sí, ya existe para el chat | `app/api/routes/credentials.py`: 30 mensajes al día con la key del equipo, keys personales en Supabase Vault. Falta cubrir la extracción y poner un tope de tokens. |
+| Key de Branchpoint con cuota y key del usuario | Sí, ya existe para el chat | `app/api/routes/credentials.py`: 30 mensajes al día con la key del equipo, keys personales en Supabase Vault. Falta cubrir la extracción. |
 | Chat con imágenes y logs | Sí | Es trabajo conocido: Supabase Storage, bloques de imagen en los dos proveedores y tools nuevas. |
 | Chat que agrega y quita componentes | Sí, acotado | Cada cambio es una operación tipada nueva en `app/agent/ops.py`. Solo se puede simular lo que el motor modela. |
-| Extracción con IA, agnóstica | Factible de construir, **calidad sin medir** | El loop y las tools son simples. No sabemos cuántos endpoints encuentra, cuánto cuesta ni cuánto demora en un repo real. Por eso parte con un spike ([IA-0](ia-00-spike-extractor.md)). |
+| Extracción hecha por el agente | Construida en la PR #59, **calidad sin medir** | Hay una prueba por CLI sobre un repo Express (19 endpoints). No sabemos cuánto encuentra, cuesta ni demora el analizador del servidor en repos reales. Lo mide [IA-0](ia-00-medir-analizador.md). |
 | Varios repos en un proyecto | Diagrama sí, simulación parcial | El motor simula una API, una DB, caché y colas. Con varios servicios se simula uno y el resto queda como dependencia externa. |
 
-## Relación con la PR #59
-
-La [PR #59](https://github.com/platanus-hack/platanus-hack-26-cl-team-19/pull/59) (JAJ-85, JAJ-86), abierta y sin mergear, ya implementa la extracción con IA. Estas specs se escribieron sobre `dev`, sin esa PR. Antes de repartir las de extracción hay que conciliarlas:
-
-| Tema | PR #59 | Estas specs |
-|---|---|---|
-| Extractor AST de FastAPI | Lo borra: todo pasa por la IA | Lo conserva y la IA cubre el resto (híbrido) |
-| ADR 0002 | `0002-la-ia-lee-la-arquitectura-del-repo.md` | `0002-extraccion-con-llm-para-repos-no-fastapi.md`: mismo número, decisión distinta |
-| Agente y contrato | `analyzer.py`, `ai_graph.py`, `submit_architecture`, `build_from_graph` | IA-3 e IA-4 describen lo mismo con otros nombres |
-| Credencial de la ingesta | `llm_access.py`, modo demo con 5 análisis al día, solo Anthropic | IA-2: cuota en `credentials.py` (la de la PR #62), Anthropic y OpenAI |
-| Varios repos | No | IA-5 e IA-10 |
-| Medición con un LLM real | Una prueba por CLI sobre un repo Express | IA-0: tres repos, con umbrales |
-
-Si se mergea la PR #59: IA-3 e IA-4 quedan cubiertas, IA-0 se reduce a medir el analizador del servidor, IA-5 se reduce a varios repos y a unificar la cuota, y el ADR 0002 de esta rama se descarta o se reescribe como enmienda. Las specs del chat (IA-1, IA-6, IA-7, IA-8, IA-9) no dependen de esa decisión.
+Al no haber AST, ya no hay respaldo: si el agente falla o no hay credencial, el repo no se importa. Eso hace de IA-0 e IA-3 lo primero.
 
 ## Cómo se ve en código
 
-No hace falta LangChain. El repo ya tiene las tres piezas de un harness propio, y son pequeñas:
+No hace falta LangChain. El repo ya tiene las piezas de un harness propio, y son pequeñas:
 
 ```
 LLM (Protocol)            complete(system, messages, tools) -> Turn      app/agent/loop.py
   AnthropicLLM            SDK anthropic, Messages API
   OpenAILLM               SDK openai, Responses API                      app/agent/openai_llm.py
-run_agent(...)            loop: modelo -> tool calls -> resultados       app/agent/loop.py
-AgentTools                tools con Pydantic, schemas() y call()         app/agent/tools.py
+run_agent(...)            loop del chat: modelo -> tool calls -> resultados
+AgentTools                tools del chat con Pydantic                    app/agent/tools.py
+analyze_repo(...)         loop de la extracción, con RepoReader          app/ingest/analyzer.py (PR #59)
 ```
 
-Las dos funcionalidades son el mismo loop con otro juego de tools:
+Las dos funcionalidades son el mismo patrón con otro juego de tools: el modelo pide una tool, el backend valida los argumentos con Pydantic, la ejecuta y devuelve el resultado. Las tools "locales" son funciones Python del backend.
 
-```
-                     ┌── RepoTools (list_dir, read_file, grep, submit_graph)   -> extracción
-run_agent(tools, llm)┤
-                     └── AgentTools (+ adjuntos, + ops nuevas)                 -> chat
-```
-
-Las tools "locales" son funciones Python del backend. El modelo pide una, el backend valida los argumentos con Pydantic, la ejecuta y devuelve el resultado. Así funciona hoy el chat.
-
-**Por qué no LangChain ni LiteLLM.** Son dos proveedores y el adaptador de cada uno cabe en una pantalla. Una capa genérica esconde lo que cada API pide de vuelta en una conversación con tools (los bloques de thinking de Anthropic, los items de salida de la Responses API) y eso el repo ya lo resuelve. Agregar un tercer proveedor es escribir otra clase con `complete`.
-
-### Extracción: tres opciones
-
-| Opción | Cómo | Problema |
-|---|---|---|
-| A. Un solo prompt con el repo entero | Empaquetar los archivos y pedir JSON | El tarball admite hasta 80 MB. Un repo mediano no cabe o cuesta mucho, y no hay cómo verificar lo que devuelve. |
-| B. Agente con tools sobre el repo extraído | `list_dir`, `read_file`, `grep` y un `submit_graph` final | Más vueltas, pero lee solo lo que necesita y se puede validar. |
-| **C. Híbrido (recomendada)** | Lo determinista primero (`iac.py` para todos; `extract.py` si es FastAPI) y el agente de B completa el resto | La más barata y la que mejor conserva lo que ya funciona. |
-
-Con C, el LLM entrega **estructura con evidencia** (`archivo:línea`), no números. El backend verifica que cada archivo y línea existan y arma el modelo con el catálogo, como hoy. La regla "el LLM nunca inventa números" de ADR 0001 se mantiene. Lo que cambia es que ahora el LLM sí extrae la estructura, que ADR 0001 había descartado: por eso hay un [ADR 0002](../adr/0002-extraccion-con-llm-para-repos-no-fastapi.md).
+**Por qué no LangChain ni LiteLLM.** Son dos proveedores y el adaptador de cada uno cabe en una pantalla. Una capa genérica esconde lo que cada API pide de vuelta en una conversación con tools (los bloques de thinking de Anthropic, los items de salida de la Responses API) y eso el repo ya lo resuelve. Como `analyze_repo` recibe cualquier `LLM`, soportar OpenAI en la extracción es pasarle `OpenAILLM`.
 
 ### Chat: qué falta
 
@@ -82,37 +78,36 @@ Cada spec es una PR. Las de la ola 1 no dependen entre sí.
 
 | ID | Spec | Área | Depende de | Tamaño |
 |---|---|---|---|---|
-| IA-0 | [Spike del extractor](ia-00-spike-extractor.md) | backend | — | S |
-| IA-1 | [Capa LLM: imágenes, modelos y loop genérico](ia-01-capa-llm.md) | backend | — | S |
+| IA-0 | [Medir el analizador con LLM reales](ia-00-medir-analizador.md) | backend | rama de la PR #59 | S |
+| IA-1 | [Capa LLM: imágenes y modelos configurables](ia-01-capa-llm.md) | backend | — | S |
 | IA-2 | [Cuota de la key de Branchpoint](ia-02-cuota-y-keys.md) | backend, DB | — | S |
-| IA-3 | [Contrato `graph/v1` y validador](ia-03-grafo-v1.md) | backend | — | M |
 | IA-6 | [Adjuntos en Supabase Storage](ia-06-adjuntos-storage.md) | backend, DB | — | M |
 | IA-8 | [Operaciones para agregar y quitar componentes](ia-08-ops-agregar-quitar.md) | backend | — | M |
-| IA-4 | [Extractor agente](ia-04-extractor-agente.md) | backend | IA-0, IA-1, IA-3 | M |
-| IA-5 | [Ingesta con IA y varios repos](ia-05-ingesta-multirepo.md) | backend, DB | IA-2, IA-3, IA-4 | L |
+| IA-3 | [Llevar el analizador a `dev` con la credencial unificada](ia-03-analizador-en-dev.md) | backend, frontend | PR #59, IA-2 | M |
 | IA-7 | [Chat con adjuntos y evidencia](ia-07-chat-evidencia.md) | backend | IA-1, IA-6 | M |
 | IA-9 | [Frontend: adjuntos y tarjeta de evidencia](ia-09-frontend-chat.md) | frontend | contrato de IA-6 e IA-7 | M |
-| IA-10 | [Frontend: varios repos y diagrama de componentes](ia-10-frontend-multirepo.md) | frontend | contrato de IA-3 e IA-5 | M |
+| IA-4 | [Analizador: evidencia verificada, presupuesto y progreso](ia-04-analizador-robustez.md) | backend | IA-3, resultado de IA-0 | M |
+| IA-5 | [Varios repos por proyecto](ia-05-ingesta-multirepo.md) | backend, DB | IA-3 | L |
+| IA-10 | [Frontend: varios repos en el proyecto y el diagrama](ia-10-frontend-multirepo.md) | frontend | contrato de IA-5 | M |
 
 ```
-Ola 1 (paralelo):  IA-0   IA-1   IA-2   IA-3   IA-6   IA-8
-Ola 2:             IA-4 (0,1,3)         IA-7 (1,6)     IA-9 (contratos)
-Ola 3:             IA-5 (2,3,4)         IA-10 (contratos)
+Ola 1 (paralelo):  IA-0   IA-1   IA-2   IA-6   IA-8
+Ola 2:             IA-3 (#59, 2)        IA-7 (1,6)     IA-9 (contratos)
+Ola 3:             IA-4 (3, 0)          IA-5 (3)       IA-10 (contrato de 5)
 ```
 
-Reparto sugerido para cuatro personas: una toma la extracción (IA-0, IA-3, IA-4, IA-5), otra el chat de backend (IA-1, IA-6, IA-7), otra el frontend (IA-9, IA-10) y otra cuota y operaciones (IA-2, IA-8).
+Reparto sugerido para cuatro personas: quien lleva la PR #59 sigue con la extracción (IA-3, IA-4, IA-5), otra persona el chat de backend (IA-1, IA-6, IA-7), otra el frontend (IA-9, IA-10) y otra medición, cuota y operaciones (IA-0, IA-2, IA-8).
 
 ## Decisiones que tiene que tomar el equipo
 
-1. **Aceptar el ADR 0002.** Sin él, IA-4 e IA-5 contradicen el ADR 0001.
-2. **Umbral del spike.** IA-0 propone: al menos 80 % de los endpoints, menos de 3 minutos y menos de US$ 1 por repo. Si no se cumple, la extracción con IA queda solo para el diagrama (componentes y conexiones), sin simular.
-3. **Cuota de extracción con la key de Branchpoint.** IA-2 propone 2 al día por usuario.
-4. **Key de OpenAI de Branchpoint.** Hoy la key del equipo es solo de Anthropic. IA-2 la deja opcional con `OPENAI_API_KEY`.
-5. **Login en producción.** Producción corre con `BRANCHPOINT_AUTH=off`. La cuota y los adjuntos necesitan un usuario: sin login solo funciona la key en el header y no hay adjuntos.
+1. **Umbral de IA-0.** Se propone: al menos 80 % de los endpoints, ninguno inventado, menos de 3 minutos y menos de US$ 1 por repo. Si no se cumple, se ajusta el prompt y los límites (IA-4) antes de abrir la importación al público. No hay camino alternativo.
+2. **Cuota de extracción con la key de Branchpoint.** IA-2 propone 5 repos analizados al día por usuario, el mismo número del modo demo de la PR #59.
+3. **Key de OpenAI de Branchpoint.** Hoy la key del equipo es solo de Anthropic. IA-2 la deja opcional con `OPENAI_API_KEY`.
+4. **Login en producción.** Producción corre con `BRANCHPOINT_AUTH=off`. La cuota y los adjuntos necesitan un usuario: sin login solo funciona la key en el header y no hay adjuntos.
 
 ## Fuera de alcance
 
 * Simular varios servicios a la vez. Es un cambio del motor (`app/engine`).
 * Guardar el historial del chat en `chat_sessions`. Las tablas existen y nadie las usa.
 * Otros proveedores (Gemini, modelos locales).
-* El modo MCP: las tools nuevas del chat quedan disponibles ahí sin trabajo extra, salvo las de adjuntos, que dependen de una sesión del editor.
+* El modo MCP: `submit_architecture` ya existe ahí. Las tools de adjuntos dependen de una sesión del editor y no se publican por MCP.
