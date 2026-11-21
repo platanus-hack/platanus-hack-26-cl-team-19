@@ -662,44 +662,50 @@ async function saveVersion() {
     </template>
 
     <template #metrics>
-      <Tabs v-model="panel" class="gap-0">
-        <TabsList variant="line" aria-label="Panel de análisis" class="mx-4">
+      <Tabs v-model="panel" class="min-h-0 flex-1 gap-0">
+        <TabsList
+          variant="line"
+          aria-label="Panel de análisis"
+          class="mx-4 shrink-0"
+        >
           <TabsTrigger value="simulation">Simulación</TabsTrigger>
           <TabsTrigger value="costs">Costos</TabsTrigger>
         </TabsList>
-        <TabsContent value="simulation" class="flex flex-col gap-3 p-4">
-          <SimulationPanel
-            v-if="playback"
-            v-model:minute="cursor"
-            v-model:playing="playing"
-            :frames="playback.frames"
-            :phases="playback.phases"
-            :provenance="provenance"
-            time-unit="second"
-          />
-          <p v-else class="text-sm text-muted-foreground">
-            Elige un escenario y pulsa Simular para reproducir el resultado.
-          </p>
-          <ul
-            v-if="run?.warnings.length"
-            class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
-          >
-            <li v-for="warning in run.warnings" :key="warning">
-              {{ warning }}
-            </li>
-          </ul>
-          <div
-            v-if="results"
-            class="flex flex-col gap-4 border-t border-border pt-4"
-          >
-            <EditorVersionCosts :costs="results.cost" />
-            <EditorFailureCost
-              :failure="results.failure"
-              :missing="results.failure_missing"
+        <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
+          <div class="flex flex-col gap-3">
+            <SimulationPanel
+              v-if="playback"
+              v-model:minute="cursor"
+              v-model:playing="playing"
+              :frames="playback.frames"
+              :phases="playback.phases"
+              :provenance="provenance"
+              time-unit="second"
             />
+            <p v-else class="text-sm text-muted-foreground">
+              Elige un escenario y pulsa Simular para reproducir el resultado.
+            </p>
+            <ul
+              v-if="run?.warnings.length"
+              class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+            >
+              <li v-for="warning in run.warnings" :key="warning">
+                {{ warning }}
+              </li>
+            </ul>
+            <div
+              v-if="results"
+              class="flex flex-col gap-4 border-t border-border pt-4"
+            >
+              <EditorVersionCosts :costs="results.cost" />
+              <EditorFailureCost
+                :failure="results.failure"
+                :missing="results.failure_missing"
+              />
+            </div>
           </div>
         </TabsContent>
-        <TabsContent value="costs" class="p-4">
+        <TabsContent value="costs" class="min-h-0 overflow-y-auto p-4">
           <EditorVersionCosts v-if="displayedCosts" :costs="displayedCosts" />
           <div v-else-if="costsError" class="flex flex-col items-start gap-3">
             <p class="text-sm text-muted-foreground">{{ costsError }}</p>

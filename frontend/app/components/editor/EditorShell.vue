@@ -93,7 +93,7 @@ withDefaults(
           <template v-if="$slots.metrics">
             <Separator />
             <div
-              class="@container/canvas min-h-0 @3xl:h-[40%] @3xl:shrink-0 @3xl:overflow-y-auto"
+              class="@container/canvas flex min-h-0 flex-col @3xl:h-[40%] @3xl:shrink-0"
             >
               <slot name="metrics" />
             </div>
