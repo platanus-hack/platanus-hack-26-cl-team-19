@@ -194,11 +194,13 @@ Además:
 Por eso el `Run` trae `saturation`:
 - `saturated`: se cumplen dos condiciones.
   1. **Muchas requests sin respuesta:** al menos 5 % (`UNANSWERED_SATURATED`).
-  2. **Una espera que crece o que llegó al timeout:** la espera que implica la fila (Ley de Little: fila / tasa de llegada) es al final al menos 1,5 veces la de la mitad, más 0,25 s (`WAIT_GROWTH` y `WAIT_GROWTH_MIN_S`). También cuenta si llegó al 80 % del timeout del cliente (`TIMEOUT_SHARE`). En simulaciones de más de ~2× el timeout, la espera deja de crecer porque las requests que vencen pasan a error, pero el sistema sigue colapsado.
+  2. **Una espera que crece o que llegó al timeout:** la espera que implica la fila (Ley de Little: fila / tasa de llegada) es al final al menos 1,5 veces la de la mitad, más 0,25 s (`WAIT_GROWTH` y `WAIT_GROWTH_MIN_S`). También cuenta si llegó al 80 % del timeout del cliente (`TIMEOUT_SHARE`) **y ya hay timeouts**: un endpoint sano que tarda 25 s deja una espera de 25 s, pero sus requests no vencen. En simulaciones de más de ~2× el timeout, la espera deja de crecer porque las requests que vencen pasan a error, pero el sistema sigue colapsado.
 
   La primera condición sola no basta. Sin saturación, la fracción en curso es latencia / duración: un endpoint sano de 3 s (una llamada a un LLM) deja 10 % en curso en 30 s. Pero en un sistema sano la espera se estabiliza en la latencia, y en uno saturado crece sin parar. La tasa de llegada se mide en una ventana de 3 s, así que un perfil que sube no se confunde con una fila que crece. Con menos de 4 s simulados no se evalúa.
 - `wait_mid_s` y `wait_end_s`: la espera a la mitad y al final.
-- `label` (`SUPUESTO`) y `source`: la procedencia de `saturated`, armada desde las constantes del motor. El editor puede mostrarla junto al aviso. El agente la recibe anidada en `saturated_provenance`, para que no pise la procedencia de otros números.
+- `label` (`SUPUESTO`) y `source`: la procedencia de `saturated`, armada desde las constantes del motor. El editor puede mostrarla junto al aviso. El agente la recibe de dos formas:
+  - en `simulate` y `compare`, dentro del bloque `saturation`, con `label` y `source` (son de `saturated`; los conteos salen del motor);
+  - en las metas (`goals.errors` y `goals.p95`), anidada en `saturated_provenance`, para que no pise el `label` y el `source` del piso del 1 %.
 - `unanswered` y `unanswered_rate`: cuántas quedaron sin respuesta.
 - `error_rate_if_unanswered_fail`: la tasa de error si esas requests terminaran fallando. Es el techo de `error_rate`.
 - `offered_rps`: las req/s que llegaron (con perfil, el promedio).
