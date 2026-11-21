@@ -126,6 +126,7 @@ export function createEditorApi(baseURL: string) {
   return {
     listModels: () => fetchApi<ModelSummary[]>("/models"),
     createProject: (sample: string) => post<Project>("/projects", { sample }),
+    getProject: (id: string) => fetchApi<Project>(projectPath(id)),
     getVersion: (id: string, version: number) =>
       fetchApi<VersionDetail>(versionPath(id, version)),
     getGraph: (model: ArchitectureModel) => post<Graph>("/graph", { model }),

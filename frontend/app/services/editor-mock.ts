@@ -139,6 +139,12 @@ export function createMockEditorApi(): ReturnType<typeof createEditorApi> {
 
   return {
     listModels: () => Promise.resolve([sample]),
+    getProject: (id: string) =>
+      Promise.resolve<Project>({
+        id,
+        name: sample.name,
+        versions: getVersions(id),
+      }),
     createProject: () => {
       const id = crypto.randomUUID();
       const v1: VersionDetail = {
