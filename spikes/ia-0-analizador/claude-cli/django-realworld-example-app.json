@@ -1,0 +1,474 @@
+{
+ "framework": "django",
+ "language": "python",
+ "endpoints": [
+  {
+   "method": "GET",
+   "path": "/api/user",
+   "handler": "UserRetrieveUpdateAPIView.retrieve",
+   "file": "conduit/apps/authentication/urls.py",
+   "line": 8,
+   "why": "url('^user/?$') sobre UserRetrieveUpdateAPIView",
+   "is_async": false,
+   "effects": []
+  },
+  {
+   "method": "PUT",
+   "path": "/api/user",
+   "handler": "UserRetrieveUpdateAPIView.update",
+   "file": "conduit/apps/authentication/urls.py",
+   "line": 8,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "serializer.save()",
+     "file": "conduit/apps/authentication/views.py",
+     "line": 82,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/user",
+   "handler": "UserRetrieveUpdateAPIView.update",
+   "file": "conduit/apps/authentication/urls.py",
+   "line": 8,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "serializer.save()",
+     "file": "conduit/apps/authentication/views.py",
+     "line": 82,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/users",
+   "handler": "RegistrationAPIView.post",
+   "file": "conduit/apps/authentication/urls.py",
+   "line": 9,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "serializer.save()",
+     "file": "conduit/apps/authentication/views.py",
+     "line": 27,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/users/login",
+   "handler": "LoginAPIView.post",
+   "file": "conduit/apps/authentication/urls.py",
+   "line": 10,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "authenticate(username=email)",
+     "file": "conduit/apps/authentication/serializers.py",
+     "line": 69,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/profiles/{username}",
+   "handler": "ProfileRetrieveAPIView.retrieve",
+   "file": "conduit/apps/profiles/urls.py",
+   "line": 6,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Profile",
+     "detail": "Profile.objects.get(user__username)",
+     "file": "conduit/apps/profiles/views.py",
+     "line": 23,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/profiles/{username}/follow",
+   "handler": "ProfileFollowAPIView.post",
+   "file": "conduit/apps/profiles/urls.py",
+   "line": 7,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Profile",
+     "detail": "Profile.objects.get(user__username)",
+     "file": "conduit/apps/profiles/views.py",
+     "line": 59,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Profile",
+     "detail": "self.follows.add(profile)",
+     "file": "conduit/apps/profiles/models.py",
+     "line": 46,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/profiles/{username}/follow",
+   "handler": "ProfileFollowAPIView.delete",
+   "file": "conduit/apps/profiles/urls.py",
+   "line": 7,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Profile",
+     "detail": "Profile.objects.get(user__username)",
+     "file": "conduit/apps/profiles/views.py",
+     "line": 43,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Profile",
+     "detail": "self.follows.remove(profile)",
+     "file": "conduit/apps/profiles/models.py",
+     "line": 50,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles",
+   "handler": "ArticleViewSet.list",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 11,
+   "why": "router.register('articles')",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "count",
+     "entity": "Article",
+     "detail": "paginate_queryset (COUNT)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 61,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Article",
+     "detail": "paginate_queryset(get_queryset())",
+     "file": "conduit/apps/articles/views.py",
+     "line": 61,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles",
+   "handler": "ArticleViewSet.create",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 11,
+   "why": "router.register('articles')",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "serializer.save()",
+     "file": "conduit/apps/articles/views.py",
+     "line": 55,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/{slug}",
+   "handler": "ArticleViewSet.retrieve",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 11,
+   "why": "router.register('articles')",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "queryset.get(slug=slug)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 75,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/api/articles/{slug}",
+   "handler": "ArticleViewSet.update",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 11,
+   "why": "router.register('articles'): update",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "queryset.get(slug=slug)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 91,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "serializer.save()",
+     "file": "conduit/apps/articles/views.py",
+     "line": 104,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/feed",
+   "handler": "ArticlesFeedAPIView.list",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 16,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Article",
+     "detail": "paginate_queryset del feed",
+     "file": "conduit/apps/articles/views.py",
+     "line": 224,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles/{article_slug}/favorite",
+   "handler": "ArticlesFavoriteAPIView.post",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 18,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "Article.objects.get(slug)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 185,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "self.favorites.add(article)",
+     "file": "conduit/apps/profiles/models.py",
+     "line": 62,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{article_slug}/favorite",
+   "handler": "ArticlesFavoriteAPIView.delete",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 18,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "Article.objects.get(slug)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 170,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "self.favorites.remove(article)",
+     "file": "conduit/apps/profiles/models.py",
+     "line": 66,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/{article_slug}/comments",
+   "handler": "CommentsListCreateAPIView.list",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 21,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Comment",
+     "detail": "queryset.filter(article__slug)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 126,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles/{article_slug}/comments",
+   "handler": "CommentsListCreateAPIView.create",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 21,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "Article.objects.get(slug)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 133,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Comment",
+     "detail": "serializer.save()",
+     "file": "conduit/apps/articles/views.py",
+     "line": 139,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{article_slug}/comments/{comment_pk}",
+   "handler": "CommentsDestroyAPIView.destroy",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 24,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "Comment",
+     "detail": "Comment.objects.get(pk)",
+     "file": "conduit/apps/articles/views.py",
+     "line": 151,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Comment",
+     "detail": "comment.delete()",
+     "file": "conduit/apps/articles/views.py",
+     "line": 155,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/tags",
+   "handler": "TagListAPIView.list",
+   "file": "conduit/apps/articles/urls.py",
+   "line": 27,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "scan",
+     "entity": "Tag",
+     "detail": "Tag.objects.all()",
+     "file": "conduit/apps/articles/views.py",
+     "line": 203,
+     "why": "consulta del handler"
+    }
+   ]
+  }
+ ]
+}
