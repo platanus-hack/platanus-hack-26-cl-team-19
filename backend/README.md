@@ -187,6 +187,19 @@ Además:
 - **La v2 (API ×3 y pooler)** aguanta la subida, pero a los 2 minutos se satura la DB y los errores llegan al 60 %.
 - **La v1 llega al 81 %** de errores.
 
+### Cuando el sistema no alcanza a atender (JAJ-89)
+
+`error_rate` solo cuenta las requests que terminaron, sea bien o con error. Una request que sigue en fila cuando se acaba la simulación, y todavía no llega al timeout del cliente, no es ni ok ni error: queda en `in_flight`. En un sistema saturado la fila crece sin parar, así que un "0 % de errores" puede esconder un colapso. Con branchpoint-shop-demo a 400 req/s y 60 s, el `Run` daba 0 % de errores con un p95 de 22 s.
+
+Por eso el `Run` trae `saturation`:
+- `saturated`: más del 5 % de las requests quedaron sin respuesta (`UNANSWERED_SATURATED`). Sin saturación, las que quedan en curso son tasa × latencia (a 100 req/s y 200 ms, 0,3 %), así que el 5 % solo aparece cuando la fila crece sin parar.
+- `unanswered` y `unanswered_rate`: cuántas quedaron sin respuesta.
+- `error_rate_if_unanswered_fail`: la tasa de error si esas requests terminaran fallando. Es el techo de `error_rate`.
+- `offered_rps`: las req/s que llegaron (con perfil, el promedio).
+- `message`: el aviso en español. También va primero en `warnings`, y dice dónde estaba la fila.
+
+En `compare`, `summary` agrega "Ojo: v1 no alcanza a atender este tráfico (v1 deja 39 % de las requests sin respuesta al terminar): su tasa de error es un piso". Las metas del agente (`simulate` y `compare` de `app/agent/tools.py`) usan ese techo, así que una versión saturada nunca "cumple" por su 0 % de errores.
+
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
 ## Cómo usarlo

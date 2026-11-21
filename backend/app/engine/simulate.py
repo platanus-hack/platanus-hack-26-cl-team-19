@@ -76,6 +76,7 @@ from app.models.run import (
     QueueStats,
     ResourceStats,
     Run,
+    Saturation,
     SecondSample,
 )
 from app.models.traffic import TrafficProfile
@@ -87,6 +88,10 @@ RESOURCE_LABELS = {
     "db_cpu": "CPU de la DB",
 }
 SATURATION_WARNING = 0.9  # JAJ-44: sobre esto, latencia y errores se muestran como piso
+# JAJ-89: sobre esta fracción de requests sin respuesta al terminar, el sistema no alcanza a atender.
+# Sin saturación, las que quedan en curso son tasa × latencia (a 100 req/s y 200 ms, 20 de 6.000:
+# 0,3 %), así que 5 % solo aparece cuando la fila crece sin parar.
+UNANSWERED_SATURATED = 0.05
 BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
 CPU_CREDITS = ("sustained", "burst")
@@ -491,6 +496,10 @@ def _build_run(
     errors = sum(rec.error_types.values())
     all_latencies = [ms for second in rec.latencies_ms for ms in second]
 
+    requests = sum(rec.arrivals)
+    saturation = _saturation(requests, errors, still_running, duration_s, resource_stats)
+    if saturation.message:
+        warnings.insert(0, saturation.message)  # primero: es lo que cambia cómo leer el resto
     for rs in resource_stats:
         if rs.utilization >= SATURATION_WARNING:
             warnings.append(
@@ -505,7 +514,7 @@ def _build_run(
         seed=seed,
         duration_s=duration_s,
         arrivals=arrivals,
-        requests=sum(rec.arrivals),
+        requests=requests,
         ok=ok,
         errors=dict(rec.error_types),
         in_flight=still_running,
@@ -544,6 +553,38 @@ def _build_run(
         ],
         traffic_profile=_profile_segments(profile, rate),
         elapsed_ms=round((time.perf_counter() - wall_start) * 1000, 1),
+        saturation=saturation,
+    )
+
+
+def _saturation(
+    requests: int, errors: int, unanswered: int, duration_s: float, stats: list[ResourceStats]
+) -> Saturation:
+    """Si quedaron muchas requests sin respuesta al terminar, el sistema no alcanzó a atender (JAJ-89).
+
+    ``error_rate`` no las cuenta (no son ok ni error todavía), así que un sistema colapsado puede dar
+    "0 % de errores" con un p95 de decenas de segundos. El mensaje dice cuántas quedaron, dónde se
+    formó la fila y cuál sería la tasa de error si terminaran fallando.
+    """
+    rate = unanswered / requests if requests else 0.0
+    worst = (errors + unanswered) / requests if requests else 0.0
+    saturated = rate >= UNANSWERED_SATURATED
+    message = None
+    if saturated:
+        queued = max(stats, key=lambda s: (s.final_queue, s.utilization))
+        where = f" La fila estaba en {queued.label} ({queued.final_queue} esperando)." if queued.final_queue else ""
+        message = (
+            f"El sistema no alcanza a atender este tráfico: {unanswered} de {requests} requests ({rate:.0%}) "
+            f"seguían sin respuesta al terminar y no cuentan como error.{where} Si terminaran fallando, la tasa "
+            f"de error sería {worst:.0%}. Simula más tiempo para ver los timeouts, o toma la tasa de error como piso."
+        )
+    return Saturation(
+        saturated=saturated,
+        offered_rps=round(requests / duration_s, 3),
+        unanswered=unanswered,
+        unanswered_rate=round(rate, 4),
+        error_rate_if_unanswered_fail=round(worst, 4),
+        message=message,
     )
 
 

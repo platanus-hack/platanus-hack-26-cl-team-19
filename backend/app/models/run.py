@@ -158,6 +158,25 @@ class Bottleneck:
 
 
 @dataclass
+class Saturation:
+    """¿El sistema alcanzó a atender el tráfico? (JAJ-89)
+
+    ``error_rate`` solo cuenta las requests que terminaron (ok + errores). Una request que sigue en fila
+    cuando se acaba la simulación, y todavía no llega al timeout del cliente, no es ok ni error: queda
+    en ``in_flight``. Si el sistema está saturado, la fila crece sin parar y esas requests pueden ser
+    muchas, así que un "0 % de errores" puede esconder un colapso. Este bloque lo hace explícito.
+    """
+
+    saturated: bool  # unanswered_rate sobre UNANSWERED_SATURATED: el sistema no alcanza a atender
+    offered_rps: float  # req/s que llegaron (requests / duración; con perfil, el promedio)
+    unanswered: int  # requests sin respuesta al terminar (= Run.in_flight)
+    unanswered_rate: float  # unanswered / requests (0 a 1)
+    # tasa de error si las requests sin respuesta terminaran fallando: el techo de error_rate
+    error_rate_if_unanswered_fail: float
+    message: str | None  # en español, para el editor; None si no está saturado
+
+
+@dataclass
 class Run:
     model: str
     scenario: str
@@ -184,6 +203,8 @@ class Run:
     schema: str = field(default=RUN_SCHEMA)
     # tramos del perfil de tráfico en req/s (JAJ-71); None si la tasa fue constante
     traffic_profile: list[ProfileSegment] | None = None
+    # JAJ-89: si quedaron requests sin respuesta al terminar (el motor siempre lo llena)
+    saturation: Saturation | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

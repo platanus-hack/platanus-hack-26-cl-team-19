@@ -269,16 +269,31 @@ def compare(
         cost_delta=delta,
         failure_a=fa,
         failure_b=fb,
-        summary=compare_summary(va.number, vb.number, delta, fa, fb),
+        summary=compare_summary(va.number, vb.number, delta, fa, fb, run_a, run_b),
     )
 
 
-def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
+def compare_summary(
+    a: int,
+    b: int,
+    cost: CostDelta,
+    fa: FailureCost | None,
+    fb: FailureCost | None,
+    run_a: Run | None = None,
+    run_b: Run | None = None,
+) -> str:
     """'v2 cuesta +US$57,66/mes y evita entre US$X y US$Y por hora en ventas en juego' (JAJ-74).
 
     La diferencia se calcula con cada cota (piso y techo) y se ordena de menor a mayor: cuando las dos
     versiones fallan mucho, sus techos se acercan a "si fallara todo" y esa diferencia queda cerca de 0.
+
+    Con los ``Run``, agrega si alguna versión no alcanza a atender el tráfico (JAJ-89): su tasa de
+    error no cuenta las requests que siguen en fila, y sin este aviso una versión colapsada se lee sana.
     """
+    return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b)
+
+
+def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
     sign = "+" if cost.diff >= 0 else "−"
     text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
     if fa is None or fb is None:
@@ -292,6 +307,19 @@ def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb:
     if hi <= 0:
         return text + f" y suma entre US${-hi:,.0f} y US${-lo:,.0f} por hora en ventas en juego{floor}."
     return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
+
+
+def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -> str:
+    saturated = [
+        (n, r.saturation)
+        for n, r in ((a, run_a), (b, run_b))
+        if r is not None and r.saturation and r.saturation.saturated
+    ]
+    if not saturated:
+        return ""
+    parts = " y ".join(f"v{n} deja {s.unanswered_rate:.0%} de las requests sin respuesta" for n, s in saturated)
+    who = "Ninguna versión alcanza" if len(saturated) == 2 else f"v{saturated[0][0]} no alcanza"
+    return f" Ojo: {who} a atender este tráfico ({parts} al terminar): su tasa de error es un piso."
 
 
 @router.get(

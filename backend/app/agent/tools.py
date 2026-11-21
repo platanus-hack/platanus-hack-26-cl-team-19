@@ -24,7 +24,7 @@ import re
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from typing import Any, Literal
 
@@ -224,17 +224,24 @@ def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[st
     if goals == ProjectGoals():
         return None
     out: dict[str, Any] = {}
+    saturated = run.saturation is not None and run.saturation.saturated
+    # JAJ-89: con el sistema saturado, error_rate no cuenta las requests que siguen en fila; para las
+    # metas se usa el techo (si esas requests terminaran fallando), así una versión colapsada no cumple.
+    error_rate = run.saturation.error_rate_if_unanswered_fail if saturated else run.error_rate
     if goals.slo_p95_ms is not None:
         p95 = run.latency.p95_ms
-        out["p95"] = {"goal_ms": goals.slo_p95_ms, "ok": p95 is not None and p95 <= goals.slo_p95_ms}
+        out["p95"] = {
+            "goal_ms": goals.slo_p95_ms,
+            "ok": p95 is not None and p95 <= goals.slo_p95_ms and not saturated,
+        }
     if goals.slo_error_rate is not None:
-        out["errors"] = {"goal": goals.slo_error_rate, "ok": run.error_rate <= goals.slo_error_rate}
+        out["errors"] = {"goal": goals.slo_error_rate, "ok": error_rate <= goals.slo_error_rate}
     else:
         # El p95 solo mide las requests exitosas: una versión que rechaza casi todo puede tener un p95
         # bajísimo. Sin meta de errores del usuario, se exige un piso SUPUESTO y se dice.
         out["errors"] = {
             "goal": DEFAULT_ERROR_RATE,
-            "ok": run.error_rate <= DEFAULT_ERROR_RATE,
+            "ok": error_rate <= DEFAULT_ERROR_RATE,
             "label": "SUPUESTO",
             "source": f"Sin meta de errores del usuario se usa {DEFAULT_ERROR_RATE:.0%} como piso: el p95 solo mide "
             "las requests exitosas. Pregúntale al usuario cuántos errores acepta (set_goals slo_error_rate).",
@@ -254,6 +261,8 @@ def _run_summary(run: Run, model: dict[str, Any]) -> dict[str, Any]:
         "error_rate": round(run.error_rate, 4),
         "errors": run.errors,
         "throughput_rps": round(run.throughput_rps, 1),
+        # JAJ-89: si quedaron requests sin respuesta, error_rate es un piso; el agente debe decirlo
+        "saturation": asdict(run.saturation) if run.saturation is not None else None,
         "bottleneck": {
             "resource": b.resource,
             "utilization": round(b.utilization, 3),
@@ -530,7 +539,7 @@ class AgentTools:
                 "usd_month": cdelta.diff,
                 "bottleneck_changed": d.bottleneck_changed,
             },
-            "summary": compare_summary(va.number, vb.number, cdelta, fa, fb),
+            "summary": compare_summary(va.number, vb.number, cdelta, fa, fb, run_a, run_b),
         }
 
     # -- escribir --
