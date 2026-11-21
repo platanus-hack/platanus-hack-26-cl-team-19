@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.errors import INVALID_MODEL, INVALID_PARAMETERS, RUN_TOO_LARGE, UNKNOWN_SCENARIO, ApiError
-from app.api.schemas import MAX_SIMULATED_REQUESTS, RunRequest
+from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams, RunRequest
 from app.engine import simulate
 from app.models import load_model
 from app.models.architecture import ArchitectureModel
@@ -22,7 +22,12 @@ router = APIRouter(tags=["runs"])
 # bloquea las demás requests mientras simula.
 @router.post("/runs", response_model=Run, summary="Simular un modelo bajo un escenario")
 def create_run(req: RunRequest) -> Run:
-    model = _load(req.model)
+    return run_model(req.model, req)
+
+
+def run_model(raw: dict, req: RunParams) -> Run:
+    """Valida el modelo y los parámetros y simula. Lo usan ``POST /runs`` y las rutas de proyectos."""
+    model = load_or_422(raw)
     if req.rps is None and req.scenario not in model.scenarios:
         available = sorted(model.scenarios)
         raise ApiError(
@@ -56,7 +61,7 @@ def create_run(req: RunRequest) -> Run:
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from e
 
 
-def _load(raw: dict) -> ArchitectureModel:
+def load_or_422(raw: dict) -> ArchitectureModel:
     try:
         return load_model(raw)
     except KeyError as e:

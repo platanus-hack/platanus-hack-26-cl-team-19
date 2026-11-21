@@ -16,12 +16,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import install_error_handlers
-from app.api.routes import health, runs
+from app.api.routes import health, models, projects, runs
+from app.api.store import InMemoryProjectStore, ProjectStore
 
 DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 
 
-def create_app(cors_origins: list[str] | None = None) -> FastAPI:
+def create_app(cors_origins: list[str] | None = None, store: ProjectStore | None = None) -> FastAPI:
     if cors_origins is None:
         env = os.environ.get("BRANCHPOINT_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
         cors_origins = [o.strip() for o in env.split(",") if o.strip()]
@@ -37,8 +38,12 @@ def create_app(cors_origins: list[str] | None = None) -> FastAPI:
         allow_headers=["Content-Type"],
     )
     install_error_handlers(app)
+    # proyectos y versiones en memoria hasta que exista la persistencia (JAJ-17)
+    app.state.store = store if store is not None else InMemoryProjectStore()
     app.include_router(health.router)
     app.include_router(runs.router)
+    app.include_router(models.router)
+    app.include_router(projects.router)
     return app
 
 
