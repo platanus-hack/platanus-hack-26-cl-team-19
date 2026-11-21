@@ -62,7 +62,8 @@ def test_tools_list_and_instructions(open_api):
     )
     assert "Nunca inventes" in init.json()["result"]["instructions"]
     names = [t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]]
-    assert len(names) == 12 and {"simulate", "propose_version", "set_traffic", "set_goals"} <= set(names)
+    assert len(names) == 13 and {"simulate", "propose_version", "set_goals", "submit_architecture"} <= set(names)
+    assert "submit_architecture" in init.json()["result"]["instructions"]
 
 
 def test_simulate_and_propose_by_mcp(open_api):
@@ -98,3 +99,17 @@ def test_login_isolates_users():
         assert [p["name"] for p in tool(client, "list_projects", {}, bob)["projects"]] == ["de bob"]
         assert "No existe el proyecto" in tool(client, "simulate", {"project_id": alice_project.id}, bob)["error"]
         assert client.get("/health").status_code == 200  # el resto de la API no pasa por la puerta de MCP
+
+
+def test_submit_architecture_by_mcp(open_api):
+    from tests.ingest.test_ai_graph import EXPRESS
+
+    client, _ = open_api
+    schema = next(t for t in rpc(client, "tools/list").json()["result"]["tools"] if t["name"] == "submit_architecture")
+    assert "endpoints" in schema["inputSchema"]["required"]  # la CLI ve la forma de cada endpoint y paso
+    out = tool(client, "submit_architecture", EXPRESS)
+    assert out["version"] == 1 and out["components_from_ai"] == 3, out
+    sim = tool(client, "simulate", {"project_id": out["project_id"], "scenario": "pico_normal"})
+    assert "error" not in sim, sim
+    bad = {**EXPRESS, "endpoints": [{**EXPRESS["endpoints"][0], "latency_ms": 40}]}
+    assert "Extra inputs" in tool(client, "submit_architecture", bad)["error"]
