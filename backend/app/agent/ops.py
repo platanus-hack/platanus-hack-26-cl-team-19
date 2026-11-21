@@ -90,7 +90,48 @@ class MoveToQueue(_Op):
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió los workers.")
 
 
-Op = Annotated[ScaleApi | ChangeDbPlan | AddPooler | AddCache | MoveToQueue, Field(discriminator="op")]
+class RemoveCache(_Op):
+    """Quita la caché de un endpoint: las lecturas que estaban en on_miss vuelven a hacerse siempre."""
+
+    op: Literal["remove_cache"]
+    endpoint: str = Field(description="Id del endpoint con caché, por ejemplo 'GET /items/'.")
+
+
+class RemovePooler(_Op):
+    """Quita el pooler: la app vuelve a abrir conexiones directo contra Postgres, con el límite del plan."""
+
+    op: Literal["remove_pooler"]
+
+
+class MoveToSync(_Op):
+    """Inversa de move_to_queue: el trabajo encolado vuelve a hacerse dentro de la request."""
+
+    op: Literal["move_to_sync"]
+    endpoint: str = Field(description="Id del endpoint que encola, por ejemplo 'POST /password-recovery/{email}'.")
+    step: str = Field(description="archivo:línea del paso que encola (el paso 'background').")
+
+
+class ScaleWorkers(_Op):
+    """Cambia los workers (trabajos en paralelo) de una cola que ya existe."""
+
+    op: Literal["scale_workers"]
+    queue: str = Field(description="Nombre de la cola, por ejemplo 'emails'.")
+    workers: int = Field(ge=1, le=100, description="Trabajos en paralelo de la cola.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió los workers.")
+
+
+Op = Annotated[
+    ScaleApi
+    | ChangeDbPlan
+    | AddPooler
+    | AddCache
+    | MoveToQueue
+    | RemoveCache
+    | RemovePooler
+    | MoveToSync
+    | ScaleWorkers,
+    Field(discriminator="op"),
+]
 _OPS = TypeAdapter(list[Op])
 
 
@@ -311,6 +352,8 @@ def _add_cache(m: dict[str, Any], op: AddCache, catalog: dict[str, Any], warning
         "time": copy.deepcopy(catalog["other_steps"]["cache"]),
         "on_miss": [steps[i] for i in reads],
         "proposed": True,
+        # dónde estaba cada lectura: remove_cache las devuelve a su lugar exacto
+        "restore_positions": list(reads),
     }
     if op.hit_ratio is not None:
         cache_step["hit_ratio"] = _num(op.hit_ratio, "fracción", "SUPUESTO", f"Declarado por el usuario: «{op.quote}»")
@@ -350,6 +393,8 @@ def _move_to_queue(m: dict[str, Any], op: MoveToQueue, catalog: dict[str, Any], 
         "queue": op.queue,
         "proposed": True,
     }
+    if isinstance(ep.get("api_cpu_ms"), dict):
+        steps[idx]["restore_api_cpu_ms"] = copy.deepcopy(ep["api_cpu_ms"])  # para move_to_sync
     queues[op.queue] = {
         "workers": _design(op.workers, "workers", f"{op.workers} workers para la cola {op.queue}", op.quote),
         "job_steps": [moved],
@@ -368,12 +413,125 @@ def _move_to_queue(m: dict[str, Any], op: MoveToQueue, catalog: dict[str, Any], 
     return f"Cola '{op.queue}' con {op.workers} workers: {op.endpoint} encola el paso de {op.at}"
 
 
+# ---------- remove_cache ----------
+def _remove_cache(m: dict[str, Any], op: RemoveCache, catalog: dict[str, Any], warnings: list[str]) -> str:
+    ep = _endpoint(m, op.endpoint)
+    steps = ep["steps"]
+    caches = [i for i, s in enumerate(steps) if s.get("resource") == "cache"]
+    if not caches:
+        with_cache = [e["id"] for e in m["endpoints"] if any(s.get("resource") == "cache" for s in e["steps"])]
+        raise OpError(
+            f"El endpoint '{op.endpoint}' no tiene caché. Tienen caché: {', '.join(with_cache) or 'ninguno'}."
+        )
+    blind = [steps[i].get("at", "?") for i in caches if "on_miss" not in steps[i]]
+    if blind:
+        raise OpError(
+            f"La caché de '{op.endpoint}' en {', '.join(blind)} no guarda qué se hace cuando falla (on_miss): "
+            "no se puede saber qué lecturas vuelven a la DB. Branchpoint no la quita para no adivinar."
+        )
+    restored = 0
+    for i in reversed(caches):  # de atrás hacia adelante: los índices de las anteriores no cambian
+        cache = steps.pop(i)
+        on_miss = cache.get("on_miss") or []
+        positions = cache.get("restore_positions")
+        restored += len(on_miss)
+        if positions and len(positions) == len(on_miss):
+            for pos, step in sorted(zip(positions, on_miss, strict=True)):  # la caché de add_cache: lugar exacto
+                steps.insert(pos, step)
+        else:  # la caché venía del repo: sus lecturas quedan donde estaba ella
+            steps[i:i] = on_miss
+    return f"Sin caché en {op.endpoint}: {restored} lectura(s) vuelven a la DB en cada request"
+
+
+# ---------- remove_pooler ----------
+def _remove_pooler(m: dict[str, Any], op: RemovePooler, catalog: dict[str, Any], warnings: list[str]) -> str:
+    db = m["deployment"]["db"]
+    if "pooler" not in db:
+        raise OpError("El proyecto no tiene pooler.")
+    db.pop("pooler")
+    conns = db.get("max_connections")
+    label = conns.get("label") if isinstance(conns, dict) else "SUPUESTO"
+    return (
+        f"DB: sin pooler; la app abre conexiones directo contra Postgres (máximo {value(conns)} del plan "
+        f"{db.get('provider')} {db.get('plan')}, {label})"
+    )
+
+
+# ---------- move_to_sync ----------
+def _queue_of(m: dict[str, Any], step: dict[str, Any]) -> str | None:
+    queues = m["deployment"].get("queues") or {}
+    name = step.get("queue")
+    if name is None and step.get("infer_queue", True) and len(queues) == 1:
+        name = next(iter(queues))
+    return name if name in queues else None
+
+
+def _move_to_sync(m: dict[str, Any], op: MoveToSync, catalog: dict[str, Any], warnings: list[str]) -> str:
+    ep = _endpoint(m, op.endpoint)
+    steps = ep["steps"]
+    idx = next((i for i, s in enumerate(steps) if s.get("at") == op.step and s.get("resource") == "background"), None)
+    if idx is None:
+        found = ", ".join(s.get("at", "?") for s in steps if s.get("resource") == "background") or "ninguno"
+        raise OpError(f"'{op.endpoint}' no encola nada en {op.step}. Pasos que encolan: {found}.")
+    bg = steps[idx]
+    name = _queue_of(m, bg)
+    if name is None:
+        raise OpError(f"El paso de {op.step} no está en una cola del modelo: no se sabe qué trabajo hace.")
+    queue = m["deployment"]["queues"][name]
+    job = queue.get("job_steps") or []
+    if not job:
+        raise OpError(
+            f"La cola '{name}' no guarda los pasos de su trabajo (job_steps): no se puede saber qué vuelve a la "
+            "request. Branchpoint no lo adivina."
+        )
+    steps[idx : idx + 1] = copy.deepcopy(job)
+    if "restore_api_cpu_ms" in bg:
+        ep["api_cpu_ms"] = bg["restore_api_cpu_ms"]
+    elif isinstance(ep.get("api_cpu_ms"), dict):  # la cola venía del repo: su CPU vuelve a la request
+        cpu = sum(
+            float(value(s.get("time"), 0.0)) * max(1, int(value(s.get("repeat"), 1)))
+            for s in job
+            if s.get("resource") == RESOURCE_API_CPU
+        )
+        if cpu:
+            ep["api_cpu_ms"] = {
+                **ep["api_cpu_ms"],
+                "value": round(float(value(ep["api_cpu_ms"])) + cpu, 3),
+                "source": f"{ep['api_cpu_ms']['source']}. Con el trabajo de la cola {name} de vuelta en la request",
+            }
+    still_used = any(
+        s.get("resource") == "background" and _queue_of(m, s) == name for e in m["endpoints"] for s in e["steps"]
+    )
+    if still_used:
+        return f"{op.endpoint} hace en la request el trabajo de {op.step}; la cola '{name}' sigue para otros endpoints"
+    del m["deployment"]["queues"][name]
+    if not m["deployment"]["queues"]:
+        m["deployment"].pop("queues")
+    return f"{op.endpoint} hace en la request el trabajo de {op.step}; la cola '{name}' y sus workers se quitan"
+
+
+# ---------- scale_workers ----------
+def _scale_workers(m: dict[str, Any], op: ScaleWorkers, catalog: dict[str, Any], warnings: list[str]) -> str:
+    queues = m["deployment"].get("queues") or {}
+    if op.queue not in queues:
+        raise OpError(f"No existe la cola '{op.queue}'. Hay: {', '.join(queues) or 'ninguna'}.")
+    before = value(queues[op.queue].get("workers"), 1)
+    queues[op.queue]["workers"] = _design(
+        op.workers, "workers", f"{op.workers} workers para la cola {op.queue}", op.quote
+    )
+    return f"Cola '{op.queue}': {before} → {op.workers} workers"
+
+
 _APPLY = {
     ScaleApi: _scale_api,
     ChangeDbPlan: _change_db_plan,
     AddPooler: _add_pooler,
     AddCache: _add_cache,
     MoveToQueue: _move_to_queue,
+    RemoveCache: _remove_cache,
+    RemovePooler: _remove_pooler,
+    MoveToSync: _move_to_sync,
+    ScaleWorkers: _scale_workers,
 }
 
 
