@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Boxes, Gauge, History } from "@lucide/vue";
+import { Boxes, FileText, Gauge, History } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { EditorSection } from "./types";
 
@@ -11,6 +11,7 @@ const sections = [
   { id: "scenarios", label: "Escenarios", icon: Gauge },
   { id: "components", label: "Componentes", icon: Boxes },
   { id: "versions", label: "Versiones", icon: History },
+  { id: "reports", label: "Reportes", icon: FileText },
 ] as const satisfies { id: EditorSection; label: string; icon: unknown }[];
 </script>
 

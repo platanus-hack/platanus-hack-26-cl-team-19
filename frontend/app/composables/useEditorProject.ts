@@ -7,7 +7,9 @@ import type {
   Run,
   VersionDetail,
 } from "@/services/editor-api";
+import { editorRunParams } from "@/services/editor-api";
 import { toScenarios, toVersionEntry } from "@/services/editor-view";
+import type { RunReport } from "@/services/reports-api";
 
 function errorMessage(error: unknown): string {
   const response = error as { data?: { error?: { message?: string } } };
@@ -38,6 +40,10 @@ function changeReplicas(version: VersionDetail, replicas: number) {
 
 export function useEditorProject() {
   const { api, isMock } = useProjectApi();
+  const reportsApi = useReportsApi();
+  // JAJ-127: el reporte de la última corrida; reportsVersion avisa a la lista que hay uno nuevo
+  const lastReport = shallowRef<RunReport | null>(null);
+  const reportsVersion = ref(0);
   const models = shallowRef<ModelSummary[]>([]);
   const project = shallowRef<Project | null>(null);
   const projectGroup = shallowRef<Project | null>(null);
@@ -181,7 +187,22 @@ export function useEditorProject() {
     const number = version.value?.number;
     if (!id || number === undefined || !scenario.value) return;
     await request("Simulando…", async () => {
-      run.value = await api.run(id, number, scenario.value);
+      if (!reportsApi) {
+        run.value = await api.run(id, number, scenario.value);
+        return;
+      }
+      // Cada corrida es una simulación nueva con su reporte guardado (JAJ-127). El backend elige la
+      // semilla; el Run de esa semilla ya quedó guardado, así que pedirlo no vuelve a simular.
+      const { seed: _, ...params } = editorRunParams(scenario.value);
+      const report = await reportsApi.create(id, number, params);
+      lastReport.value = report;
+      reportsVersion.value++;
+      run.value = await api.run(
+        id,
+        number,
+        scenario.value,
+        report.scenario.seed,
+      );
     });
   }
 
@@ -235,5 +256,8 @@ export function useEditorProject() {
     simulate,
     loadCosts,
     compare,
+    lastReport,
+    reportsVersion,
+    reportsEnabled: reportsApi !== null,
   };
 }

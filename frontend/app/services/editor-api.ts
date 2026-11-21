@@ -136,10 +136,10 @@ export interface Comparison {
   summary: string | null;
 }
 
-export function editorRunParams(scenario: string) {
+export function editorRunParams(scenario: string, seed = 0) {
   return {
     scenario,
-    seed: 0,
+    seed,
     duration_s: 60,
     traffic_profile: scenario === "cyberday" ? "pico" : null,
   };
@@ -221,8 +221,11 @@ export function createEditorApi(
         note,
         origin: "manual",
       }),
-    run: (id: string, version: number, scenario: string) =>
-      post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
+    run: (id: string, version: number, scenario: string, seed = 0) =>
+      post<Run>(
+        `${versionPath(id, version)}/runs`,
+        editorRunParams(scenario, seed),
+      ),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),
     compare: (id: string, base: number, target: number, scenario: string) =>
