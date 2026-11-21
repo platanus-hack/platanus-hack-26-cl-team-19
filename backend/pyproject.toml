@@ -1,0 +1,35 @@
+[project]
+name = "branchpoint-backend"
+version = "0.1.0"
+description = "Backend de Branchpoint: motor de simulación, API y persistencia en Postgres."
+requires-python = ">=3.12"
+# el motor (app/engine) solo usa la librería estándar; FastAPI y uvicorn son para la API (app/api)
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "psycopg[binary,pool]>=3.2",  # ProjectStore sobre Postgres (app/db), con DATABASE_URL
+    "python-dotenv>=1.0",  # uvicorn --env-file .env
+    "pyjwt[crypto]>=2.10",  # validar los tokens de sesión de Supabase Auth (app/api/auth.py, JAJ-78)
+    "pyyaml>=6.0",  # app/ingest/iac.py: Docker Compose, Kubernetes y render.yaml
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",  # lo usa el TestClient de FastAPI
+    "ruff==0.17.6",  # versión fija: el CI y cada laptop formatean igual
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes + errores de pycodestyle, imports ordenados, bugbear y sintaxis moderna
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+# B008: FastAPI usa Depends(...) como valor por defecto a propósito
+ignore = ["B008"]

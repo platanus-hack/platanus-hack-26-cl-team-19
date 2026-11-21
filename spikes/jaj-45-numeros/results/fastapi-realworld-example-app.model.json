@@ -1,0 +1,3379 @@
+{
+  "schema": "branchpoint.model/v1",
+  "repo": {
+    "path": "fastapi-realworld-example-app",
+    "extracted_at": "2026-11-21",
+    "stats": {
+      "files": 70,
+      "functions": 98,
+      "parse_errors": 0,
+      "routers": 10,
+      "include_edges": 9,
+      "endpoints": 19,
+      "endpoints_rooted": 19,
+      "endpoints_with_db": 19,
+      "endpoints_with_db_in_handler": 16,
+      "endpoints_with_entity": 19,
+      "endpoints_with_cache": 0,
+      "endpoints_with_http": 0,
+      "endpoints_with_plugin": 0,
+      "endpoints_with_background": 0,
+      "risks": 3
+    }
+  },
+  "deployment": {
+    "api": {
+      "provider": "fargate",
+      "replicas": {
+        "value": 2,
+        "unit": "réplicas",
+        "label": "SUPUESTO",
+        "source": "Declarado por el usuario: réplicas de la API",
+        "date": "2026-11-21"
+      },
+      "vcpu": {
+        "value": 1,
+        "unit": "vCPU",
+        "label": "SUPUESTO",
+        "source": "Declarado por el usuario: vCPU por réplica",
+        "date": "2026-11-21"
+      },
+      "memory_gb": {
+        "value": 2,
+        "unit": "GB",
+        "label": "SUPUESTO",
+        "source": "Declarado por el usuario: memoria por réplica",
+        "date": "2026-11-21"
+      },
+      "workers": {
+        "value": 1,
+        "unit": "procesos",
+        "label": "OBSERVADO",
+        "source": "el CMD del Dockerfile de app no pasa --workers: el servidor levanta 1 proceso por defecto",
+        "date": "2026-11-21",
+        "at": "Dockerfile:20"
+      },
+      "threads_per_worker": {
+        "value": 40,
+        "unit": "hilos",
+        "label": "ESTIMADO",
+        "source": "Threadpool por defecto de AnyIO/Starlette para endpoints `def`",
+        "date": "2026-11-21"
+      },
+      "latency_ms": {
+        "value": 0.25,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "JAJ-8: latencia cliente ↔ API con k6 y 1 VU, Docker local",
+        "date": "2026-11-21"
+      },
+      "usd_month": {
+        "value": 57.67,
+        "unit": "US$/mes",
+        "label": "ESTIMADO",
+        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
+        "date": "2026-11-21"
+      },
+      "cpu_core_factor": {
+        "value": 1.95,
+        "unit": "×",
+        "label": "ESTIMADO",
+        "source": "API en fargate: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "date": "2026-11-21",
+        "processor": "graviton2"
+      }
+    },
+    "db": {
+      "provider": "rds_postgres",
+      "plan": "db.t4g.medium",
+      "vcpu": {
+        "value": 2,
+        "unit": "vCPU",
+        "label": "ESTIMADO",
+        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
+        "date": "2026-11-21"
+      },
+      "max_connections": {
+        "value": 450,
+        "unit": "conexiones",
+        "label": "ESTIMADO",
+        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
+        "date": "2026-11-21"
+      },
+      "usd_month": {
+        "value": 47.45,
+        "unit": "US$/mes",
+        "label": "ESTIMADO",
+        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730 (JAJ-11)",
+        "date": "2026-11-21"
+      },
+      "pool_per_worker": {
+        "library": "asyncpg",
+        "defined_at": "app/db/events.py:11",
+        "pool_size": {
+          "value": 10,
+          "unit": "conexiones",
+          "label": "OBSERVADO",
+          "source": "default de la configuración en app/core/settings/app.py:22 (se puede cambiar por variable de entorno)",
+          "date": "2026-11-21"
+        },
+        "max_overflow": {
+          "value": 0,
+          "unit": "conexiones",
+          "label": "ESTIMADO",
+          "source": "asyncpg no tiene overflow: max_size es el tope. El repo no lo configura (app/db/events.py:11)",
+          "date": "2026-11-21"
+        },
+        "pool_timeout_s": {
+          "value": null,
+          "unit": "s",
+          "label": "ESTIMADO",
+          "source": "asyncpg espera una conexión sin límite si no se pasa timeout a acquire(). El repo no lo configura (app/db/events.py:11)",
+          "date": "2026-11-21"
+        }
+      },
+      "cpu_core_factor": {
+        "value": 1.95,
+        "unit": "×",
+        "label": "ESTIMADO",
+        "source": "Plan rds_postgres db.t4g.medium: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "date": "2026-11-21",
+        "processor": "graviton2"
+      },
+      "cpu_credits": {
+        "baseline_per_vcpu": {
+          "value": 0.2,
+          "unit": "fracción de vCPU",
+          "label": "ESTIMADO",
+          "source": "aws.amazon.com/ec2/instance-types/t4/ (t4g.medium: base de 20 % por vCPU)",
+          "date": "2026-11-21"
+        },
+        "sustained_vcpu": {
+          "value": 0.4,
+          "unit": "vCPU",
+          "label": "ESTIMADO",
+          "source": "vCPU × base por vCPU: lo que rinde db.t4g.medium con carga sostenida. En modo unlimited rinde los vCPU nominales y cobra el exceso",
+          "date": "2026-11-21",
+          "derived": true
+        }
+      }
+    },
+    "services": [
+      {
+        "name": "app",
+        "role": "api",
+        "at": "docker-compose.yml:4",
+        "workers": {
+          "value": 1,
+          "unit": "procesos",
+          "label": "OBSERVADO",
+          "source": "el CMD del Dockerfile de app no pasa --workers: el servidor levanta 1 proceso por defecto",
+          "date": "2026-11-21",
+          "at": "Dockerfile:20"
+        },
+        "source_file": "compose:docker-compose.yml"
+      },
+      {
+        "name": "db",
+        "role": "db",
+        "at": "docker-compose.yml:15",
+        "image": "postgres:11.5-alpine",
+        "engine": "postgres",
+        "version": "11.5-alpine",
+        "source_file": "compose:docker-compose.yml"
+      }
+    ],
+    "iac": {
+      "files": [
+        {
+          "path": "docker-compose.yml",
+          "kind": "compose"
+        },
+        {
+          "path": "Dockerfile",
+          "kind": "dockerfile"
+        }
+      ],
+      "deploy_targets": [
+        {
+          "target": "docker registry",
+          "at": ".github/workflows/deploy.yml:26"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    }
+  },
+  "traffic": {
+    "peak_rps": {
+      "value": 40,
+      "unit": "req/s",
+      "label": "SUPUESTO",
+      "source": "Declarado por el usuario: requests por segundo en la hora pico",
+      "date": "2026-11-21"
+    },
+    "requests_per_session": {
+      "value": 17,
+      "unit": "requests/sesión",
+      "label": "SUPUESTO",
+      "source": "JAJ-11: perfil medio, sin dato del usuario",
+      "date": "2026-11-21",
+      "needs_review": true
+    },
+    "scenarios": {
+      "pico_normal": {
+        "multiplier": {
+          "value": 1,
+          "unit": "×",
+          "label": "SUPUESTO",
+          "source": "Hora pico de un día normal",
+          "date": "2026-11-21",
+          "needs_review": true
+        },
+        "rps": {
+          "value": 40,
+          "unit": "req/s",
+          "label": "SUPUESTO",
+          "source": "pico × multiplicador",
+          "date": "2026-11-21",
+          "needs_review": true,
+          "derived": true
+        }
+      },
+      "cyberday": {
+        "multiplier": {
+          "value": 20,
+          "unit": "×",
+          "label": "SUPUESTO",
+          "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+          "date": "2026-11-21",
+          "needs_review": true
+        },
+        "rps": {
+          "value": 800,
+          "unit": "req/s",
+          "label": "SUPUESTO",
+          "source": "pico × multiplicador",
+          "date": "2026-11-21",
+          "needs_review": true,
+          "derived": true
+        }
+      }
+    }
+  },
+  "business": {
+    "ticket_usd": {
+      "value": 25,
+      "unit": "US$",
+      "label": "SUPUESTO",
+      "source": "Declarado por el usuario: ticket promedio",
+      "date": "2026-11-21"
+    },
+    "conversion": {
+      "value": 0.03,
+      "unit": "fracción",
+      "label": "SUPUESTO",
+      "source": "Declarado por el usuario: conversión",
+      "date": "2026-11-21"
+    }
+  },
+  "endpoints": [
+    {
+      "id": "GET /articles/feed",
+      "method": "GET",
+      "path": "/articles/feed",
+      "handler": "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+      "at": "app/api/routes/articles/articles_common.py:27",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_articles_for_feed(users)",
+          "at": "app/db/repositories/articles.py:221",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 10.64,
+        "unit": "ms",
+        "label": "SUPUESTO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [
+        {
+          "type": "N+1",
+          "detail": "queries.get_tags_for_article_by_slug(tags) se ejecuta una vez por iteración",
+          "file": "app/db/repositories/articles.py",
+          "line": 228,
+          "db_call": "app/db/repositories/articles.py:255",
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        }
+      ],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "POST /articles/{slug}/favorite",
+      "method": "POST",
+      "path": "/articles/{slug}/favorite",
+      "handler": "app.api.routes.articles.articles_common:mark_article_as_favorite",
+      "at": "app/api/routes/articles/articles_common.py:52",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.add_article_to_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:276",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:mark_article_as_favorite",
+            "app.db.repositories.articles:ArticlesRepository.add_article_into_favorites"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.82,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "DELETE /articles/{slug}/favorite",
+      "method": "DELETE",
+      "path": "/articles/{slug}/favorite",
+      "handler": "app.api.routes.articles.articles_common:remove_article_from_favorites",
+      "at": "app/api/routes/articles/articles_common.py:82",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.remove_article_from_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:288",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_common:remove_article_from_favorites",
+            "app.db.repositories.articles:ArticlesRepository.remove_article_from_favorites"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.82,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "GET /articles",
+      "method": "GET",
+      "path": "/articles",
+      "handler": "app.api.routes.articles.articles_resource:list_articles",
+      "at": "app/api/routes/articles/articles_resource.py:31",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "unknown",
+          "detail": "self.connection.fetch",
+          "at": "app/db/repositories/articles.py:202",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "SUPUESTO",
+            "source": "Query que el AST no pudo clasificar (SQL en texto o builder externo). Se asume un rango por índice; revisar",
+            "date": "2026-11-21",
+            "needs_review": true
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 10.64,
+        "unit": "ms",
+        "label": "SUPUESTO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "needs_review": true,
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [
+        {
+          "type": "N+1",
+          "detail": "queries.get_tags_for_article_by_slug(tags) se ejecuta una vez por iteración",
+          "file": "app/db/repositories/articles.py",
+          "line": 205,
+          "db_call": "app/db/repositories/articles.py:255",
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        }
+      ],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "POST /articles",
+      "method": "POST",
+      "path": "/articles",
+      "handler": "app.api.routes.articles.articles_resource:create_new_article",
+      "at": "app/api/routes/articles/articles_resource.py:59",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.create_new_article(users)",
+          "at": "app/db/repositories/articles.py:45",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.services.articles:check_article_exists",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.create_new_tags(tags)",
+          "at": "app/db/repositories/tags.py:13",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.tags:TagsRepository.create_tags_that_dont_exist"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.add_tags_to_article(articles_to_tags)",
+          "at": "app/db/repositories/articles.py:327",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._link_article_with_tags"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 4.02,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "GET /articles/{slug}",
+      "method": "GET",
+      "path": "/articles/{slug}",
+      "handler": "app.api.routes.articles.articles_resource:retrieve_article_by_slug",
+      "at": "app/api/routes/articles/articles_resource.py:83",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 0.72,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "PUT /articles/{slug}",
+      "method": "PUT",
+      "path": "/articles/{slug}",
+      "handler": "app.api.routes.articles.articles_resource:update_article_by_slug",
+      "at": "app/api/routes/articles/articles_resource.py:95",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.update_article(articles)",
+          "at": "app/db/repositories/articles.py:81",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:update_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository.update_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.82,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "DELETE /articles/{slug}",
+      "method": "DELETE",
+      "path": "/articles/{slug}",
+      "handler": "app.api.routes.articles.articles_resource:delete_article_by_slug",
+      "at": "app/api/routes/articles/articles_resource.py:116",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.delete_article(articles)",
+          "at": "app/db/repositories/articles.py:95",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.articles.articles_resource:delete_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository.delete_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.82,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "POST /users/login",
+      "method": "POST",
+      "path": "/users/login",
+      "handler": "app.api.routes.authentication:login",
+      "at": "app/api/routes/authentication.py:23",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_email(users)",
+          "at": "app/db/repositories/users.py:11",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.authentication:login",
+            "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 0.1,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "POST /users",
+      "method": "POST",
+      "path": "/users",
+      "handler": "app.api.routes.authentication:register",
+      "at": "app/api/routes/authentication.py:62",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.create_new_user(users)",
+          "at": "app/db/repositories/users.py:40",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.db.repositories.users:UsersRepository.create_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.services.authentication:check_username_is_taken",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_email(users)",
+          "at": "app/db/repositories/users.py:11",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.services.authentication:check_email_is_taken",
+            "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "shape": "password_hash",
+          "detail": "pwd_context.hash (hash de contraseña)",
+          "at": "app/services/security.py:16",
+          "resource": "api_cpu",
+          "time": {
+            "value": 110,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.db.repositories.users:UsersRepository.create_user",
+            "app.models.domain.users:UserInDB.change_password",
+            "app.services.security:get_password_hash"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 111.3,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 110.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "GET /articles/{slug}/comments",
+      "method": "GET",
+      "path": "/articles/{slug}/comments",
+      "handler": "app.api.routes.comments:list_comments_for_article",
+      "at": "app/api/routes/comments.py:31",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_comments_for_article_by_slug(users)",
+          "at": "app/db/repositories/comments.py:48",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.comments:list_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository.get_comments_for_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "repeat": {
+            "value": 20,
+            "unit": "×",
+            "label": "SUPUESTO",
+            "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.comments:list_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository.get_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 2.76,
+        "unit": "ms",
+        "label": "SUPUESTO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [
+        {
+          "type": "N+1",
+          "detail": "queries.is_user_following_for_another(users) se ejecuta una vez por iteración",
+          "file": "app/db/repositories/comments.py",
+          "line": 53,
+          "db_call": "app/db/repositories/profiles.py:43",
+          "via": [
+            "app.api.routes.comments:list_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository.get_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "POST /articles/{slug}/comments",
+      "method": "POST",
+      "path": "/articles/{slug}/comments",
+      "handler": "app.api.routes.comments:create_comment_for_article",
+      "at": "app/api/routes/comments.py:46",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.create_new_comment(users)",
+          "at": "app/db/repositories/comments.py:68",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.comments:create_comment_for_article",
+            "app.db.repositories.comments:CommentsRepository.create_comment_for_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.comments:create_comment_for_article",
+            "app.db.repositories.comments:CommentsRepository.create_comment_for_article",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.82,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "DELETE /articles/{slug}/comments/{comment_id}",
+      "method": "DELETE",
+      "path": "/articles/{slug}/comments/{comment_id}",
+      "handler": "app.api.routes.comments:delete_comment_from_article",
+      "at": "app/api/routes/comments.py:67",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.delete_comment_by_id(commentaries)",
+          "at": "app/db/repositories/comments.py:81",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.comments:delete_comment_from_article",
+            "app.db.repositories.comments:CommentsRepository.delete_comment"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_comment_by_id_and_slug(users)",
+          "at": "app/db/repositories/comments.py:26",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.comments:get_comment_by_id_from_path",
+            "app.db.repositories.comments:CommentsRepository.get_comment_by_id"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_article_by_slug(users)",
+          "at": "app/db/repositories/articles.py:243",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "range",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "at": "app/db/repositories/articles.py:255",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "at": "app/db/repositories/articles.py:263",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "count",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "at": "app/db/repositories/articles.py:268",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.14,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.comments:get_comment_by_id_from_path",
+            "app.db.repositories.comments:CommentsRepository.get_comment_by_id",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.92,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "GET /profiles/{username}",
+      "method": "GET",
+      "path": "/profiles/{username}",
+      "handler": "app.api.routes.profiles:retrieve_profile_by_username",
+      "at": "app/api/routes/profiles.py:21",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.profiles:get_profile_by_username_from_path",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 0.2,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "POST /profiles/{username}/follow",
+      "method": "POST",
+      "path": "/profiles/{username}/follow",
+      "handler": "app.api.routes.profiles:follow_for_user",
+      "at": "app/api/routes/profiles.py:32",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.subscribe_user_to_another(followers_to_followings)",
+          "at": "app/db/repositories/profiles.py:57",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.profiles:follow_for_user",
+            "app.db.repositories.profiles:ProfilesRepository.add_user_into_followers"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.profiles:get_profile_by_username_from_path",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.3,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "DELETE /profiles/{username}/follow",
+      "method": "DELETE",
+      "path": "/profiles/{username}/follow",
+      "handler": "app.api.routes.profiles:unsubscribe_from_user",
+      "at": "app/api/routes/profiles.py:62",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.unsubscribe_user_from_another(followers_to_followings)",
+          "at": "app/db/repositories/profiles.py:70",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.profiles:unsubscribe_from_user",
+            "app.db.repositories.profiles:ProfilesRepository.remove_user_from_followers"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.is_user_following_for_another(users)",
+          "at": "app/db/repositories/profiles.py:43",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.profiles:get_profile_by_username_from_path",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.3,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "GET /tags",
+      "method": "GET",
+      "path": "/tags",
+      "handler": "app.api.routes.tags:get_all_tags",
+      "at": "app/api/routes/tags.py:11",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "scan",
+          "detail": "queries.get_all_tags(tags)",
+          "at": "app/db/repositories/tags.py:9",
+          "resource": "db_connection",
+          "time": {
+            "value": 5.0,
+            "unit": "ms",
+            "label": "SUPUESTO",
+            "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+            "date": "2026-11-21",
+            "needs_review": true
+          },
+          "via": [
+            "app.api.routes.tags:get_all_tags",
+            "app.db.repositories.tags:TagsRepository.get_all_tags"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 5.0,
+        "unit": "ms",
+        "label": "SUPUESTO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "needs_review": true,
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "GET /user",
+      "method": "GET",
+      "path": "/user",
+      "handler": "app.api.routes.users:retrieve_current_user",
+      "at": "app/api/routes/users.py:19",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 0.1,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.1214,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    },
+    {
+      "id": "PUT /user",
+      "method": "PUT",
+      "path": "/user",
+      "handler": "app.api.routes.users:update_current_user",
+      "at": "app/api/routes/users.py:39",
+      "async": true,
+      "steps": [
+        {
+          "kind": "db",
+          "shape": "commit",
+          "detail": "queries.update_user_by_username(users)",
+          "at": "app/db/repositories/users.py:70",
+          "resource": "db_connection",
+          "time": {
+            "value": 1.1,
+            "unit": "ms",
+            "label": "CALIBRADO",
+            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.users:update_current_user",
+            "app.db.repositories.users:UsersRepository.update_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_username(users)",
+          "at": "app/db/repositories/users.py:18",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "shape": "lookup",
+          "detail": "queries.get_user_by_email(users)",
+          "at": "app/db/repositories/users.py:11",
+          "resource": "db_connection",
+          "time": {
+            "value": 0.1,
+            "unit": "ms",
+            "label": "ESTIMADO",
+            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "date": "2026-11-21"
+          },
+          "via": [
+            "app.api.routes.users:update_current_user",
+            "app.services.authentication:check_email_is_taken",
+            "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        }
+      ],
+      "alternatives": [],
+      "db_hold_ms": {
+        "value": 1.3,
+        "unit": "ms",
+        "label": "ESTIMADO",
+        "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "api_cpu_ms": {
+        "value": 0.68,
+        "unit": "ms",
+        "label": "CALIBRADO",
+        "source": "CPU base de FastAPI + CPU pesada del endpoint",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "external_ms": null,
+      "risks": [],
+      "weight": {
+        "value": 0.0125,
+        "unit": "fracción",
+        "label": "SUPUESTO",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "date": "2026-11-21",
+        "needs_review": true
+      }
+    }
+  ],
+  "checks": {
+    "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación (JAJ-9).",
+    "connections": {
+      "app_max": {
+        "value": 20,
+        "unit": "conexiones",
+        "label": "SUPUESTO",
+        "source": "réplicas × workers × (pool_size + max_overflow): cada proceso tiene su propio pool",
+        "date": "2026-11-21",
+        "derived": true
+      },
+      "db_max": {
+        "value": 450,
+        "unit": "conexiones",
+        "label": "ESTIMADO",
+        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
+        "date": "2026-11-21"
+      },
+      "status": "ok"
+    },
+    "mean_db_hold_ms": {
+      "value": 10.2931,
+      "unit": "ms",
+      "label": "SUPUESTO",
+      "source": "promedio ponderado por el tráfico de db_hold_ms, en la nube (× cpu_core_factor)",
+      "date": "2026-11-21",
+      "needs_review": true,
+      "derived": true
+    },
+    "mean_api_cpu_ms": {
+      "value": 4.007,
+      "unit": "ms",
+      "label": "SUPUESTO",
+      "source": "promedio ponderado por el tráfico de api_cpu_ms, en la nube (× cpu_core_factor)",
+      "date": "2026-11-21",
+      "needs_review": true,
+      "derived": true
+    },
+    "capacity": {
+      "pool": {
+        "value": 1943.0,
+        "unit": "req/s",
+        "label": "SUPUESTO",
+        "source": "conexiones usables / tiempo promedio con la conexión tomada (ley de Little)",
+        "date": "2026-11-21",
+        "needs_review": true,
+        "derived": true
+      },
+      "db_cpu": {
+        "value": 52.5,
+        "unit": "req/s",
+        "label": "SUPUESTO",
+        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
+        "date": "2026-11-21",
+        "needs_review": true,
+        "derived": true
+      },
+      "api_cpu": {
+        "value": 499.1,
+        "unit": "req/s",
+        "label": "SUPUESTO",
+        "source": "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request en la nube",
+        "date": "2026-11-21",
+        "needs_review": true,
+        "derived": true
+      }
+    },
+    "scenarios": {
+      "pico_normal": {
+        "rps": 40,
+        "utilization": {
+          "pool": 0.021,
+          "db_cpu": 0.762,
+          "api_cpu": 0.08
+        },
+        "bottleneck": "db_cpu",
+        "sales_at_stake_per_hour": {
+          "value": 6353.0,
+          "unit": "US$/hora",
+          "label": "SUPUESTO",
+          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+          "date": "2026-11-21",
+          "needs_review": true,
+          "derived": true
+        }
+      },
+      "cyberday": {
+        "rps": 800,
+        "utilization": {
+          "pool": 0.412,
+          "db_cpu": 15.238,
+          "api_cpu": 1.603
+        },
+        "bottleneck": "db_cpu",
+        "sales_at_stake_per_hour": {
+          "value": 127059.0,
+          "unit": "US$/hora",
+          "label": "SUPUESTO",
+          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+          "date": "2026-11-21",
+          "needs_review": true,
+          "derived": true
+        }
+      }
+    }
+  },
+  "assumptions": {
+    "total": 39,
+    "by_source": [
+      {
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "count": 19,
+        "needs_review": true,
+        "example_path": "endpoints[0].weight"
+      },
+      {
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "count": 9,
+        "needs_review": false,
+        "example_path": "endpoints[0].steps[2].repeat"
+      },
+      {
+        "source": "Declarado por el usuario: réplicas de la API",
+        "count": 1,
+        "needs_review": false,
+        "example_path": "deployment.api.replicas"
+      },
+      {
+        "source": "Declarado por el usuario: vCPU por réplica",
+        "count": 1,
+        "needs_review": false,
+        "example_path": "deployment.api.vcpu"
+      },
+      {
+        "source": "Declarado por el usuario: memoria por réplica",
+        "count": 1,
+        "needs_review": false,
+        "example_path": "deployment.api.memory_gb"
+      },
+      {
+        "source": "Declarado por el usuario: requests por segundo en la hora pico",
+        "count": 1,
+        "needs_review": false,
+        "example_path": "traffic.peak_rps"
+      },
+      {
+        "source": "JAJ-11: perfil medio, sin dato del usuario",
+        "count": 1,
+        "needs_review": true,
+        "example_path": "traffic.requests_per_session"
+      },
+      {
+        "source": "Hora pico de un día normal",
+        "count": 1,
+        "needs_review": true,
+        "example_path": "traffic.scenarios.pico_normal.multiplier"
+      },
+      {
+        "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+        "count": 1,
+        "needs_review": true,
+        "example_path": "traffic.scenarios.cyberday.multiplier"
+      },
+      {
+        "source": "Declarado por el usuario: ticket promedio",
+        "count": 1,
+        "needs_review": false,
+        "example_path": "business.ticket_usd"
+      },
+      {
+        "source": "Declarado por el usuario: conversión",
+        "count": 1,
+        "needs_review": false,
+        "example_path": "business.conversion"
+      },
+      {
+        "source": "Query que el AST no pudo clasificar (SQL en texto o builder externo). Se asume un rango por índice; revisar",
+        "count": 1,
+        "needs_review": true,
+        "example_path": "endpoints[3].steps[0].time"
+      },
+      {
+        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "count": 1,
+        "needs_review": true,
+        "example_path": "endpoints[16].steps[0].time"
+      }
+    ],
+    "items": [
+      {
+        "path": "deployment.api.replicas",
+        "value": 2,
+        "unit": "réplicas",
+        "source": "Declarado por el usuario: réplicas de la API",
+        "needs_review": false
+      },
+      {
+        "path": "deployment.api.vcpu",
+        "value": 1,
+        "unit": "vCPU",
+        "source": "Declarado por el usuario: vCPU por réplica",
+        "needs_review": false
+      },
+      {
+        "path": "deployment.api.memory_gb",
+        "value": 2,
+        "unit": "GB",
+        "source": "Declarado por el usuario: memoria por réplica",
+        "needs_review": false
+      },
+      {
+        "path": "traffic.peak_rps",
+        "value": 40,
+        "unit": "req/s",
+        "source": "Declarado por el usuario: requests por segundo en la hora pico",
+        "needs_review": false
+      },
+      {
+        "path": "traffic.requests_per_session",
+        "value": 17,
+        "unit": "requests/sesión",
+        "source": "JAJ-11: perfil medio, sin dato del usuario",
+        "needs_review": true
+      },
+      {
+        "path": "traffic.scenarios.pico_normal.multiplier",
+        "value": 1,
+        "unit": "×",
+        "source": "Hora pico de un día normal",
+        "needs_review": true
+      },
+      {
+        "path": "traffic.scenarios.cyberday.multiplier",
+        "value": 20,
+        "unit": "×",
+        "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+        "needs_review": true
+      },
+      {
+        "path": "business.ticket_usd",
+        "value": 25,
+        "unit": "US$",
+        "source": "Declarado por el usuario: ticket promedio",
+        "needs_review": false
+      },
+      {
+        "path": "business.conversion",
+        "value": 0.03,
+        "unit": "fracción",
+        "source": "Declarado por el usuario: conversión",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[0].steps[2].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[0].steps[3].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[0].steps[4].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[0].steps[5].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[0].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[1].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[2].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[3].steps[0].time",
+        "value": 0.14,
+        "unit": "ms",
+        "source": "Query que el AST no pudo clasificar (SQL en texto o builder externo). Se asume un rango por índice; revisar",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[3].steps[2].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[3].steps[3].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[3].steps[4].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[3].steps[5].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[3].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[4].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[5].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[6].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[7].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[8].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[9].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[10].steps[6].repeat",
+        "value": 20,
+        "unit": "×",
+        "source": "N+1: se ejecuta una vez por iteración (Declarado por el usuario: largo de las listas con N+1)",
+        "needs_review": false
+      },
+      {
+        "path": "endpoints[10].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[11].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[12].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[13].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[14].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[15].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[16].steps[0].time",
+        "value": 5.0,
+        "unit": "ms",
+        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[16].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[17].weight",
+        "value": 0.1214,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      },
+      {
+        "path": "endpoints[18].weight",
+        "value": 0.0125,
+        "unit": "fracción",
+        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "needs_review": true
+      }
+    ]
+  }
+}

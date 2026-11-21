@@ -1,0 +1,10 @@
+{
+  "_doc": "Respuestas de ejemplo con el tráfico declarado como req/s en la hora pico y la DB en RDS. Valores ilustrativos.",
+  "traffic": {"mode": "rps", "peak_rps": 40},
+  "deployment": {
+    "db": {"provider": "rds_postgres", "plan": "db.t4g.medium"},
+    "api": {"provider": "fargate", "replicas": 2, "vcpu": 1, "memory_gb": 2}
+  },
+  "business": {"ticket_usd": 25, "conversion": 0.03},
+  "overrides": {"table_rows": {"articles": 50000}, "n_plus_one_list": 20}
+}

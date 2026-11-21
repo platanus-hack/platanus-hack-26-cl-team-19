@@ -1,0 +1,72 @@
+{
+  "currency": "USD",
+  "note": "Precios que no tienen archivo de precios descargable. Cada bloque dice de dónde sale y cuándo se leyó.",
+  "supabase": {
+    "source": "https://supabase.com/pricing.md",
+    "read_on": "2026-11-21",
+    "provenance": "ESTIMADO",
+    "plans_month": {"pro": 25, "team": 599},
+    "compute_credit_month": 10,
+    "included": {"disk_gb": 8, "egress_gb": 250, "auth_mau": 100000, "iops": 3000},
+    "overage": {"disk_gb_month": 0.125, "egress_gb": 0.09, "auth_mau": 0.00325, "iops_month": 0.024},
+    "hours_per_month": 744,
+    "compute_month": {
+      "micro":  {"usd": 10,   "vcpu": "compartida", "ram_gb": 1,   "direct_conn": 60,  "pooler_conn": 200},
+      "small":  {"usd": 15,   "vcpu": "compartida", "ram_gb": 2,   "direct_conn": 90,  "pooler_conn": 400},
+      "medium": {"usd": 60,   "vcpu": "compartida", "ram_gb": 4,   "direct_conn": 120, "pooler_conn": 600},
+      "large":  {"usd": 110,  "vcpu": 2,  "ram_gb": 8,   "direct_conn": 160, "pooler_conn": 800},
+      "xl":     {"usd": 210,  "vcpu": 4,  "ram_gb": 16,  "direct_conn": 240, "pooler_conn": 1000},
+      "2xl":    {"usd": 410,  "vcpu": 8,  "ram_gb": 32,  "direct_conn": 380, "pooler_conn": 1500},
+      "4xl":    {"usd": 960,  "vcpu": 16, "ram_gb": 64,  "direct_conn": 480, "pooler_conn": 3000},
+      "8xl":    {"usd": 1870, "vcpu": 32, "ram_gb": 128, "direct_conn": 490, "pooler_conn": 6000},
+      "12xl":   {"usd": 2800, "vcpu": 48, "ram_gb": 192, "direct_conn": 500, "pooler_conn": 9000},
+      "16xl":   {"usd": 3730, "vcpu": 64, "ram_gb": 256, "direct_conn": 500, "pooler_conn": 12000}
+    },
+    "operational": {
+      "compute_resize_downtime": "Normalmente menos de 2 minutos; puede tardar más según el proveedor de nube (docs: platform/compute-and-disk).",
+      "disk_change_cooldown_hours": 4,
+      "spend_cap": "Si se supera la cuota de un ítem cubierto, ese ítem deja de estar disponible hasta el próximo ciclo. Cubre disco, egreso, Edge Functions, logs, MAU, Realtime y Storage. NO cubre compute, réplicas, IOPS ni throughput extra (docs: platform/spend-cap)."
+    }
+  },
+  "neon": {
+    "source": "https://neon.com/docs/introduction/plans",
+    "read_on": "2026-11-21",
+    "provenance": "ESTIMADO",
+    "cu_hour": {"launch": 0.106, "scale": 0.222},
+    "max_cu": {"launch_autoscale": 16, "scale_fixed": 56},
+    "storage_gb_month": 0.35,
+    "egress_included_gb": 500,
+    "egress_gb": 0.10,
+    "cu_ram_gb": 4
+  },
+  "upstash_redis": {
+    "source": "https://upstash.com/docs/redis/overall/pricing",
+    "read_on": "2026-11-21",
+    "provenance": "ESTIMADO",
+    "pay_as_you_go_per_100k_commands": 0.20,
+    "fixed_month": {"1gb": {"usd": 20, "max_ops_per_s": 10000}, "5gb": {"usd": 100}}
+  },
+  "cloudfront_flat_rate": {
+    "source": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html",
+    "read_on": "2026-11-21",
+    "provenance": "ESTIMADO",
+    "plans_month": {
+      "free":     {"usd": 0,    "requests": 1000000,   "transfer_gb": 100},
+      "pro":      {"usd": 15,   "requests": 10000000,  "transfer_gb": 51200},
+      "business": {"usd": 200,  "requests": 125000000, "transfer_gb": 51200},
+      "premium":  {"usd": 1000, "requests": 500000000, "transfer_gb": 51200}
+    },
+    "overage": "Sin cobro por exceso. El primer pico de hasta 3 veces la asignación en un mes no afecta el servicio. El exceso sostenido se evalúa en 2–3 meses; si sigue, AWS puede servir desde menos edge locations o bajar el rendimiento.",
+    "origin_transfer": "La transferencia desde S3, ALB o API Gateway hacia CloudFront es gratis."
+  },
+  "llm_tokens": {
+    "source": "Tabla de precios de modelos de Anthropic (skill claude-api, cache del 2026-11-03)",
+    "read_on": "2026-11-21",
+    "provenance": "ESTIMADO",
+    "usd_per_million": {
+      "claude-opus-5-5":   {"input": 4.00, "output": 20.00, "cache_read": 0.20},
+      "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_read": 0.10},
+      "claude-haiku-5-5":  {"input": 0.10, "output": 0.50,  "note": "hasta 100K tokens de prompt; sobre eso 0,50 / 2,50"}
+    }
+  }
+}

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+# salidas de app.cli --out y body de ejemplo para curl (README)
+run*.json
+req.json
+
+# variables de entorno con secretos (ver .env.example)
+.env

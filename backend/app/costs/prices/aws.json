@@ -1,0 +1,603 @@
+{
+  "currency": "USD",
+  "note": "Precios on-demand, Linux, sin impuestos. Extraídos de la AWS Price List API pública.",
+  "regions": {
+    "us-east-1": {
+      "sources": {
+        "AmazonRDS": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/20261120224619/us-east-1/index.json",
+          "publication_date": "2026-11-20T22:46:19Z"
+        },
+        "AmazonS3": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/20261121001414/us-east-1/index.json",
+          "publication_date": "2026-11-21T00:14:14Z"
+        },
+        "AmazonElastiCache": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/20261118174528/us-east-1/index.json",
+          "publication_date": "2026-11-18T17:45:28Z"
+        },
+        "AWSELB": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSELB/20261119222709/us-east-1/index.json",
+          "publication_date": "2026-11-19T22:27:09Z"
+        },
+        "AmazonECS": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonECS/20261111234623/us-east-1/index.json",
+          "publication_date": "2026-11-11T23:46:23Z"
+        },
+        "AWSDataTransfer": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/20261119105841/us-east-1/index.json",
+          "publication_date": "2026-11-19T10:58:41Z"
+        }
+      },
+      "rds_postgres": {
+        "single_az_per_hour": {
+          "db.t4g.micro": {
+            "usd": 0.016,
+            "unit": "Hrs",
+            "sku_description": "$ 0.016 per RDS db.t4g.micro Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.t4g.medium": {
+            "usd": 0.065,
+            "unit": "Hrs",
+            "sku_description": "$ 0.065 per RDS db.t4g.medium Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.large": {
+            "usd": 0.168,
+            "unit": "Hrs",
+            "sku_description": "$ 0.168 per RDS db.m7g.large Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.xlarge": {
+            "usd": 0.337,
+            "unit": "Hrs",
+            "sku_description": "$ 0.337 per RDS db.m7g.xlarge Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.2xlarge": {
+            "usd": 0.674,
+            "unit": "Hrs",
+            "sku_description": "$ 0.674 per RDS db.m7g.2xlarge Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.4xlarge": {
+            "usd": 1.348,
+            "unit": "Hrs",
+            "sku_description": "$ 1.348 per RDS db.m7g.4xlarge Single-AZ instance hour (or partial hour) running PostgreSQL"
+          }
+        },
+        "multi_az_per_hour": {
+          "db.t4g.micro": {
+            "usd": 0.032,
+            "unit": "Hrs",
+            "sku_description": "$ 0.032 per RDS db.t4g.micro Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.t4g.medium": {
+            "usd": 0.129,
+            "unit": "Hrs",
+            "sku_description": "$ 0.129 per RDS db.t4g.medium Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.large": {
+            "usd": 0.337,
+            "unit": "Hrs",
+            "sku_description": "$ 0.337 per RDS db.m7g.large Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.xlarge": {
+            "usd": 0.674,
+            "unit": "Hrs",
+            "sku_description": "$ 0.674 per RDS db.m7g.xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.2xlarge": {
+            "usd": 1.348,
+            "unit": "Hrs",
+            "sku_description": "$ 1.348 per RDS db.m7g.2xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.4xlarge": {
+            "usd": 2.696,
+            "unit": "Hrs",
+            "sku_description": "$ 2.696 per RDS db.m7g.4xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          }
+        },
+        "gp3_gb_month": {
+          "usd": 0.115,
+          "unit": "GB-Mo",
+          "sku_description": "$0.115 per GB-month of provisioned GP3 storage running PostgreSQL"
+        },
+        "gp3_gb_month_multi_az": {
+          "usd": 0.23,
+          "unit": "GB-Mo",
+          "sku_description": "$0.23 per GB-month of provisioned GP3 storage for Multi-AZ deployments running PostgreSQL"
+        },
+        "backup_gb_month": {
+          "usd": 0.095,
+          "unit": "GB-Mo",
+          "sku_description": "$0.095 per additional GB-month of backup storage exceeding free allocation running PostgreSQL"
+        }
+      },
+      "s3_standard": {
+        "storage_tiers": [
+          {
+            "from_gb": 0.0,
+            "to_gb": 51200.0,
+            "usd_per_gb": 0.023,
+            "sku_description": "$0.023 per GB - first 50 TB / month of storage used"
+          },
+          {
+            "from_gb": 51200.0,
+            "to_gb": 512000.0,
+            "usd_per_gb": 0.022,
+            "sku_description": "$0.022 per GB - next 450 TB / month of storage used"
+          },
+          {
+            "from_gb": 512000.0,
+            "to_gb": null,
+            "usd_per_gb": 0.021,
+            "sku_description": "$0.021 per GB - storage used / month over 500 TB"
+          }
+        ],
+        "put_per_request": {
+          "usd": 5e-06,
+          "unit": "Requests",
+          "sku_description": "$0.005 per 1,000 PUT, COPY, POST, or LIST requests"
+        },
+        "get_per_request": {
+          "usd": 4e-07,
+          "unit": "Requests",
+          "sku_description": "$0.004 per 10,000 GET and all other requests"
+        }
+      },
+      "elasticache_valkey": {
+        "serverless_gb_hour": {
+          "usd": 0.084,
+          "unit": "GB-Hours",
+          "sku_description": "$0.084 per GB-hour for Valkey data storage"
+        },
+        "serverless_ecpu": {
+          "usd": 2.3e-09,
+          "unit": "ElastiCacheProcessingUnit",
+          "sku_description": "$0.0023 per million Valkey ECPUs"
+        },
+        "node_cache.t4g.micro_hour": {
+          "usd": 0.0128,
+          "unit": "Hrs",
+          "sku_description": "$0.0128 per T4G Micro Cache node-hour (or partial hour) running Valkey"
+        },
+        "node_cache.m7g.large_hour": {
+          "usd": 0.1264,
+          "unit": "Hrs",
+          "sku_description": "$0.1264 per Gen Purpose m7g.large node hour running Valkey"
+        }
+      },
+      "alb": {
+        "hour": {
+          "usd": 0.0225,
+          "unit": "Hrs",
+          "sku_description": "$0.0225 per Application LoadBalancer-hour (or partial hour)"
+        },
+        "lcu_hour": {
+          "usd": 0.008,
+          "unit": "LCU-Hrs",
+          "sku_description": "$0.008 per used Application load balancer capacity unit-hour (or partial hour)"
+        }
+      },
+      "fargate_linux_arm": {
+        "vcpu_hour": {
+          "usd": 0.03238,
+          "unit": "hours",
+          "sku_description": "AWS Fargate - ARM - vCPU - US East (N. Virginia)"
+        },
+        "gb_hour": {
+          "usd": 0.00356,
+          "unit": "hours",
+          "sku_description": "AWS Fargate - ARM - Memory - US East (N. Virginia)"
+        }
+      },
+      "data_transfer_out_internet": [
+        {
+          "from_gb": 0.0,
+          "to_gb": 100.0,
+          "usd_per_gb": 0.0,
+          "sku_description": "$0 for 100GB of data transfer out to the internet, aggregated globally, each month"
+        },
+        {
+          "from_gb": 0.0,
+          "to_gb": 10240.0,
+          "usd_per_gb": 0.09,
+          "sku_description": "$0.090 per GB - first 10 TB / month data transfer out beyond the global free tier"
+        },
+        {
+          "from_gb": 10240.0,
+          "to_gb": 51200.0,
+          "usd_per_gb": 0.085,
+          "sku_description": "$0.085 per GB - next 40 TB / month data transfer out"
+        },
+        {
+          "from_gb": 51200.0,
+          "to_gb": 153600.0,
+          "usd_per_gb": 0.07,
+          "sku_description": "$0.070 per GB - next 100 TB / month data transfer out"
+        },
+        {
+          "from_gb": 153600.0,
+          "to_gb": null,
+          "usd_per_gb": 0.05,
+          "sku_description": "$0.050 per GB - greater than 150 TB / month data transfer out"
+        }
+      ]
+    },
+    "sa-east-1": {
+      "sources": {
+        "AmazonRDS": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/20261120224619/sa-east-1/index.json",
+          "publication_date": "2026-11-20T22:46:19Z"
+        },
+        "AmazonS3": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/20261121001414/sa-east-1/index.json",
+          "publication_date": "2026-11-21T00:14:14Z"
+        },
+        "AmazonElastiCache": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonElastiCache/20261118174528/sa-east-1/index.json",
+          "publication_date": "2026-11-18T17:45:28Z"
+        },
+        "AWSELB": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSELB/20261119222709/sa-east-1/index.json",
+          "publication_date": "2026-11-19T22:27:09Z"
+        },
+        "AmazonECS": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonECS/20261111234623/sa-east-1/index.json",
+          "publication_date": "2026-11-11T23:46:23Z"
+        },
+        "AWSDataTransfer": {
+          "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/20261119105841/sa-east-1/index.json",
+          "publication_date": "2026-11-19T10:58:41Z"
+        }
+      },
+      "rds_postgres": {
+        "single_az_per_hour": {
+          "db.t4g.micro": {
+            "usd": 0.034,
+            "unit": "Hrs",
+            "sku_description": "$ 0.034 per RDS db.t4g.micro Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.t4g.medium": {
+            "usd": 0.137,
+            "unit": "Hrs",
+            "sku_description": "$ 0.137 per RDS db.t4g.medium Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.large": {
+            "usd": 0.221,
+            "unit": "Hrs",
+            "sku_description": "USD 0.221 per RDS db.m7g.large Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.xlarge": {
+            "usd": 0.442,
+            "unit": "Hrs",
+            "sku_description": "USD 0.442 per RDS db.m7g.xlarge Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.2xlarge": {
+            "usd": 0.884,
+            "unit": "Hrs",
+            "sku_description": "USD 0.884 per RDS db.m7g.2xlarge Single-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.4xlarge": {
+            "usd": 1.768,
+            "unit": "Hrs",
+            "sku_description": "USD 1.768 per RDS db.m7g.4xlarge Single-AZ instance hour (or partial hour) running PostgreSQL"
+          }
+        },
+        "multi_az_per_hour": {
+          "db.t4g.micro": {
+            "usd": 0.069,
+            "unit": "Hrs",
+            "sku_description": "$ 0.069 per RDS db.t4g.micro Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.t4g.medium": {
+            "usd": 0.275,
+            "unit": "Hrs",
+            "sku_description": "$ 0.275 per RDS db.t4g.medium Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.large": {
+            "usd": 0.442,
+            "unit": "Hrs",
+            "sku_description": "USD 0.442 per RDS db.m7g.large Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.xlarge": {
+            "usd": 0.884,
+            "unit": "Hrs",
+            "sku_description": "USD 0.884 per RDS db.m7g.xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.2xlarge": {
+            "usd": 1.768,
+            "unit": "Hrs",
+            "sku_description": "USD 1.768 per RDS db.m7g.2xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          },
+          "db.m7g.4xlarge": {
+            "usd": 3.536,
+            "unit": "Hrs",
+            "sku_description": "USD 3.536 per RDS db.m7g.4xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL"
+          }
+        },
+        "gp3_gb_month": {
+          "usd": 0.219,
+          "unit": "GB-Mo",
+          "sku_description": "$0.219 per GB-month of provisioned GP3 storage running PostgreSQL"
+        },
+        "gp3_gb_month_multi_az": {
+          "usd": 0.438,
+          "unit": "GB-Mo",
+          "sku_description": "$0.438 per GB-month of provisioned GP3 storage for Multi-AZ deployments running PostgreSQL"
+        },
+        "backup_gb_month": {
+          "usd": 0.095,
+          "unit": "GB-Mo",
+          "sku_description": "$0.095 per additional GB-month of backup storage exceeding free allocation running PostgreSQL"
+        }
+      },
+      "s3_standard": {
+        "storage_tiers": [
+          {
+            "from_gb": 0.0,
+            "to_gb": 51200.0,
+            "usd_per_gb": 0.0405,
+            "sku_description": "$0.0405 per GB - first 50 TB / month of storage used"
+          },
+          {
+            "from_gb": 51200.0,
+            "to_gb": 512000.0,
+            "usd_per_gb": 0.039,
+            "sku_description": "$0.039 per GB - next 450 TB / month of storage used"
+          },
+          {
+            "from_gb": 512000.0,
+            "to_gb": null,
+            "usd_per_gb": 0.037,
+            "sku_description": "$0.037 per GB - storage used / month over 500 TB"
+          }
+        ],
+        "put_per_request": {
+          "usd": 7e-06,
+          "unit": "Requests",
+          "sku_description": "$0.007 per 1,000 PUT, COPY, POST, or LIST requests"
+        },
+        "get_per_request": {
+          "usd": 5.6e-07,
+          "unit": "Requests",
+          "sku_description": "$0.0056 per 10,000 GET and all other requests"
+        }
+      },
+      "elasticache_valkey": {
+        "serverless_gb_hour": {
+          "usd": 0.133,
+          "unit": "GB-Hours",
+          "sku_description": "$0.133 per GB-hour for Valkey data storage"
+        },
+        "serverless_ecpu": {
+          "usd": 3.7e-09,
+          "unit": "ElastiCacheProcessingUnit",
+          "sku_description": "$0.0036 per million Valkey ECPUs"
+        },
+        "node_cache.t4g.micro_hour": {
+          "usd": 0.024,
+          "unit": "Hrs",
+          "sku_description": "$0.024 per T4G Micro Cache node-hour (or partial hour) running Valkey"
+        },
+        "node_cache.m7g.large_hour": {
+          "usd": 0.18,
+          "unit": "Hrs",
+          "sku_description": "$0.18 per Gen Purpose m7g.large node hour running Valkey"
+        }
+      },
+      "alb": {
+        "hour": {
+          "usd": 0.034,
+          "unit": "Hrs",
+          "sku_description": "$0.034 per Application LoadBalancer-hour (or partial hour)"
+        },
+        "lcu_hour": {
+          "usd": 0.011,
+          "unit": "LCU-Hrs",
+          "sku_description": "$0.011 per used Application load balancer capacity unit-hour (or partial hour)"
+        }
+      },
+      "fargate_linux_arm": {
+        "vcpu_hour": {
+          "usd": 0.0557,
+          "unit": "hours",
+          "sku_description": "AWS Fargate - ARM - vCPU - South America (Sao Paulo)"
+        },
+        "gb_hour": {
+          "usd": 0.00612,
+          "unit": "hours",
+          "sku_description": "AWS Fargate - ARM - Memory - South America (Sao Paulo)"
+        }
+      },
+      "data_transfer_out_internet": [
+        {
+          "from_gb": 0.0,
+          "to_gb": 100.0,
+          "usd_per_gb": 0.0,
+          "sku_description": "$0 for 100GB of data transfer out to the internet, aggregated globally, each month"
+        },
+        {
+          "from_gb": 0.0,
+          "to_gb": 10240.0,
+          "usd_per_gb": 0.15,
+          "sku_description": "$0.150 per GB - up to 10 TB / month data transfer out"
+        },
+        {
+          "from_gb": 10240.0,
+          "to_gb": 51200.0,
+          "usd_per_gb": 0.138,
+          "sku_description": "$0.138 per GB - next 40 TB / month data transfer out"
+        },
+        {
+          "from_gb": 51200.0,
+          "to_gb": 153600.0,
+          "usd_per_gb": 0.126,
+          "sku_description": "$0.126 per GB - next 100 TB / month data transfer out"
+        },
+        {
+          "from_gb": 153600.0,
+          "to_gb": null,
+          "usd_per_gb": 0.114,
+          "sku_description": "$0.114 per GB - greater than 150 TB / month data transfer out"
+        }
+      ]
+    }
+  },
+  "cloudfront": {
+    "source": {
+      "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudFront/current/index.json",
+      "publication_date": "2026-10-19T15:05:00Z"
+    },
+    "north_america": {
+      "transfer_tiers": [
+        {
+          "from_gb": 0.0,
+          "to_gb": 10240.0,
+          "usd_per_gb": 0.085,
+          "sku_description": "$0.085 per GB - first 10 TB / month data transfer out"
+        },
+        {
+          "from_gb": 10240.0,
+          "to_gb": 51200.0,
+          "usd_per_gb": 0.08,
+          "sku_description": "$0.080 per GB - next 40 TB / month data transfer out"
+        },
+        {
+          "from_gb": 51200.0,
+          "to_gb": 153600.0,
+          "usd_per_gb": 0.06,
+          "sku_description": "$0.060 per GB - next 100 TB / month data transfer out"
+        },
+        {
+          "from_gb": 153600.0,
+          "to_gb": 512000.0,
+          "usd_per_gb": 0.04,
+          "sku_description": "$0.040 per GB - next 350 TB / month data transfer out"
+        },
+        {
+          "from_gb": 512000.0,
+          "to_gb": 1048576.0,
+          "usd_per_gb": 0.03,
+          "sku_description": "$0.030 per GB - next 524 TB / month data transfer out"
+        },
+        {
+          "from_gb": 1048576.0,
+          "to_gb": 5242880.0,
+          "usd_per_gb": 0.025,
+          "sku_description": "$0.025 per GB - next 4 PB / month data transfer out"
+        },
+        {
+          "from_gb": 5242880.0,
+          "to_gb": null,
+          "usd_per_gb": 0.02,
+          "sku_description": "$0.020 per GB - data transfer out / month over 5 PB"
+        }
+      ],
+      "https_per_request": {
+        "usd": 1e-06,
+        "unit": "Requests",
+        "sku_description": "$0.0100 per 10,000 HTTPS Requests"
+      }
+    },
+    "south_america": {
+      "transfer_tiers": [
+        {
+          "from_gb": 0.0,
+          "to_gb": 10240.0,
+          "usd_per_gb": 0.11,
+          "sku_description": "$0.110 per GB - first 10 TB / month data transfer out"
+        },
+        {
+          "from_gb": 10240.0,
+          "to_gb": 51200.0,
+          "usd_per_gb": 0.105,
+          "sku_description": "$0.105 per GB - next 40 TB / month data transfer out"
+        },
+        {
+          "from_gb": 51200.0,
+          "to_gb": 153600.0,
+          "usd_per_gb": 0.09,
+          "sku_description": "$0.090 per GB - next 100 TB / month data transfer out"
+        },
+        {
+          "from_gb": 153600.0,
+          "to_gb": 512000.0,
+          "usd_per_gb": 0.08,
+          "sku_description": "$0.080 per GB - next 350 TB / month data transfer out"
+        },
+        {
+          "from_gb": 512000.0,
+          "to_gb": 1048576.0,
+          "usd_per_gb": 0.06,
+          "sku_description": "$0.060 per GB - next 524 TB / month data transfer out"
+        },
+        {
+          "from_gb": 1048576.0,
+          "to_gb": 5242880.0,
+          "usd_per_gb": 0.05,
+          "sku_description": "$0.050 per GB - next 4 PB / month data transfer out"
+        },
+        {
+          "from_gb": 5242880.0,
+          "to_gb": null,
+          "usd_per_gb": 0.04,
+          "sku_description": "$0.040 per GB - data transfer out / month over 5 PB"
+        }
+      ],
+      "https_per_request": {
+        "usd": 2.2e-06,
+        "unit": "Requests",
+        "sku_description": "$0.0220 per 10,000 HTTPS Requests"
+      }
+    },
+    "europe": {
+      "transfer_tiers": [
+        {
+          "from_gb": 0.0,
+          "to_gb": 10240.0,
+          "usd_per_gb": 0.085,
+          "sku_description": "$0.085 per GB - first 10 TB / month data transfer out"
+        },
+        {
+          "from_gb": 10240.0,
+          "to_gb": 51200.0,
+          "usd_per_gb": 0.08,
+          "sku_description": "$0.080 per GB - next 40 TB / month data transfer out"
+        },
+        {
+          "from_gb": 51200.0,
+          "to_gb": 153600.0,
+          "usd_per_gb": 0.06,
+          "sku_description": "$0.060 per GB - next 100 TB / month data transfer out"
+        },
+        {
+          "from_gb": 153600.0,
+          "to_gb": 512000.0,
+          "usd_per_gb": 0.04,
+          "sku_description": "$0.040 per GB - next 350 TB / month data transfer out"
+        },
+        {
+          "from_gb": 512000.0,
+          "to_gb": 1048576.0,
+          "usd_per_gb": 0.03,
+          "sku_description": "$0.030 per GB - next 524 TB / month data transfer out"
+        },
+        {
+          "from_gb": 1048576.0,
+          "to_gb": 5242880.0,
+          "usd_per_gb": 0.025,
+          "sku_description": "$0.025 per GB - next 4 PB / month data transfer out"
+        },
+        {
+          "from_gb": 5242880.0,
+          "to_gb": null,
+          "usd_per_gb": 0.02,
+          "sku_description": "$0.020 per GB - data transfer out / month over 5 PB"
+        }
+      ],
+      "https_per_request": {
+        "usd": 1.2e-06,
+        "unit": "Requests",
+        "sku_description": "$0.0120 per 10,000 HTTPS Requests"
+      }
+    }
+  }
+}

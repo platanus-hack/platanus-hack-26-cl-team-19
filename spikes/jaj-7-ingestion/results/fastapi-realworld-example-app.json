@@ -1,0 +1,2242 @@
+{
+  "repo": "fastapi-realworld-example-app",
+  "stats": {
+    "files": 70,
+    "functions": 98,
+    "parse_errors": 0,
+    "routers": 10,
+    "include_edges": 9,
+    "endpoints": 19,
+    "endpoints_rooted": 19,
+    "endpoints_with_db": 19,
+    "endpoints_with_db_in_handler": 16,
+    "endpoints_with_entity": 19,
+    "endpoints_with_cache": 0,
+    "endpoints_with_http": 0,
+    "endpoints_with_plugin": 0,
+    "endpoints_with_background": 0,
+    "risks": 3,
+    "seconds_parse": 0.031,
+    "seconds_total": 0.062
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/articles/feed",
+      "handler": "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+      "file": "app/api/routes/articles/articles_common.py",
+      "line": 27,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 18,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_articles_for_feed(users)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 221,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": true,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": true,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": true,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": true,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "type": "N+1",
+          "detail": "queries.get_tags_for_article_by_slug(tags) se ejecuta una vez por iteración",
+          "file": "app/db/repositories/articles.py",
+          "line": 228,
+          "db_call": "app/db/repositories/articles.py:255",
+          "via": [
+            "app.api.routes.articles.articles_common:get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository.get_articles_for_user_feed",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/articles/{slug}/favorite",
+      "handler": "app.api.routes.articles.articles_common:mark_article_as_favorite",
+      "file": "app/api/routes/articles/articles_common.py",
+      "line": 52,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 20,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.add_article_to_favorites(favorites)",
+          "shape": "commit",
+          "file": "app/db/repositories/articles.py",
+          "line": 276,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/api/routes/articles/articles_common.py:57",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_common:mark_article_as_favorite",
+            "app.db.repositories.articles:ArticlesRepository.add_article_into_favorites"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/articles/{slug}/favorite",
+      "handler": "app.api.routes.articles.articles_common:remove_article_from_favorites",
+      "file": "app/api/routes/articles/articles_common.py",
+      "line": 82,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 20,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.remove_article_from_favorites(favorites)",
+          "shape": "commit",
+          "file": "app/db/repositories/articles.py",
+          "line": 288,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/api/routes/articles/articles_common.py:87",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_common:remove_article_from_favorites",
+            "app.db.repositories.articles:ArticlesRepository.remove_article_from_favorites"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "GET",
+      "path": "/articles",
+      "handler": "app.api.routes.articles.articles_resource:list_articles",
+      "file": "app/api/routes/articles/articles_resource.py",
+      "line": 31,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 19,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "self.connection.fetch",
+          "shape": "unknown",
+          "file": "app/db/repositories/articles.py",
+          "line": 202,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": true,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": true,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": true,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": true,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "type": "N+1",
+          "detail": "queries.get_tags_for_article_by_slug(tags) se ejecuta una vez por iteración",
+          "file": "app/db/repositories/articles.py",
+          "line": 205,
+          "db_call": "app/db/repositories/articles.py:255",
+          "via": [
+            "app.api.routes.articles.articles_resource:list_articles",
+            "app.db.repositories.articles:ArticlesRepository.filter_articles",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/articles",
+      "handler": "app.api.routes.articles.articles_resource:create_new_article",
+      "file": "app/api/routes/articles/articles_resource.py",
+      "line": 59,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "articles_to_tags",
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 23,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.create_new_article(users)",
+          "shape": "commit",
+          "file": "app/db/repositories/articles.py",
+          "line": 45,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.services.articles:check_article_exists",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.create_new_tags(tags)",
+          "shape": "commit",
+          "file": "app/db/repositories/tags.py",
+          "line": 13,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:54",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.tags:TagsRepository.create_tags_that_dont_exist"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.add_tags_to_article(articles_to_tags)",
+          "shape": "commit",
+          "file": "app/db/repositories/articles.py",
+          "line": 327,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:54",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._link_article_with_tags"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.articles.articles_resource:create_new_article",
+            "app.db.repositories.articles:ArticlesRepository.create_article",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "GET",
+      "path": "/articles/{slug}",
+      "handler": "app.api.routes.articles.articles_resource:retrieve_article_by_slug",
+      "file": "app/api/routes/articles/articles_resource.py",
+      "line": 83,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": false,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 15,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "PUT",
+      "path": "/articles/{slug}",
+      "handler": "app.api.routes.articles.articles_resource:update_article_by_slug",
+      "file": "app/api/routes/articles/articles_resource.py",
+      "line": 95,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "articles",
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 19,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.update_article(articles)",
+          "shape": "commit",
+          "file": "app/db/repositories/articles.py",
+          "line": 81,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:update_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository.update_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/articles/{slug}",
+      "handler": "app.api.routes.articles.articles_resource:delete_article_by_slug",
+      "file": "app/api/routes/articles/articles_resource.py",
+      "line": 116,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "articles",
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 18,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.delete_article(articles)",
+          "shape": "commit",
+          "file": "app/db/repositories/articles.py",
+          "line": 95,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.articles.articles_resource:delete_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository.delete_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "POST",
+      "path": "/users/login",
+      "handler": "app.api.routes.authentication:login",
+      "file": "app/api/routes/authentication.py",
+      "line": 23,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "users"
+      ],
+      "functions_reached": 6,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_email(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 11,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.authentication:login",
+            "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "handler": "app.api.routes.authentication:register",
+      "file": "app/api/routes/authentication.py",
+      "line": 62,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "cpu",
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "users"
+      ],
+      "functions_reached": 13,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.create_new_user(users)",
+          "shape": "commit",
+          "file": "app/db/repositories/users.py",
+          "line": 40,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.db.repositories.users:UsersRepository.create_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.services.authentication:check_username_is_taken",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_email(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 11,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.services.authentication:check_email_is_taken",
+            "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        },
+        {
+          "kind": "cpu",
+          "op": "hash",
+          "detail": "pwd_context.hash (hash de contraseña)",
+          "shape": "password_hash",
+          "file": "app/services/security.py",
+          "line": 16,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.authentication:register",
+            "app.db.repositories.users:UsersRepository.create_user",
+            "app.models.domain.users:UserInDB.change_password",
+            "app.services.security:get_password_hash"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "GET",
+      "path": "/articles/{slug}/comments",
+      "handler": "app.api.routes.comments:list_comments_for_article",
+      "file": "app/api/routes/comments.py",
+      "line": 31,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 21,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_comments_for_article_by_slug(users)",
+          "shape": "range",
+          "file": "app/db/repositories/comments.py",
+          "line": 48,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.comments:list_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository.get_comments_for_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": true,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.comments:list_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository.get_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "type": "N+1",
+          "detail": "queries.is_user_following_for_another(users) se ejecuta una vez por iteración",
+          "file": "app/db/repositories/comments.py",
+          "line": 53,
+          "db_call": "app/db/repositories/profiles.py:43",
+          "via": [
+            "app.api.routes.comments:list_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository.get_comments_for_article",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/articles/{slug}/comments",
+      "handler": "app.api.routes.comments:create_comment_for_article",
+      "file": "app/api/routes/comments.py",
+      "line": 46,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 21,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.create_new_comment(users)",
+          "shape": "commit",
+          "file": "app/db/repositories/comments.py",
+          "line": 68,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.comments:create_comment_for_article",
+            "app.db.repositories.comments:CommentsRepository.create_comment_for_article"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.comments:create_comment_for_article",
+            "app.db.repositories.comments:CommentsRepository.create_comment_for_article",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/articles/{slug}/comments/{comment_id}",
+      "handler": "app.api.routes.comments:delete_comment_from_article",
+      "file": "app/api/routes/comments.py",
+      "line": 67,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "commentaries",
+        "favorites",
+        "tags",
+        "users"
+      ],
+      "functions_reached": 21,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.delete_comment_by_id(commentaries)",
+          "shape": "commit",
+          "file": "app/db/repositories/comments.py",
+          "line": 81,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.comments:delete_comment_from_article",
+            "app.db.repositories.comments:CommentsRepository.delete_comment"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_comment_by_id_and_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/comments.py",
+          "line": 26,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.comments:get_comment_by_id_from_path",
+            "app.db.repositories.comments:CommentsRepository.get_comment_by_id"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_article_by_slug(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/articles.py",
+          "line": 243,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_tags_for_article_by_slug(tags)",
+          "shape": "range",
+          "file": "app/db/repositories/articles.py",
+          "line": 255,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_tags_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_favorites_count_for_article(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 263,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.get_favorites_count_for_article_by_slug"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_article_in_favorites(favorites)",
+          "shape": "count",
+          "file": "app/db/repositories/articles.py",
+          "line": 268,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/articles.py:244",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.articles:get_article_by_slug_from_path",
+            "app.db.repositories.articles:ArticlesRepository.get_article_by_slug",
+            "app.db.repositories.articles:ArticlesRepository._get_article_from_db_record",
+            "app.db.repositories.articles:ArticlesRepository.is_article_favorited_by_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/comments.py:31",
+              "body"
+            ],
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.comments:get_comment_by_id_from_path",
+            "app.db.repositories.comments:CommentsRepository.get_comment_by_id",
+            "app.db.repositories.comments:CommentsRepository._get_comment_from_db_record",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "GET",
+      "path": "/profiles/{username}",
+      "handler": "app.api.routes.profiles:retrieve_profile_by_username",
+      "file": "app/api/routes/profiles.py",
+      "line": 21,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": false,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "users"
+      ],
+      "functions_reached": 10,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.profiles:get_profile_by_username_from_path",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "POST",
+      "path": "/profiles/{username}/follow",
+      "handler": "app.api.routes.profiles:follow_for_user",
+      "file": "app/api/routes/profiles.py",
+      "line": 32,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "followers_to_followings",
+        "users"
+      ],
+      "functions_reached": 15,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.subscribe_user_to_another(followers_to_followings)",
+          "shape": "commit",
+          "file": "app/db/repositories/profiles.py",
+          "line": 57,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.profiles:follow_for_user",
+            "app.db.repositories.profiles:ProfilesRepository.add_user_into_followers"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.profiles:get_profile_by_username_from_path",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/profiles/{username}/follow",
+      "handler": "app.api.routes.profiles:unsubscribe_from_user",
+      "file": "app/api/routes/profiles.py",
+      "line": 62,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "followers_to_followings",
+        "users"
+      ],
+      "functions_reached": 15,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.unsubscribe_user_from_another(followers_to_followings)",
+          "shape": "commit",
+          "file": "app/db/repositories/profiles.py",
+          "line": 70,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.profiles:unsubscribe_from_user",
+            "app.db.repositories.profiles:ProfilesRepository.remove_user_from_followers"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.is_user_following_for_another(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/profiles.py",
+          "line": 43,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/db/repositories/profiles.py:28",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.dependencies.profiles:get_profile_by_username_from_path",
+            "app.db.repositories.profiles:ProfilesRepository.get_profile_by_username",
+            "app.db.repositories.profiles:ProfilesRepository.is_user_following_for_another_user"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "GET",
+      "path": "/tags",
+      "handler": "app.api.routes.tags:get_all_tags",
+      "file": "app/api/routes/tags.py",
+      "line": 11,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "tags"
+      ],
+      "functions_reached": 3,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_all_tags(tags)",
+          "shape": "scan",
+          "file": "app/db/repositories/tags.py",
+          "line": 9,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.tags:get_all_tags",
+            "app.db.repositories.tags:TagsRepository.get_all_tags"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "GET",
+      "path": "/user",
+      "handler": "app.api.routes.users:retrieve_current_user",
+      "file": "app/api/routes/users.py",
+      "line": 19,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": false,
+      "db_ops": [
+        "read"
+      ],
+      "entities": [
+        "users"
+      ],
+      "functions_reached": 13,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        }
+      ],
+      "risks": []
+    },
+    {
+      "method": "PUT",
+      "path": "/user",
+      "handler": "app.api.routes.users:update_current_user",
+      "file": "app/api/routes/users.py",
+      "line": 39,
+      "rooted": true,
+      "path_resolved": true,
+      "async": true,
+      "touches": [
+        "db"
+      ],
+      "db_in_handler": true,
+      "db_ops": [
+        "read",
+        "write"
+      ],
+      "entities": [
+        "users"
+      ],
+      "functions_reached": 17,
+      "effects": [
+        {
+          "kind": "db",
+          "op": "write",
+          "detail": "queries.update_user_by_username(users)",
+          "shape": "commit",
+          "file": "app/db/repositories/users.py",
+          "line": 70,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.routes.users:update_current_user",
+            "app.db.repositories.users:UsersRepository.update_user"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_username(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 18,
+          "in_loop": false,
+          "branch": [],
+          "via": [
+            "app.api.dependencies.authentication:_get_current_user",
+            "app.db.repositories.users:UsersRepository.get_user_by_username"
+          ]
+        },
+        {
+          "kind": "db",
+          "op": "read",
+          "detail": "queries.get_user_by_email(users)",
+          "shape": "lookup",
+          "file": "app/db/repositories/users.py",
+          "line": 11,
+          "in_loop": false,
+          "branch": [
+            [
+              "app/api/routes/users.py:52",
+              "body"
+            ]
+          ],
+          "via": [
+            "app.api.routes.users:update_current_user",
+            "app.services.authentication:check_email_is_taken",
+            "app.db.repositories.users:UsersRepository.get_user_by_email"
+          ]
+        }
+      ],
+      "risks": []
+    }
+  ]
+}
