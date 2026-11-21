@@ -15,6 +15,9 @@ memoria y se pierden al reiniciar. Para leerla de ``backend/.env``:
 Con ``SUPABASE_URL``, las rutas de proyectos piden el token de sesión de Supabase y cada usuario ve
 solo sus proyectos (JAJ-78, ver ``app/api/auth.py``). ``BRANCHPOINT_AUTH=off`` lo apaga en local.
 
+En ``/mcp`` está el servidor MCP del agente (JAJ-67, ``app/agent/mcp.py``): la CLI de IA del usuario
+(por ejemplo Claude Code) se conecta ahí y usa las tools con la misma sesión que el editor.
+
 Con las variables ``GITHUB_APP_*``, ``/github/*`` conecta repos con la GitHub App y los analiza como v1
 (JAJ-57, ver ``app/api/routes/github.py``). Sin ellas, esas rutas responden 503.
 """
@@ -29,9 +32,11 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.mcp import build_mcp, mcp_asgi_app
+from app.agent.tools import Limiter
 from app.api.auth import SupabaseAuth, auth_from_env
 from app.api.errors import install_error_handlers
-from app.api.routes import costs, github, health, models, projects, runs
+from app.api.routes import chat, costs, github, health, models, projects, runs
 from app.api.run_cache import RUN_CACHE_HEADER
 from app.api.store import InMemoryProjectStore, ProjectStore
 from app.github import GitHubApp, GitHubAppConfig
@@ -71,9 +76,14 @@ def create_app(
     owns_store = store is None
     store = store if store is not None else store_from_env()
 
+    limiter = Limiter()  # llamadas por minuto y simulaciones por día, por usuario (MCP y chat)
+    mcp_server = build_mcp(store, auth, limiter)
+    mcp_app = mcp_asgi_app(mcp_server, auth)  # crea también el session manager de MCP
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        yield
+        async with mcp_server.session_manager.run():
+            yield
         if owns_store and hasattr(store, "close"):
             store.close()  # cierra el pool de conexiones a Postgres
 
@@ -87,7 +97,8 @@ def create_app(
         CORSMiddleware,
         allow_origins=cors_origins,
         allow_methods=["GET", "POST", "PUT"],  # PUT: escenarios del proyecto (JAJ-76)
-        allow_headers=["Content-Type", "Authorization"],  # Authorization: el token de sesión (JAJ-78)
+        # Authorization: el token de sesión (JAJ-78); X-Anthropic-Api-Key: la key del usuario para el chat (JAJ-67)
+        allow_headers=["Content-Type", "Authorization", "X-Anthropic-Api-Key"],
         expose_headers=[RUN_CACHE_HEADER],  # para que el editor sepa si el run venía guardado (JAJ-75)
     )
     install_error_handlers(app)
@@ -95,12 +106,16 @@ def create_app(
     app.state.auth = auth
     app.state.github = github_app
     app.state.ingestions = IngestionJobs()  # ingestas en curso (JAJ-57)
+    app.state.limiter = limiter
+    app.state.llm_factory = chat.default_llm_factory  # los tests lo reemplazan por un LLM falso
     app.include_router(health.router)
     app.include_router(runs.router)
     app.include_router(models.router)
     app.include_router(projects.router)
     app.include_router(costs.router)
     app.include_router(github.router)
+    app.include_router(chat.router)
+    app.mount("/", mcp_app)  # /mcp: el servidor MCP del agente (al final: las rutas de arriba tienen prioridad)
     return app
 
 
