@@ -37,7 +37,10 @@ def model_dict(steps, queues=None, db_vcpu=8):
 
 def cached_query(hit_ratio=0.5):
     step = {
-        "kind": "cache", "resource": "cache", "time": 0.0, "at": "app.py:1",
+        "kind": "cache",
+        "resource": "cache",
+        "time": 0.0,
+        "at": "app.py:1",
         "on_miss": [{"kind": "db", "resource": "db_connection", "time": JAJ44_QUERY_MS, "at": "app.py:2"}],
     }
     if hit_ratio is not None:
@@ -50,6 +53,7 @@ def resource(run, name):
 
 
 # --- caché ---------------------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("rate", sorted(JAJ44_REAL_P95_MS))
 def test_cache_matches_jaj44(rate):

@@ -82,19 +82,40 @@ def test_graph_with_cache_queue_and_external(client):
     ep = m["endpoints"][0]
     db_step = ep["steps"][0]
     ep["steps"] = [
-        {"kind": "cache", "resource": "cache", "time": {"value": 0.03}, "hit_ratio": {"value": 0.8},
-         "at": "app/x.py:1", "on_miss": [db_step]},
+        {
+            "kind": "cache",
+            "resource": "cache",
+            "time": {"value": 0.03},
+            "hit_ratio": {"value": 0.8},
+            "at": "app/x.py:1",
+            "on_miss": [db_step],
+        },
         {"kind": "background", "resource": "background", "time": {"value": 0.03}, "at": "app/x.py:2"},
     ]
-    m["deployment"]["queues"] = {"emails": {"workers": {"value": 2}, "job_steps": [
-        {"kind": "external", "resource": "external", "time": {"value": 300}, "at": "app/jobs.py:9"}]}}
+    m["deployment"]["queues"] = {
+        "emails": {
+            "workers": {"value": 2},
+            "job_steps": [{"kind": "external", "resource": "external", "time": {"value": 300}, "at": "app/jobs.py:9"}],
+        }
+    }
     g = client.post("/graph", json={"model": m}).json()
     kinds = {n["id"]: n["kind"] for n in g["nodes"]}
-    assert kinds == {"api": "api", "db": "db", "cache": "cache", "queue:emails": "queue",
-                     "worker:emails": "worker", "external": "external"}
+    assert kinds == {
+        "api": "api",
+        "db": "db",
+        "cache": "cache",
+        "queue:emails": "queue",
+        "worker:emails": "worker",
+        "external": "external",
+    }
     edges = {e["id"]: e for e in g["edges"]}
-    assert {"api->cache", "api->db", "api->queue:emails", "queue:emails->worker:emails",
-            "worker:emails->external"} <= set(edges)
+    assert {
+        "api->cache",
+        "api->db",
+        "api->queue:emails",
+        "queue:emails->worker:emails",
+        "worker:emails->external",
+    } <= set(edges)
     assert edges["worker:emails->external"]["endpoints"] == ["cola emails"]
     assert edges["api->cache"]["refs"] == ["app/x.py:1"]
 
@@ -144,7 +165,10 @@ def test_versions_chain_like_commits(client, project):
     assert (r.json()["number"], r.json()["parent"]) == (3, 1)
     history = client.get(f"/projects/{pid}").json()["versions"]
     assert [(v["label"], v["origin"], v["parent"]) for v in history] == [
-        ("v1", "repo", None), ("v2", "manual", 1), ("v3", "agente", 1)]
+        ("v1", "repo", None),
+        ("v2", "manual", 1),
+        ("v3", "agente", 1),
+    ]
     assert [p["id"] for p in client.get("/projects").json()] == [pid]
 
 
@@ -218,6 +242,14 @@ def test_compare_lists_added_endpoint(client, project):
 
 def test_openapi_lists_editor_routes(client):
     paths = client.get("/openapi.json").json()["paths"]
-    assert {"/models", "/models/{sample_id}", "/graph", "/projects", "/projects/{project_id}",
-            "/projects/{project_id}/versions", "/projects/{project_id}/versions/{number}",
-            "/projects/{project_id}/versions/{number}/runs", "/projects/{project_id}/compare"} <= set(paths)
+    assert {
+        "/models",
+        "/models/{sample_id}",
+        "/graph",
+        "/projects",
+        "/projects/{project_id}",
+        "/projects/{project_id}/versions",
+        "/projects/{project_id}/versions/{number}",
+        "/projects/{project_id}/versions/{number}/runs",
+        "/projects/{project_id}/compare",
+    } <= set(paths)

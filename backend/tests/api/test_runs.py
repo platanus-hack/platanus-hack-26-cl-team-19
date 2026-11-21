@@ -55,10 +55,17 @@ def test_defaults(client, raw):
 
 
 def test_rps_override_and_options(client, raw):
-    r = client.post("/runs", json={
-        "model": raw, "rps": 5, "duration_s": 10, "arrivals": "uniform",
-        "client_timeout_s": None, "cache_hit_ratio": 0.5,
-    })
+    r = client.post(
+        "/runs",
+        json={
+            "model": raw,
+            "rps": 5,
+            "duration_s": 10,
+            "arrivals": "uniform",
+            "client_timeout_s": None,
+            "cache_hit_ratio": 0.5,
+        },
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["rps"] == 5 and body["arrivals"] == "uniform"
@@ -97,13 +104,16 @@ def test_missing_field(client, raw):
     assert r.json()["error"] == {"code": "invalid_model", "message": "Al modelo le falta el campo 'deployment'."}
 
 
-@pytest.mark.parametrize("payload, field", [
-    ({"duration_s": 0}, "duration_s"),
-    ({"rps": -1}, "rps"),
-    ({"cache_hit_ratio": 1.5}, "cache_hit_ratio"),
-    ({"arrivals": "burst"}, "arrivals"),
-    ({"otro": 1}, "otro"),
-])
+@pytest.mark.parametrize(
+    "payload, field",
+    [
+        ({"duration_s": 0}, "duration_s"),
+        ({"rps": -1}, "rps"),
+        ({"cache_hit_ratio": 1.5}, "cache_hit_ratio"),
+        ({"arrivals": "burst"}, "arrivals"),
+        ({"otro": 1}, "otro"),
+    ],
+)
 def test_invalid_parameters(client, raw, payload, field):
     r = client.post("/runs", json={"model": raw, **payload})
     assert r.status_code == 422
@@ -124,11 +134,14 @@ def test_run_too_large(client, raw):
 
 
 def test_cors_allows_nuxt_dev(client):
-    r = client.options("/runs", headers={
-        "Origin": "http://localhost:3000",
-        "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type",
-    })
+    r = client.options(
+        "/runs",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
     assert r.status_code == 200
     assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
 

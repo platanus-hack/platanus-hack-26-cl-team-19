@@ -188,9 +188,7 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
     total = sum(e.weight for e in endpoints)
     if total <= 0:
         raise ValueError("Los pesos de los endpoints suman 0: no hay tráfico que simular")
-    endpoints = tuple(
-        Endpoint(e.id, e.weight / total, e.is_async, e.base_cpu_ms, e.steps) for e in endpoints
-    )
+    endpoints = tuple(Endpoint(e.id, e.weight / total, e.is_async, e.base_cpu_ms, e.steps) for e in endpoints)
 
     scenarios = {
         name: Scenario(name, float(value(sc["rps"])))
@@ -258,10 +256,7 @@ def _resolve_queue(step: Step, queues: dict[str, QueueDeployment], where: str, w
 
 
 def _load_endpoint(e: dict[str, Any], queues: dict[str, QueueDeployment], warnings: list[str]) -> Endpoint:
-    steps = [
-        _resolve_queue(_load_step(s, e["id"], warnings), queues, e["id"], warnings)
-        for s in e.get("steps", [])
-    ]
+    steps = [_resolve_queue(_load_step(s, e["id"], warnings), queues, e["id"], warnings) for s in e.get("steps", [])]
     # api_cpu_ms del modelo incluye los pasos de CPU (ej. hash); la CPU base es el resto.
     # Solo cuentan los pasos que siempre se hacen (no los de on_miss).
     cpu_steps = sum(s.time_ms * s.repeat for s in steps if s.resource == RESOURCE_API_CPU)

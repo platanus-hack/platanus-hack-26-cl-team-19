@@ -13,8 +13,19 @@ dependencies = [
 dev = [
     "pytest>=8",
     "httpx>=0.27",  # lo usa el TestClient de FastAPI
+    "ruff==0.17.6",  # versión fija: el CI y cada laptop formatean igual
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes + errores de pycodestyle, imports ordenados, bugbear y sintaxis moderna
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+# B008: FastAPI usa Depends(...) como valor por defecto a propósito
+ignore = ["B008"]

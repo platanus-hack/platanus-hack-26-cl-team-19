@@ -64,8 +64,9 @@ class Recorder:
         self.arrivals[self._second(t)] += 1
         self.by_endpoint[endpoint.id].requests += 1
 
-    def finish(self, endpoint: Endpoint, t0: float, t1: float, error: str | None,
-               client_timeout_s: float | None) -> None:
+    def finish(
+        self, endpoint: Endpoint, t0: float, t1: float, error: str | None, client_timeout_s: float | None
+    ) -> None:
         latency_s = t1 - t0
         if error is None and client_timeout_s is not None and latency_s > client_timeout_s:
             error = ERROR_CLIENT_TIMEOUT

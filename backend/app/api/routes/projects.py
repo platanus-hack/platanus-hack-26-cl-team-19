@@ -102,9 +102,7 @@ def get_version(project_id: str, number: int, store: ProjectStore = Depends(get_
 
 
 @router.post("/{project_id}/versions/{number}/runs", response_model=Run, summary="Simular una versión")
-def run_version(
-    project_id: str, number: int, req: RunParams, store: ProjectStore = Depends(get_store)
-) -> Run:
+def run_version(project_id: str, number: int, req: RunParams, store: ProjectStore = Depends(get_store)) -> Run:
     return run_model(_version(_project(store, project_id), number).model, req)
 
 
