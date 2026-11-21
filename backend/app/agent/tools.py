@@ -43,6 +43,7 @@ from app.models.run import Run
 
 SIM_SECONDS = 60.0  # duración por defecto; la elige el servidor, nunca el LLM
 MIN_SIM_SECONDS = 5.0
+DEFAULT_ERROR_RATE = 0.01  # piso de errores cuando el usuario no declaró uno (SUPUESTO, se avisa)
 SECONDS_DAY = 86_400
 SECONDS_MONTH = 30 * SECONDS_DAY
 RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
@@ -228,6 +229,16 @@ def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[st
         out["p95"] = {"goal_ms": goals.slo_p95_ms, "ok": p95 is not None and p95 <= goals.slo_p95_ms}
     if goals.slo_error_rate is not None:
         out["errors"] = {"goal": goals.slo_error_rate, "ok": run.error_rate <= goals.slo_error_rate}
+    else:
+        # El p95 solo mide las requests exitosas: una versión que rechaza casi todo puede tener un p95
+        # bajísimo. Sin meta de errores del usuario, se exige un piso SUPUESTO y se dice.
+        out["errors"] = {
+            "goal": DEFAULT_ERROR_RATE,
+            "ok": run.error_rate <= DEFAULT_ERROR_RATE,
+            "label": "SUPUESTO",
+            "source": f"Sin meta de errores del usuario se usa {DEFAULT_ERROR_RATE:.0%} como piso: el p95 solo mide "
+            "las requests exitosas. Pregúntale al usuario cuántos errores acepta (set_goals slo_error_rate).",
+        }
     if goals.budget_usd_month is not None and monthly is not None:
         out["budget"] = {"goal_usd_month": goals.budget_usd_month, "ok": monthly <= goals.budget_usd_month}
     out["meets_all"] = all(v["ok"] for v in out.values() if isinstance(v, dict))

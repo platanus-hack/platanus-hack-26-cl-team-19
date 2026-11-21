@@ -374,7 +374,7 @@ Reglas, iguales en los dos modos:
 - **Procedencia en cada resultado** (`label`, fuente con escenario, semilla, req/s y segundos simulados) y todas las advertencias del motor.
 - **Errores con la forma `{"error": "..."}`,** también para argumentos desconocidos o mal tipados. En MCP, un middleware los rechaza antes de la tool, porque el SDK los descarta en silencio.
 - **Límites por usuario:** 60 llamadas por minuto y 300 simulaciones por día (`compare` cuenta 2). Son en memoria, por instancia de la API.
-- **Metas:** `projects.slo_p95_ms`, `slo_error_rate` y `budget_usd_month` del modelo de datos (JAJ-55).
+- **Metas:** `projects.slo_p95_ms`, `slo_error_rate` y `budget_usd_month` del modelo de datos (JAJ-55). El p95 solo mide las requests exitosas. Por eso, si el usuario no declaró una meta de errores, `simulate` y `compare` exigen un piso de 1 % (`SUPUESTO`, y lo dicen): una versión que rechaza el 85 % de las requests nunca cumple, aunque su p95 sea bajo.
 
 `read_file` y `grep` no están. En el modo MCP sobran, porque la CLI del usuario lee su repo local. Para el chat haría falta guardar el repo extraído.
 

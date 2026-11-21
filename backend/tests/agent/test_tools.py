@@ -191,3 +191,21 @@ def test_limits(store, project):
     assert "error" not in t.call("simulate", {"project_id": project.id})
     assert "simulaciones por día" in t.call("simulate", {"project_id": project.id})["error"]
     assert "llamadas por minuto" in t.call("list_projects", {})["error"]
+
+
+def test_many_errors_never_meet_the_goals(tools, project):
+    """Con 85 % de errores el p95 (solo de las exitosas) puede quedar bajo la meta: igual no cumple."""
+    tools.call(
+        "set_traffic",
+        {"project_id": project.id, "volume": 100000, "unit": "orders_per_day", "peak_factor": 20, "quote": QUOTE},
+    )
+    tools.call("set_goals", {"project_id": project.id, "slo_p95_ms": 300, "quote": QUOTE})
+    v = tools.call(
+        "propose_version",
+        {"project_id": project.id, "ops": [{"op": "scale_api", "replicas": 50, "vcpu": 4}, {"op": "add_pooler"}]},
+    )
+    r = tools.call("simulate", {"project_id": project.id, "version": v["version"], "scenario": "cyberday"})
+    assert r["error_rate"] > 0.5, r["error_rate"]
+    goals = r["goals"]
+    assert goals["errors"]["ok"] is False and goals["errors"]["label"] == "SUPUESTO"
+    assert goals["meets_all"] is False
