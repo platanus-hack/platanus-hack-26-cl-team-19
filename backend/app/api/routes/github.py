@@ -20,16 +20,18 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from app.agent.loop import model_for
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import NOT_FOUND, ApiError
+from app.api.routes.credentials import Provider, llm_key
 from app.github.client import GitHubApp, GitHubError, Repo
-from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion
+from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion, team_token_cap
 from app.github.state import InvalidState, sign_state, verify_state
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -56,12 +58,69 @@ class RepoOut(BaseModel):
     installation_id: int
 
 
-class StartIngestion(BaseModel):
-    repo_full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$", examples=["acme/tienda"])
+class ConnectionOut(BaseModel):
+    repos: list[RepoOut]
+    installations: list[InstallationOut]
+    revoked: bool
+
+
+REPO_NAME = r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+MAX_REPOS = 4
+
+
+class RepoChoice(BaseModel):
+    full_name: str = Field(pattern=REPO_NAME, examples=["acme/api"])
     branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
+
+
+class StartIngestion(BaseModel):
+    """Un repo (``repo_full_name`` y ``branch``, la forma de siempre) o varios (``repos`` y ``primary``, IA-5)."""
+
+    provider: Provider = Field("anthropic", description="Quién lee el repo: Anthropic (Claude) u OpenAI.")
+    use_branchpoint_key: bool = False
+    repo_full_name: str | None = Field(None, pattern=REPO_NAME, examples=["acme/tienda"])
+    branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
+    repos: list[RepoChoice] | None = Field(
+        None, min_length=1, max_length=MAX_REPOS, description=f"Entre 1 y {MAX_REPOS} repos, sin repetidos."
+    )
+    primary: str | None = Field(
+        None, description="El repo que simula el motor. Obligatorio con más de un repo; tiene que estar en repos."
+    )
     name: str | None = Field(
         None, min_length=1, max_length=120, description="nombre del proyecto; por defecto, el repo"
     )
+
+    @model_validator(mode="after")
+    def _one_shape(self) -> StartIngestion:
+        if (self.repo_full_name is None) == (self.repos is None):
+            raise ValueError("manda repo_full_name o repos, no los dos")
+        if self.repos is not None:
+            names = [r.full_name.lower() for r in self.repos]
+            if len(set(names)) != len(names):
+                raise ValueError("repos repetidos")
+            if len(self.repos) > 1:
+                if self.primary is None:
+                    raise ValueError("con más de un repo, primary es obligatorio")
+                if self.primary.lower() not in names:
+                    raise ValueError("primary tiene que ser uno de repos")
+        return self
+
+    def choices(self) -> list[RepoChoice]:
+        """Los repos pedidos, el principal primero."""
+        if self.repos is None:
+            return [RepoChoice(full_name=self.repo_full_name or "", branch=self.branch)]
+        primary = (self.primary or self.repos[0].full_name).lower()
+        return sorted(self.repos, key=lambda r: r.full_name.lower() != primary)
+
+
+class RepoProgressOut(BaseModel):
+    full_name: str
+    branch: str
+    primary: bool
+    status: Literal["queued", "running", "done", "failed"]
+    endpoints: int | None
+    llm_steps: int | None
+    error_message: str | None
 
 
 class IngestionOut(BaseModel):
@@ -72,14 +131,19 @@ class IngestionOut(BaseModel):
     stage: Literal["acceso", "analisis", "preparacion"] | None
     commit_sha: str | None
     endpoints: int | None
+    llm_steps: int | None = Field(None, description="vueltas de la IA leyendo el repo, en vivo")
+    cost: dict[str, Any] | None = Field(None, description="al terminar: US$ de los tokens (ESTIMADO) o null")
     project_id: str | None = Field(description="al terminar: el proyecto creado, con su v1")
     version: int | None
     error_message: str | None
     created_at: str
+    repos: list[RepoProgressOut] | None = Field(None, description="con varios repos: el avance de cada uno")
 
 
 def _out(job: Ingestion) -> IngestionOut:
-    return IngestionOut(**{k: v for k, v in job.__dict__.items() if k != "owner"})
+    data = {k: v for k, v in job.__dict__.items() if k not in ("owner", "repos")}
+    repos = [RepoProgressOut(**r.__dict__) for r in job.repos] if job.repos else None
+    return IngestionOut(**data, repos=repos)
 
 
 def get_github(request: Request) -> GitHubApp:
@@ -216,6 +280,27 @@ def repos(
     return [RepoOut(**r.__dict__) for r in _repos(request, github, owner_of(user))]
 
 
+@router.get("/connection", response_model=ConnectionOut)
+def connection(
+    request: Request, github: GitHubApp = Depends(get_github), user: User | None = Depends(current_user)
+) -> ConnectionOut:
+    """Repos, instalaciones y si se perdió el acceso, en una sola consulta para el onboarding (JAJ-91).
+
+    ``revoked`` es verdadero cuando el usuario ya no tiene instalaciones vigentes y al menos una
+    fue revocada desde GitHub: así la UI explica por qué desaparecieron sus repos.
+    """
+    store = request.app.state.store
+    owner = owner_of(user)
+    available_repos = _repos(request, github, owner)
+    # Se consulta después de GitHub: _repos detecta y registra las revocaciones.
+    active = installations(request, user)
+    return ConnectionOut(
+        repos=[RepoOut(**repo.__dict__) for repo in available_repos],
+        installations=active,
+        revoked=not active and bool(store.list_installations(owner, revoked=True)),
+    )
+
+
 @router.get("/repos/{owner}/{repo}/branches", response_model=list[str])
 def branches(
     owner: str,
@@ -248,12 +333,48 @@ def start_ingestion(
     github: GitHubApp = Depends(get_github),
     jobs: IngestionJobs = Depends(get_jobs),
     user: User | None = Depends(current_user),
+    x_anthropic_api_key: str | None = Header(default=None),
+    x_openai_api_key: str | None = Header(default=None),
 ) -> IngestionOut:
     owner = owner_of(user)
-    repo = _repo_or_404(request, github, owner, req.repo_full_name)
-    job = jobs.start(owner, repo.full_name, req.branch or repo.default_branch)
+    choices = req.choices()
+    found = [_repo_or_404(request, github, owner, c.full_name) for c in choices]
+    branches = [c.branch or r.default_branch for c, r in zip(choices, found, strict=True)]
+    # La arquitectura la lee la IA (ADR 0002). La key sale como en el chat: la del header, la personal elegida
+    # o la de Branchpoint, que descuenta 1 análisis por repo, todos o ninguno (IA-5). El 422 y el 429 salen
+    # acá, antes de encolar.
+    header = x_openai_api_key if req.provider == "openai" else x_anthropic_api_key
+    key = llm_key(
+        request,
+        user,
+        req.provider,
+        header,
+        None,
+        purpose="extract",
+        units=len(found),
+        use_branchpoint_key=req.use_branchpoint_key,
+    )
+    factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
+    llms = [factory(key.key, model=model_for(req.provider, "extract")) for _ in found]  # uno por repo
+    repo, llm = found[0], llms[0]
+    others = [(r.full_name, b) for r, b in zip(found[1:], branches[1:], strict=True)]
+    job = jobs.start(owner, repo.full_name, branches[0], others or None)
     name = req.name or repo.full_name.split("/", 1)[1]
-    tasks.add_task(run_ingestion, jobs, job.id, github, request.app.state.store, repo, name)
+    cap = team_token_cap() if key.source == "team" else None  # el tope es solo para la key de Branchpoint
+    secondaries = [(r, b, m) for r, b, m in zip(found[1:], branches[1:], llms[1:], strict=True)] or None
+    tasks.add_task(
+        run_ingestion,
+        jobs,
+        job.id,
+        github,
+        request.app.state.store,
+        repo,
+        name,
+        llm,
+        provider=req.provider,
+        max_tokens_total=cap,
+        secondaries=secondaries,
+    )
     return _out(job)
 
 

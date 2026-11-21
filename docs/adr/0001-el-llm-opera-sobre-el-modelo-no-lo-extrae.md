@@ -4,6 +4,13 @@ status: proposed
 
 # El LLM opera sobre el modelo con tools tipadas; no extrae la arquitectura ni escribe números
 
+> **Estado (2026-11-21).** Dos partes de este ADR cambiaron:
+>
+> * **El paso 1** lo reemplaza el [ADR 0002](0002-la-ia-lee-la-arquitectura-del-repo.md): la arquitectura la lee una IA, para cualquier framework.
+> * **Dónde corre el agente:** corre en el backend, en el chat del editor, con la cuota de Branchpoint o con la key del usuario ([JAJ-94](https://linear.app/jajathom/issue/JAJ-94), [JAJ-114](https://linear.app/jajathom/issue/JAJ-114)). La CLI del usuario por MCP ([JAJ-54](https://linear.app/jajathom/issue/JAJ-54)) dejó de ser el modo principal, y la vinculación de la CLI se retiró de la interfaz ([JAJ-81](https://linear.app/jajathom/issue/JAJ-81) cancelada, [JAJ-123](https://linear.app/jajathom/issue/JAJ-123)).
+>
+> La regla central sigue vigente: el LLM opera con tools tipadas, no edita el JSON del modelo y no escribe números.
+
 La extracción de la arquitectura es determinista: `extract.py` ([JAJ-7](https://linear.app/jajathom/issue/JAJ-7)) y `build_model.py` ([JAJ-45](https://linear.app/jajathom/issue/JAJ-45)) arman el modelo `branchpoint.model/v1` sin IA. El LLM aparece solo en dos lugares: (1) **clasifica los huecos** que el AST deja marcados, eligiendo valores de un enum, y (2) es un **agente de chat** que llama tools del backend para completar el escenario, simular y proponer versiones. El LLM nunca edita el JSON del modelo ni escribe un número: cada número sale del catálogo, del motor o de una frase citada del usuario. Lo decidimos así porque el AST ya encuentra 332 de 332 endpoints en menos de 2 s y es reproducible, y porque "el LLM nunca inventa números" tiene que cumplirse por construcción, no por prompt.
 
 ## Flujo
@@ -21,6 +28,8 @@ La extracción de la arquitectura es determinista: `extract.py` ([JAJ-7](https:/
 
 Los pasos 1 y 3 no dependen de la IA: si no hay API key, el producto igual entrega un modelo con los huecos marcados como `SUPUESTO`.
 
+> **El paso 1 cambió con el [ADR 0002](0002-la-ia-lee-la-arquitectura-del-repo.md).** La arquitectura ya no la extrae un AST de FastAPI: la lee una IA, en la CLI del usuario o en la ingesta, con un schema estricto y para cualquier framework. Los pasos 3 y 4, y la regla de que el LLM no escribe números ni edita el modelo, siguen vigentes. El paso 2 (huecos) queda absorbido: la IA usa `shape: "unknown"` cuando no sabe.
+
 ## [2] Enriquecer huecos
 
 `extract.py` expone una lista `gaps[]` con lo que no pudo resolver. Hoy ya los detecta, pero quedan dispersos en los efectos:
@@ -35,7 +44,10 @@ Cada clasificación trae `evidence` (archivo:línea) y queda con etiqueta `ESTIM
 
 ## [4] Tools del agente
 
-> Desde JAJ-54 las mismas tools se exponen de dos formas. En el **modo MCP** (principal), el loop corre en la CLI de IA del usuario, y el máximo de iteraciones y la transmisión al chat de la última parte de esta sección no aplican. Ver Consecuencias. En el **modo chat** del editor, el loop es del backend y aplica todo lo de abajo.
+> Las mismas tools se exponen de dos formas:
+>
+> * **Chat del editor (modo principal):** el loop es del backend, con la cuota de Branchpoint o con la key del usuario, y aplica todo lo de abajo.
+> * **`/mcp` (vía secundaria):** el loop corre en una CLI de IA conectada al servidor MCP. Se usa en pruebas internas y por quien ya trabaja con su CLI, y la interfaz no lo ofrece. Ahí no aplican el máximo de iteraciones ni la transmisión al chat. Ver Consecuencias.
 
 Una tool es una función del backend que el LLM puede pedir ejecutar. El backend valida los argumentos, la ejecuta y le devuelve el resultado.
 
@@ -65,14 +77,17 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 
 ## Opciones descartadas
 
-* **El LLM lee el repo y escribe el modelo.** Es más lento, no es reproducible y puede inventar endpoints o latencias. Los spikes mostraron que el AST cubre casi todo.
+* **El LLM lee el repo y escribe el modelo.** Es más lento, no es reproducible y puede inventar endpoints o latencias. El ADR 0002 acepta que la IA proponga el grafo, con evidencia y schema estricto, pero nunca el modelo ni sus números.
 * **El LLM edita el JSON del modelo directamente.** No hay manera de garantizar que no invente números ni que el JSON siga siendo válido para el motor.
 * **El MCP de GitHub para leer el repo.** Es una llamada por archivo y pasa por el LLM (JAJ-53). Queda descartado para la ingesta.
 
 ## Consecuencias
 
 * Los cambios de arquitectura que el agente puede proponer son los que soportan las ops. Agregar uno nuevo es código, no prompt.
-* El proveedor de IA ([JAJ-54](https://linear.app/jajathom/issue/JAJ-54)) decidió **dónde corre el loop**, no solo qué credencial lo llama. El modo principal es **MCP**: el loop corre en la CLI de IA del usuario (por ejemplo Claude Code con su suscripción), y Branchpoint expone estas mismas tools como servidor MCP. En ese modo, Branchpoint no controla el máximo de iteraciones ni transmite las tool calls a su chat: la conversación la ve el usuario en su CLI. Para compensar, el servidor MCP **debe** tener un rate limit por token de Branchpoint (el que conecta la CLI, no tokens del LLM) y un tope de simulaciones por token y por día. Cuentan `simulate` (1) y `compare` (2). `propose_version` no simula: solo crea la versión. Es un requisito de JAJ-67. Cada `propose` aceptado queda como versión visible en el editor. El loop propio del backend, con máximo de iteraciones y streaming al editor, queda para el chat del editor con la API key del usuario o en modo demo. Las reglas de números de esta página valen igual en los dos modos, porque se cumplen en las tools. Ver `spikes/jaj-54-byos/README.md`.
+* **Dónde corre el loop.** Corre en el backend, en el chat del editor, con un máximo de iteraciones y streaming de cada tool call. La credencial es la cuota de Branchpoint o la key que el usuario guarda en Configuración (JAJ-94, JAJ-114).
+  * **Historia.** [JAJ-54](https://linear.app/jajathom/issue/JAJ-54) había elegido la CLI del usuario por MCP como modo principal. El equipo lo cambió, y la vinculación de la CLI salió de la interfaz (JAJ-123).
+  * **Qué queda de MCP.** `/mcp` sigue en el backend como vía secundaria, con la misma sesión de Supabase. En ese modo, Branchpoint no controla las iteraciones. Por eso mantiene un rate limit por usuario y un tope de simulaciones por día: `simulate` cuenta 1 y `compare` cuenta 2.
+  * **Reglas de números.** Valen igual en los dos modos, porque se cumplen en las tools.
 * El chat que pide los datos de uso ([JAJ-59](https://linear.app/jajathom/issue/JAJ-59)) se construye con `set_traffic`, `set_deployment` y `set_goals`.
 
 ## Issues
@@ -80,5 +95,8 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 * [JAJ-66](https://linear.app/jajathom/issue/JAJ-66): exponer `gaps[]` en el extractor y clasificarlos con el LLM (paso 2).
 * [JAJ-68](https://linear.app/jajathom/issue/JAJ-68): operaciones tipadas de `propose_version`.
 * [JAJ-67](https://linear.app/jajathom/issue/JAJ-67): loop del agente y sus tools (paso 4), expuestas por MCP y en el chat del editor. Depende de JAJ-68 y bloquea JAJ-59.
-* [JAJ-54](https://linear.app/jajathom/issue/JAJ-54): dónde corre el loop (MCP en la CLI del usuario). Enmienda la sección Consecuencias de este ADR.
-* [JAJ-81](https://linear.app/jajathom/issue/JAJ-81): conectar la CLI del usuario al MCP (token de Branchpoint y `claude mcp add`).
+* [JAJ-54](https://linear.app/jajathom/issue/JAJ-54): dónde corre el loop. Eligió MCP en la CLI del usuario, y ese modo pasó a ser secundario.
+* [JAJ-81](https://linear.app/jajathom/issue/JAJ-81): conectar la CLI del usuario al MCP. Cancelada.
+* [JAJ-94](https://linear.app/jajathom/issue/JAJ-94) y [JAJ-114](https://linear.app/jajathom/issue/JAJ-114): el chat del backend con la cuota de Branchpoint o la key del usuario (modo principal).
+* [JAJ-123](https://linear.app/jajathom/issue/JAJ-123): retira el código de la vinculación con la CLI y deja `/mcp` como vía secundaria.
+* [JAJ-85](https://linear.app/jajathom/issue/JAJ-85) y [JAJ-86](https://linear.app/jajathom/issue/JAJ-86): la IA lee la arquitectura para cualquier framework. Reemplazan el paso 1 (ADR 0002).

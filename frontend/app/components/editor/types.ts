@@ -8,6 +8,8 @@ import type {
 export interface Repository {
   id: string;
   name: string;
+  /** El repo que simula el motor, en proyectos de varios repos (IA-10). */
+  primary?: boolean;
   version: string;
 }
 
@@ -33,6 +35,8 @@ export interface InspectedNode {
   name: string;
   kind?: ComponentKind;
   status: SaturationStatus;
+  /** Para un componente que no se simula: por qué, en una línea (IA-10). */
+  notSimulated?: string;
   /** Frase corta que explica el estado en lenguaje simple. */
   summary?: string;
   resource?: NodeResource;
@@ -70,8 +74,19 @@ export type ProposalState = "idle" | "pending" | "applied" | "discarded";
 
 export type ToolCallStatus = "running" | "done" | "error";
 
+export type ChatAttachmentRef = {
+  id: string;
+  filename: string;
+  kind: "image" | "log";
+};
+
 export type ChatMessage =
-  | { id: string; role: "user"; text: string }
+  | {
+      id: string;
+      role: "user";
+      text: string;
+      attachments?: ChatAttachmentRef[];
+    }
   | { id: string; role: "agent"; text: string }
   | {
       id: string;
@@ -98,7 +113,17 @@ export interface SessionUser {
 }
 
 export type ComponentKind =
-  "api" | "database" | "cache" | "queue" | "worker" | "external";
+  | "api"
+  | "database"
+  | "cache"
+  | "queue"
+  | "worker"
+  | "external"
+  // de la IA (ADR 0002) y de los repos secundarios (IA-5)
+  | "service"
+  | "storage"
+  | "search"
+  | "other";
 
 export interface DiagramNode {
   id: string;
@@ -107,6 +132,10 @@ export interface DiagramNode {
   status?: SaturationStatus;
   /** Texto corto bajo el nombre, por ejemplo el tamaño del recurso. */
   detail?: string;
+  /** El repo del componente, en proyectos de varios repos (IA-5). */
+  repo?: string;
+  /** false: viene de un repo secundario y el motor no lo simula. Sin el campo, se simula. */
+  simulated?: boolean;
 }
 
 export interface DiagramEdge {

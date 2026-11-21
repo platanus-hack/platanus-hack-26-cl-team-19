@@ -2,20 +2,20 @@
   "_doc": "Catálogo de números por defecto del modelo. Cada valor trae su etiqueta de procedencia (JAJ-8), fuente y fecha. build_model.py lo cruza con el grafo del repo y las respuestas del usuario.",
   "db_shapes": {
     "pk": {"value": 0.10, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local", "date": "2026-11-21"},
-    "lookup": {"value": 0.10, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)", "date": "2026-11-21"},
+    "lookup": {"value": 0.10, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (no se verifica en el esquema)", "date": "2026-11-21"},
     "range": {"value": 0.14, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas", "date": "2026-11-21"},
     "count": {"value": 0.14, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice", "date": "2026-11-21"},
     "count_all": {"per_row": 0.00005, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla", "date": "2026-11-21"},
     "scan": {"per_row": 0.00005, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms", "date": "2026-11-21"},
     "commit": {"value": 1.1, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: escritura con commit, pgbench, disco local", "date": "2026-11-21"},
     "stage": {"value": 0.0, "unit": "ms", "label": "OBSERVADO", "source": "session.add/delete solo marcan la sesión; el SQL sale en el commit", "date": "2026-11-21"},
-    "unknown": {"value": 0.14, "unit": "ms", "label": "SUPUESTO", "source": "Query que el AST no pudo clasificar (SQL en texto o builder externo). Se asume un rango por índice; revisar", "date": "2026-11-21"}
+    "unknown": {"value": 0.14, "unit": "ms", "label": "SUPUESTO", "source": "Query que no se pudo clasificar (SQL en texto o builder externo). Se asume un rango por índice; revisar", "date": "2026-11-21"}
   },
   "table_rows_default": {"value": 100000, "unit": "filas", "label": "SUPUESTO", "source": "Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro", "date": "2026-11-21"},
   "n_plus_one_list_default": {"value": 20, "unit": "iteraciones", "label": "SUPUESTO", "source": "Largo de la lista que recorre un N+1, sin dato", "date": "2026-11-21"},
   "api": {
-    "cpu_ms": {"value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-43: CPU de FastAPI por request en un endpoint async con asyncpg, a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms). Se usa en endpoints async", "date": "2026-11-21"},
-    "cpu_ms_sync": {"value": 2.1, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: endpoint def con SQLModel + psycopg (stack del template), lectura por PK, sostenido con 16-64 clientes (1,4 ms con 1 cliente; 3,4 ms con COUNT + lista de 100). Se usa en endpoints def", "date": "2026-11-21"},
+    "cpu_ms": {"framework": "fastapi", "value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-43: CPU de FastAPI por request en un endpoint async con asyncpg, a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms). Se usa en endpoints async", "date": "2026-11-21"},
+    "cpu_ms_sync": {"framework": "fastapi", "value": 2.1, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: endpoint def con SQLModel + psycopg (stack del template), lectura por PK, sostenido con 16-64 clientes (1,4 ms con 1 cliente; 3,4 ms con COUNT + lista de 100). Se usa en endpoints def", "date": "2026-11-21"},
     "latency_ms": {"value": 0.25, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: latencia cliente ↔ API con k6 y 1 VU, Docker local", "date": "2026-11-21"},
     "threads_per_worker": {"value": 40, "unit": "hilos", "label": "ESTIMADO", "source": "Threadpool por defecto de AnyIO/Starlette para endpoints `def`", "date": "2026-11-21"},
     "workers_default": {"value": 1, "unit": "procesos", "label": "ESTIMADO", "source": "uvicorn y `fastapi run` levantan 1 worker si no se configura", "date": "2026-11-21"}

@@ -1,6 +1,6 @@
 name: PR review bot
 
-# Revisa cada PR hacia dev o main con la API de Claude y deja un solo comentario que se actualiza en
+# Revisa cada PR hacia main (los releases de dev → main) con la API de Claude y deja un solo comentario que se actualiza en
 # cada push (JAJ-63). No usa secrets: se autentica con Workload Identity Federation (el token OIDC de
 # GitHub se cambia por un token de Anthropic de pocos minutos). Los IDs de abajo no son secretos;
 # se crean en la Claude Console (ver docs/bot-reviewer.md). Mientras estén vacíos, el bot avisa y
@@ -9,8 +9,9 @@ name: PR review bot
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    # Solo main, por decisión del equipo: las PRs de trabajo hacia dev no se revisan; el release de
+    # dev → main sí, porque es lo que llega a producción.
     branches:
-      - dev
       - main
 
 permissions:

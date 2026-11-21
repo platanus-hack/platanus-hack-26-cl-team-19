@@ -1,5 +1,6 @@
 import type {
   AgentProposal,
+  ChatMessage,
   ProposalChange,
   DiagramEdge,
   DiagramNode,
@@ -171,17 +172,54 @@ const proposals = {
   },
 } satisfies Record<string, SampleProposal>;
 
-export const agentSuggestions = [
-  "¿Por qué se satura Pedidos?",
-  "Prueba agregar una caché a GET /orders",
-  "¿Qué pasa si duplico el tráfico?",
-];
-
 export interface AgentReply {
   tools: { name: string; input: string; output?: string; detail?: string }[];
   text: string;
   proposal?: SampleProposal;
 }
+
+export const chatPreview: ChatMessage[] = [
+  {
+    id: "demo-chat-question",
+    role: "user",
+    text: "¿Por qué se satura Pedidos durante el pico de tráfico?",
+  },
+  {
+    id: "demo-chat-model",
+    role: "tool",
+    name: "get_model",
+    input: '{"project_id":"tienda-api"}',
+    status: "done",
+  },
+  {
+    id: "demo-chat-simulation",
+    role: "tool",
+    name: "simulate",
+    input: '{"project_id":"tienda-api","scenario":"pico"}',
+    output: "Latencia p95 de 284 ms",
+    status: "done",
+  },
+  {
+    id: "demo-chat-answer",
+    role: "agent",
+    text: [
+      "## El cuello de botella está en Postgres",
+      "",
+      "Durante el pico, `GET /orders` ocupa las **8 conexiones** del pool.",
+      "",
+      "1. Revisa cuántas consultas quedan esperando.",
+      "2. Simula el pico con un pool más grande y compara el p95.",
+      "",
+      "```sql",
+      "SELECT state, count(*)",
+      "FROM pg_stat_activity",
+      "GROUP BY state;",
+      "```",
+      "",
+      "Consulta la [documentación de Postgres](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW) para interpretar los estados.",
+    ].join("\n"),
+  },
+];
 
 /** Respuestas guionadas para la galería; el agente real vive en el backend. */
 export function replyTo(

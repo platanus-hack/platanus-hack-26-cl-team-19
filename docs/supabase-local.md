@@ -135,6 +135,15 @@ El esquema vive **solo** en `supabase/migrations/`. Nunca se edita una migració
 
 Después de cambiar el esquema, revisa en Studio el **Advisors → Security Advisor**: avisa de tablas sin RLS y funciones expuestas a la API.
 
+**Si la migración crea una tabla en `public`:** Supabase le da todos los permisos a `anon` y `authenticated`, y solo el backend escribe (JAJ-97). Agrega en la misma migración:
+
+```sql
+revoke all on public.mi_tabla from anon;
+revoke insert, update, delete, truncate, references, trigger on public.mi_tabla from authenticated;
+```
+
+y, si el usuario debe poder leer sus filas, una política `for select`. `tests/db/test_permissions.py` falla si alguna tabla le da escritura a esos roles.
+
 ## Producción
 
 El proyecto de producción se llama `branchpoint` (ref `znkeccrcschfsslngfqv`, región `sa-east-1`). Para aplicarle migraciones necesitas que te inviten a la organización de Supabase y la contraseña de la base de datos (pídesela a Daniel, no va en el repo).

@@ -153,3 +153,23 @@ def test_realworld_t4g_burst_relieves_db():
     burst = simulate(model, "pico_normal", duration_s=60, cpu_credits="burst")
     assert sustained.cpu.db_vcpu_effective == 0.4 and burst.cpu.db_vcpu_effective == 2
     assert util(burst, "db_cpu") == pytest.approx(util(sustained, "db_cpu") / 5, rel=0.1)
+
+
+def test_queue_jobs_scale_their_queries_but_not_the_worker_cpu():
+    """JAJ-110: en un trabajo de una cola, la consulta corre en la DB y usa su factor; la CPU del worker
+    va sin ajustar, porque el modelo no dice en qué procesador corren los workers."""
+    raw = model_dict(db_factor=2.0, api_cpu_ms=1.0)
+    raw["deployment"]["queues"] = {
+        "consulta": {
+            "workers": 1,
+            "job_steps": [{"kind": "db", "resource": "db_connection", "time": 100, "at": "j.py:1"}],
+        },
+        "cpu": {"workers": 1, "job_steps": [{"kind": "cpu", "resource": None, "time": 100, "at": "j.py:2"}]},
+    }
+    raw["endpoints"][0]["steps"] = [
+        {"kind": "background", "resource": "background", "time": 0, "queue": "consulta"},
+        {"kind": "background", "resource": "background", "time": 0, "queue": "cpu"},
+    ]
+    run = sim(raw, rps=1)
+    p50 = {q.name: q.job_latency.p50_ms for q in run.queues}
+    assert p50["consulta"] == pytest.approx(200.0) and p50["cpu"] == pytest.approx(100.0)

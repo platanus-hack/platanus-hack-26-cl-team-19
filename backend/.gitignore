@@ -9,3 +9,5 @@ req.json
 
 # variables de entorno con secretos (ver .env.example)
 .env
+
+.env.local

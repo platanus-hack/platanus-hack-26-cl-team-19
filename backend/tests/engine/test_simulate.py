@@ -87,9 +87,13 @@ def test_pool_timeout(raw):
     assert next(r for r in run.resources if r.name == "db_pool").timeouts == run.errors["pool_timeout"]
 
 
-def test_cyberday_60s_fast_and_matches_checks(model, raw):
-    """60 s de CyberDay en menos de 1 s, y el cuello de botella coincide con los checks de JAJ-45."""
+def test_cyberday_60s_matches_checks(model, raw):
+    """60 s de CyberDay: el cuello de botella coincide con los checks de JAJ-45.
+
+    No se mide el tiempo real (JAJ-110): en un CI lento o cargado fallaba sin que nada cambiara. El
+    trabajo de una corrida lo acota el presupuesto de eventos (JAJ-99, ``tests/engine/test_limits.py``).
+    """
     run = simulate(model, "cyberday", duration_s=60)
-    assert run.elapsed_ms < 1000, f"tardó {run.elapsed_ms} ms"
+    assert run.elapsed_ms > 0
     assert run.bottleneck.resource == raw["checks"]["scenarios"]["cyberday"]["bottleneck"]  # api_cpu
     assert len(run.series) == 60

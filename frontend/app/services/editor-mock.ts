@@ -147,7 +147,7 @@ function makeProject(id: string, fullName = sample.name): DemoProject {
 
 export function createMockEditorApi(
   storage?: Storage,
-): ReturnType<typeof createEditorApi> {
+): Omit<ReturnType<typeof createEditorApi>, "chat"> {
   const primary = makeProject("fastapi-template");
   const worker = makeProject(
     "fastapi-worker",

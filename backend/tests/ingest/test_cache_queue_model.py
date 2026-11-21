@@ -1,10 +1,79 @@
-from textwrap import dedent
+"""Caché (cache-aside) y colas con workers, desde la arquitectura que propone la IA más la IaC."""
 
 import pytest
 
 from app.engine import simulate
-from app.ingest.build_model import build
+from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai
+from app.ingest.iac import scan_deployment
 from app.models import load_model
+
+EV = {"why": "visto en el código"}
+
+
+def db_read(entity, line, shape="pk"):
+    return {"kind": "db", "op": "read", "shape": shape, "entity": entity, "detail": "orm.get", "file": "app.js",
+            "line": line, **EV}  # fmt: skip
+
+
+def submission(**extra):
+    return ArchitectureSubmission.model_validate(
+        {
+            "repo": "acme/tienda",
+            "framework": "express",
+            "language": "javascript",
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/items/:id",
+                    "handler": "getItem",
+                    "file": "app.js",
+                    "line": 10,
+                    **EV,
+                    "effects": [
+                        db_read("User", 11),
+                        {
+                            "kind": "cache",
+                            "detail": "redis.get(item:id)",
+                            "file": "app.js",
+                            "line": 13,
+                            **EV,
+                            "on_miss": [db_read("Item", 16)],
+                        },
+                    ],
+                },
+                {
+                    "method": "POST",
+                    "path": "/refresh",
+                    "handler": "refresh",
+                    "file": "app.js",
+                    "line": 30,
+                    **EV,
+                    "effects": [
+                        {
+                            "kind": "background",
+                            "task": "refreshItem",
+                            "queue": "refresh",
+                            "detail": "queue.add",
+                            "file": "app.js",
+                            "line": 31,
+                            **EV,
+                        },  # fmt: skip
+                    ],
+                },
+            ],
+            "jobs": [
+                {
+                    "task": "refreshItem",
+                    "queue": "refresh",
+                    "file": "worker.js",
+                    "line": 3,
+                    **EV,
+                    "effects": [db_read("Item", 4)],
+                },  # fmt: skip
+            ],
+            **extra,
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -12,42 +81,7 @@ from app.models import load_model
     [(3, None, 3, "OBSERVADO"), (3, 2, 6, "OBSERVADO"), (None, None, 1, "SUPUESTO")],
     ids=["concurrencia", "concurrencia-por-replica", "concurrencia-desconocida"],
 )
-def test_ingestion_models_cache_aside_and_celery_worker(tmp_path, concurrency, replicas, expected_workers, label):
-    (tmp_path / "main.py").write_text(
-        dedent(
-            """\
-            from celery import Celery
-            from fastapi import BackgroundTasks, FastAPI
-
-            app = FastAPI()
-            celery = Celery()
-
-            def load_item(item_id):
-                return db.get(Item, item_id)
-
-            @app.get("/items/{item_id}")
-            def item(item_id):
-                db.get(User, 1)
-                key = f"item:{item_id}"
-                cached = redis.get(key)
-                if cached is not None:
-                    return cached
-                result = load_item(item_id)
-                redis.setex(key, 60, result)
-                return result
-
-            @celery.task(queue="refresh")
-            def refresh_item(item_id):
-                db.get(Item, item_id)
-
-            @app.post("/refresh")
-            def refresh(item_id, background_tasks: BackgroundTasks):
-                refresh_item.delay(item_id)
-                background_tasks.add_task(write_audit, item_id)
-            """
-        ),
-        encoding="utf-8",
-    )
+def test_cache_aside_and_queue_worker_from_ai_and_iac(tmp_path, concurrency, replicas, expected_workers, label):
     command = "celery -A main.celery worker -Q refresh"
     if concurrency is not None:
         command += f" --concurrency={concurrency}"
@@ -55,141 +89,45 @@ def test_ingestion_models_cache_aside_and_celery_worker(tmp_path, concurrency, r
     if replicas is not None:
         manifest += f"    deploy:\n      replicas: {replicas}\n"
     (tmp_path / "compose.yml").write_text(manifest, encoding="utf-8")
+    iac = scan_deployment(tmp_path).to_dict()
 
-    raw = build(tmp_path, {})
+    raw = build_from_ai(submission(), {}, iac=iac)
     cached_endpoint = next(ep for ep in raw["endpoints"] if ep["method"] == "GET")
     user_query, lookup = cached_endpoint["steps"]
-    assert user_query["detail"] == "db.get(User)"
-    assert [step["detail"] for step in lookup["on_miss"]] == ["db.get(Item)"]
-    assert lookup["hit_ratio"]["value"] is None
-    assert lookup["hit_ratio"]["needs_review"]
+    assert user_query["detail"] == "orm.get (User)"
+    assert [step["detail"] for step in lookup["on_miss"]] == ["orm.get (Item)"]
+    assert lookup["hit_ratio"]["value"] is None and lookup["hit_ratio"]["needs_review"]
     queue = raw["deployment"]["queues"]["refresh"]
     assert (queue["workers"]["value"], queue["workers"]["label"]) == (expected_workers, label)
-    assert queue["workers"].get("derived", False) == (replicas is not None)
-    assert queue["job_steps"][0]["detail"] == "db.get(Item)"
+    assert queue["job_steps"][0]["detail"] == "orm.get (Item)"
     missing = {m["field"] for m in raw["deployment"]["iac"]["missing"]}
-    assert missing >= {
-        f"overrides.cache_hit_ratio.{lookup['at']}",
-        "deployment.queues.refresh.max_length",
-    }
+    assert missing >= {f"overrides.cache_hit_ratio.{lookup['at']}", "deployment.queues.refresh.max_length"}
     assert ("deployment.queues.refresh.workers" in missing) == (concurrency is None)
+
     model = load_model(raw)
     post_steps = next(ep for ep in model.endpoints if ep.id == "POST /refresh").steps
-    assert [step.queue for step in post_steps] == ["refresh", None]
-
+    assert [step.queue for step in post_steps] == ["refresh"]
     default_run = simulate(model, rps=100, duration_s=5, seed=1)
-    assert default_run.cache.hits == 0
-    assert default_run.cache.misses > 0
+    assert default_run.cache.hits == 0 and default_run.cache.misses > 0
     assert default_run.queues[0].processed > 0
-    assert any("tasa de aciertos" in warning for warning in default_run.warnings)
 
-    configured = build(
-        tmp_path,
+    configured = build_from_ai(
+        submission(),
         {
             "overrides": {"cache_hit_ratio": {lookup["at"]: 0.5}},
             "deployment": {"queues": {"refresh": {"max_length": 8}}},
         },
+        iac=iac,
     )
     assert configured["deployment"]["queues"]["refresh"]["max_length"]["value"] == 8
     run = simulate(load_model(configured), rps=100, duration_s=5, seed=1)
     assert run.cache.hits > 0 and run.cache.misses > 0
-    assert run.queues[0].processed > 0
 
 
-def test_discarded_cache_branch_does_not_ask_for_hit_ratio(tmp_path):
-    (tmp_path / "main.py").write_text(
-        dedent(
-            """\
-            from fastapi import FastAPI
-
-            app = FastAPI()
-
-            def load_cached():
-                cached = redis.get("item")
-                if cached is None:
-                    cached = db.get(Item, 1)
-                    redis.set("item", cached)
-                return cached
-
-            @app.get("/item")
-            def get_item(use_cache: bool):
-                if use_cache:
-                    return load_cached()
-                else:
-                    db.get(User, 1)
-                    db.get(Order, 1)
-                    return db.get(Item, 1)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    model = build(tmp_path, {})
-    endpoint = model["endpoints"][0]
-    assert all(step["kind"] == "db" for step in endpoint["steps"])
-    (cache,) = endpoint["alternatives"]
-    assert cache["on_miss"]
-    assert f"overrides.cache_hit_ratio.{cache['at']}" not in {
-        missing["field"] for missing in model["deployment"]["iac"]["missing"]
-    }
-
-
-@pytest.mark.parametrize("key, guarded", [("x", True), ("another_key", False)])
-def test_cache_miss_requires_a_matching_key(tmp_path, key, guarded):
-    (tmp_path / "main.py").write_text(
-        dedent(
-            f'''\
-            from fastapi import FastAPI
-
-            app = FastAPI()
-
-            @app.get("/x")
-            def endpoint():
-                cached = redis.get("x")
-                if cached is None:
-                    cached = db.get(Item, 1)
-                    redis.set("{key}", cached)
-                return cached
-            '''
-        ),
-        encoding="utf-8",
-    )
-
-    steps = build(tmp_path, {})["endpoints"][0]["steps"]
-    if guarded:
-        assert [step["resource"] for step in steps] == ["cache"]
-        assert [step["resource"] for step in steps[0]["on_miss"]] == ["db_connection"]
-    else:
-        assert [step["resource"] for step in steps] == ["cache", "db_connection", "cache"]
-        assert all("on_miss" not in step for step in steps)
-
-
-def test_shared_queue_does_not_assign_one_task_profile_to_every_job(tmp_path):
-    (tmp_path / "main.py").write_text(
-        dedent(
-            """\
-            from celery import shared_task
-            from fastapi import FastAPI
-
-            app = FastAPI()
-
-            @shared_task(queue="refresh")
-            def refresh_item(item_id):
-                db.get(Item, item_id)
-
-            @shared_task
-            def refresh_user(user_id):
-                db.get(User, user_id)
-
-            @app.post("/refresh")
-            def refresh():
-                refresh_item.delay(1)
-                refresh_user.apply_async(args=[2], queue="refresh")
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    raw = build(tmp_path, {})
-    assert not load_model(raw).queues
-    assert [s["resource"] for s in raw["endpoints"][0]["steps"]] == ["background", "background"]
+def test_shared_queue_does_not_assign_one_task_profile_to_every_job():
+    sub = submission().model_dump()
+    sub["endpoints"][1]["effects"].append({**sub["endpoints"][1]["effects"][0], "task": "refreshUser", "line": 32})
+    sub["jobs"].append({**sub["jobs"][0], "task": "refreshUser"})
+    raw = build_from_ai(ArchitectureSubmission.model_validate(sub))
+    assert not load_model(raw).queues  # dos perfiles de trabajo en una cola: no se adivina
+    assert [s["resource"] for s in raw["endpoints"][1]["steps"]] == ["background", "background"]

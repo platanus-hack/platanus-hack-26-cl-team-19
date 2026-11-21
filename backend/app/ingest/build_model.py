@@ -1,13 +1,15 @@
-"""Arma el modelo v1 (branchpoint.model/v1) de un repo FastAPI (JAJ-45, movido de spikes/ en JAJ-57).
+"""Arma el modelo v1 (``branchpoint.model/v1``) de un repo, sin importar su framework (JAJ-45, JAJ-85).
 
-Cruza tres fuentes:
-  1. El grafo del repo (extractor de JAJ-7), más la configuración que se lee del repo (workers, pool).
-  2. El catálogo de números (catalog.json): tiempos calibrados de JAJ-8 y precios de JAJ-11.
-  3. Las 3 respuestas del usuario: tráfico, dónde está desplegado, ticket y conversión. Son opcionales:
+Cruza cuatro fuentes:
+  1. El grafo intermedio del repo (endpoints → pasos con forma y ``archivo:línea``), que propone una IA
+     (``ai_graph.py``, ADR 0002).
+  2. Los archivos de despliegue (``iac.py``, JAJ-60): servicios, réplicas, workers.
+  3. El catálogo de números (catalog.json): tiempos calibrados de JAJ-8 y precios de JAJ-11.
+  4. Las respuestas del usuario: tráfico, dónde está desplegado, ticket y conversión. Son opcionales:
      lo que falte sale del catálogo como SUPUESTO con ``needs_review`` (el agente lo pide después, JAJ-59).
 
-Uso (desde ``backend/``):
-    python -m app.ingest.build_model <ruta-al-repo> [--answers answers.json] [-o modelo.json]
+Uso (desde ``backend/``), con la arquitectura en el formato de ``submit_architecture``:
+    python -m app.ingest.build_model arquitectura.json [--answers answers.json] [-o modelo.json]
 
 Cada número del modelo trae `value`, `unit`, `label` (OBSERVADO, CALIBRADO, ESTIMADO, SUPUESTO), `source` y `date`.
 El script no simula: solo agrega cotas analíticas simples en `checks` para revisar el modelo.
@@ -16,15 +18,12 @@ El script no simula: solo agrega cotas analíticas simples en `checks` para revi
 from __future__ import annotations
 
 import argparse
-import ast
 import json
 import re
 from datetime import date
 from pathlib import Path
 
 from app.catalog import load_catalog
-from app.ingest import extract
-from app.ingest.iac import scan_deployment  # JAJ-60: archivos de despliegue
 
 RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
 HOURS_MONTH = 730
@@ -73,135 +72,18 @@ def derived(value, unit, source, *parts: dict) -> dict:
     )
 
 
-# ---------- configuración que se lee del repo (OBSERVADO) ----------
-SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__"}
-RUN_FILES = (
-    "Dockerfile*",
-    "*.Dockerfile",
-    "docker-compose*.y*ml",
-    "compose*.y*ml",
-    "Procfile",
-    "*.sh",
-    "gunicorn*.py",
-    "start*.py",
-)
-
-
-def _files(repo: Path, patterns) -> list[Path]:
-    out = set()
-    for pat in patterns:
-        for p in repo.rglob(pat):
-            if p.is_file() and not any(part in SKIP for part in p.relative_to(repo).parts):
-                out.add(p)
-    return sorted(out)
-
-
-def read_workers(repo: Path) -> tuple[int, str] | None:
-    """Workers del servidor: `--workers N` / `-w N` en Dockerfile, compose, Procfile o scripts; `workers = N` en gunicorn."""
-    for path in _files(repo, RUN_FILES):
-        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            m = re.search(r"(?:--workers|\s-w)[\s=\"',]+(\d+)", line)
-            if m and re.search(r"uvicorn|gunicorn|fastapi|hypercorn", line):
-                return int(m.group(1)), f"{path.relative_to(repo)}:{i}"
-            m = re.match(r"\s*workers\s*=\s*(\d+)", line)
-            if m and path.suffix == ".py":
-                return int(m.group(1)), f"{path.relative_to(repo)}:{i}"
-    return None
-
-
-def _config_default(proj: extract.Project, name: str) -> tuple[int, str] | None:
-    """Valor por defecto de settings.X / config.X: `x: int = 10` o `X = config("X", default=20)`."""
-    for mod in proj.modules.values():
-        for node in ast.walk(mod.tree):
-            target = val = None
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                target, val = node.target.id, node.value
-            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                target, val = node.targets[0].id, node.value
-            if target is None or target.lower() != name.lower() or val is None:
-                continue
-            if isinstance(val, ast.Call):
-                val = extract._kw(val, "default")
-            if isinstance(val, ast.Constant) and isinstance(val.value, int) and not isinstance(val.value, bool):
-                return val.value, f"{mod.rel}:{node.lineno}"
-    return None
-
-
-def _resolve_int(proj, mod, expr) -> tuple[int, str, bool] | None:
-    """(valor, archivo:línea, viene_de_config). Constante en la llamada o default de la configuración."""
-    if isinstance(expr, ast.Constant) and isinstance(expr.value, int):
-        return expr.value, f"{mod.rel}:{expr.lineno}", False
-    attr = expr.attr if isinstance(expr, ast.Attribute) else expr.id if isinstance(expr, ast.Name) else None
-    hit = _config_default(proj, attr) if attr else None
-    return (hit[0], hit[1], True) if hit else None
-
-
-def read_pool(proj: extract.Project) -> dict:
-    """Busca create_engine / create_async_engine / asyncpg.create_pool y lee el tamaño del pool."""
-    found = []
-    for mod in proj.modules.values():
-        dicts = {}
-        for node in ast.walk(mod.tree):
-            if (
-                isinstance(node, ast.Assign)
-                and isinstance(node.value, ast.Dict)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-            ):
-                dicts[node.targets[0].id] = node.value
-        for node in ast.walk(mod.tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = extract._name(node.func).split(".")[-1]
-            if fn not in ("create_engine", "create_async_engine", "create_pool"):
-                continue
-            kwargs = {k.arg: k.value for k in node.keywords if k.arg}
-            for k in node.keywords:  # create_engine(url, **kwargs) con un dict literal en el mismo módulo
-                if k.arg is None and isinstance(k.value, ast.Name) and k.value.id in dicts:
-                    d = dicts[k.value.id]
-                    kwargs.update(
-                        {key.value: v for key, v in zip(d.keys, d.values, strict=True) if isinstance(key, ast.Constant)}
-                    )
-            kind = "asyncpg" if fn == "create_pool" else "sqlalchemy"
-            if kind == "asyncpg" and "max_size" in kwargs:
-                kwargs["pool_size"] = kwargs["max_size"]
-            found.append((mod.name.endswith("env"), -len(kwargs), mod, node, kind, kwargs))
-    if not found:
-        # Sin create_engine visible (lo arma una librería, o la app no usa SQLAlchemy): se asume el pool
-        # por defecto de SQLAlchemy, por revisar. Antes de JAJ-57 esto rompía checks() con un KeyError.
-        cat = CATALOG["pools"]["sqlalchemy"]
-        why = "No se encontró create_engine en el repo: se asume el default de SQLAlchemy"
-        return {
-            "library": "sqlalchemy",
-            "defined_at": None,
-            **{
-                k: num(cat[k]["value"], cat[k]["unit"], "SUPUESTO", f"{why}. {cat[k]['source']}", default=True)
-                for k in ("pool_size", "max_overflow", "pool_timeout_s")
-            },
-        }
-    _, _, mod, node, kind, kwargs = sorted(found, key=lambda f: (f[0], f[1]))[0]  # se evitan los env.py de migraciones
-    cat = CATALOG["pools"][kind]
-    where = f"{mod.rel}:{node.lineno}"
-    out = {"library": kind, "defined_at": where}
-    if "poolclass" in kwargs and "NullPool" in extract._name(kwargs["poolclass"]):
-        out["pool_size"] = num(0, "conexiones", "OBSERVADO", f"NullPool en {where}: una conexión nueva por request")
-        out["max_overflow"] = num(None, "conexiones", "OBSERVADO", f"NullPool en {where}: sin tope en la app")
-        return out
-    for key, kw in (("pool_size", "pool_size"), ("max_overflow", "max_overflow"), ("pool_timeout_s", "pool_timeout")):
-        hit = _resolve_int(proj, mod, kwargs[kw]) if kw in kwargs else None
-        if hit:
-            val, at, via_config = hit
-            src = (
-                f"default de la configuración en {at} (se puede cambiar por variable de entorno)"
-                if via_config
-                else f"{kw}={val} en {at}"
-            )
-            out[key] = num(val, cat[key]["unit"], "OBSERVADO", src)
-        else:
-            out[key] = from_catalog(
-                cat[key], source=f"{cat[key]['source']}. El repo no lo configura ({where})", label="ESTIMADO"
-            )
-    return out
+# ---------- configuración por defecto ----------
+def default_pool(why: str, library: str = "sqlalchemy") -> dict:
+    """El pool por defecto de SQLAlchemy, como SUPUESTO por revisar, cuando el repo no dice el suyo."""
+    cat = CATALOG["pools"]["sqlalchemy"]
+    return {
+        "library": library,
+        "defined_at": None,
+        **{
+            k: num(cat[k]["value"], cat[k]["unit"], "SUPUESTO", f"{why}. {cat[k]['source']}", default=True)
+            for k in ("pool_size", "max_overflow", "pool_timeout_s")
+        },
+    }
 
 
 # ---------- cruce grafo → parámetros ----------
@@ -255,6 +137,18 @@ def step_for(e: dict, ctx: dict) -> dict:
             default=n.get("needs_review", False),
         )
     step["via"] = e["via"]
+    if e.get("service"):
+        step["service"] = e["service"]
+    if e.get("origin"):
+        # Paso propuesto por la IA (JAJ-85): el costo sale del catálogo, pero la clasificación no la
+        # verificó nadie más, así que el número no puede ser más fuerte que ESTIMADO.
+        t = step["time"]
+        step["time"] = {
+            **t,
+            "label": weakest(t["label"], "ESTIMADO"),
+            "source": f"{t['source']}. {e['origin']['source']}",
+        }
+        step["origin"] = e["origin"]
     return step
 
 
@@ -307,7 +201,7 @@ def effect_steps(effects: list[dict], ctx: dict) -> list[dict]:
         queries = [i for i in region if i != fills[0]]
         if not queries or not all(effects[i]["kind"] == "db" and effects[i]["op"] == "read" for i in queries):
             continue
-        # El motor ya simula el SET después de on_miss, incluso si el AST lo detectó aparte.
+        # El motor ya simula el SET después de on_miss: el set que guarda la clave no se cuenta aparte.
         on_miss = [{**steps[i], "branch": steps[i]["branch"][len(miss_branch) :]} for i in queries]
         selected, _ = pick_branches(on_miss)
         order = {id(query): i for i, query in enumerate(on_miss)}
@@ -366,8 +260,17 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
     dep_db = any(s["via"][0] != ep["handler"] for s in db)
     cpu_in_hold = [s for s in cpu if db and (dep_db or db_funcs & set(s["via"][1:]))]
     db += _mean_cache_reads(kept)
-    # La CPU propia de FastAPI depende de si el endpoint es async (event loop) o def (threadpool, JAJ-46)
-    base_cpu = from_catalog(CATALOG["api"]["cpu_ms" if ep.get("async") else "cpu_ms_sync"])
+    # La CPU propia del framework depende de si el endpoint bloquea su proceso o no (JAJ-46). El catálogo
+    # dice en qué framework se midió: en otro, el valor es un supuesto por revisar (JAJ-85).
+    entry = CATALOG["api"]["cpu_ms" if ep.get("async") else "cpu_ms_sync"]
+    base_cpu = from_catalog(entry)
+    framework = (ep.get("origin") or {}).get("framework")
+    if framework and entry.get("framework") and framework != entry["framework"]:
+        base_cpu = {
+            **base_cpu,
+            "label": "SUPUESTO",
+            "source": f"{base_cpu['source']}. Medido en {entry['framework']}; el repo usa {framework}",
+        }
     parts_hold = [s["time"] for s in db + cpu_in_hold] + [s["repeat"] for s in db if "repeat" in s]
     hold = (
         derived(
@@ -382,14 +285,14 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
     api_cpu = derived(
         round(base_cpu["value"] + sum(_ms(s) for s in cpu), 4),
         "ms",
-        "CPU base de FastAPI + CPU pesada del endpoint",
+        "CPU base del framework + CPU pesada del endpoint",
         base_cpu,
         *[s["time"] for s in cpu],
     )
     ext = [s for s in kept if s["resource"] == "external"]
     for s in kept + dropped:
         s.pop("branch", None)
-    return {
+    out = {
         "id": f"{ep['method']} {ep['path']}",
         "method": ep["method"],
         "path": ep["path"],
@@ -405,6 +308,9 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
         else None,
         "risks": ep["risks"],
     }
+    if ep.get("origin"):
+        out["origin"] = ep["origin"]
+    return out
 
 
 def build_queues(graph: dict, iac: dict, answers: dict, ctx: dict) -> dict:
@@ -800,31 +706,21 @@ def collect_assumptions(node, path="") -> list[dict]:
 
 
 class NoEndpoints(ValueError):
-    """El repo no tiene endpoints de FastAPI que modelar."""
+    """La IA no encontró endpoints que modelar en el repo."""
 
 
-def build(repo: Path, answers: dict) -> dict:
-    graph = extract.run(repo)
-    if not graph["endpoints"]:
-        raise NoEndpoints(
-            "No encontramos endpoints de FastAPI en ese repo y esa rama. Branchpoint analiza apps FastAPI."
-        )
-    proj = extract.Project(repo)
-    proj.load()
-    iac = scan_deployment(repo).to_dict()
-    w = read_workers(repo)
-    if w:
-        workers = num(w[0], "procesos", "OBSERVADO", f"{w[0]} workers en {w[1]}")
-    elif "api.workers" in iac["observed"]:
-        workers = iac["observed"]["api.workers"]
-    else:
-        workers = from_catalog(CATALOG["api"]["workers_default"])
-    pool = read_pool(proj)
+NO_ENDPOINTS = (
+    "No encontramos endpoints HTTP en ese repo y esa rama. Si el backend está en otra rama o en otro repo, "
+    "analiza esa; si es un monorepo, revisa que la rama tenga el código del servidor."
+)
+
+
+def endpoint_context(answers: dict) -> dict:
+    """Lo que necesita ``build_endpoint`` para ponerle números a los pasos: respuestas o catálogo."""
     ov = answers.get("overrides", {})
-    rows_default = from_catalog(CATALOG["table_rows_default"])
-    ctx = {
+    return {
         "table_rows": {k: declared(v, "filas", f"filas de {k}") for k, v in ov.get("table_rows", {}).items()},
-        "table_rows_default": rows_default,
+        "table_rows_default": from_catalog(CATALOG["table_rows_default"]),
         "n_plus_one": declared(ov["n_plus_one_list"], "iteraciones", "largo de las listas con N+1")
         if "n_plus_one_list" in ov
         else from_catalog(CATALOG["n_plus_one_list_default"]),
@@ -833,10 +729,35 @@ def build(repo: Path, answers: dict) -> dict:
         "questions": {},
         "queues": {},
     }
+
+
+def summarize_assumptions(model: dict) -> dict:
+    found = collect_assumptions({k: v for k, v in model.items() if k != "checks"})
+    by_source: dict[str, dict] = {}
+    for a in found:
+        g = by_source.setdefault(
+            a["source"],
+            {"source": a["source"], "count": 0, "needs_review": a["needs_review"], "example_path": a["path"]},
+        )
+        g["count"] += 1
+    return {
+        "total": len(found),
+        "by_source": sorted(by_source.values(), key=lambda g: -g["count"]),
+        "items": found,
+    }
+
+
+def build_from_graph(graph: dict, repo_name: str, answers: dict, *, iac: dict, workers: dict, pool: dict) -> dict:
+    """El modelo ``branchpoint.model/v1`` desde el grafo intermedio, sin importar de dónde salió el grafo.
+
+    El grafo son endpoints → efectos con forma y ``archivo:línea``, y opcionalmente ``jobs`` de colas. Lo
+    arma ``ai_graph.to_graph`` desde lo que propone la IA (ADR 0002).
+    Los números salen siempre del catálogo, de las respuestas o de la IaC (ADR 0001)."""
+    ctx = endpoint_context(answers)
     queues = build_queues(graph, iac, answers.get("deployment", {}).get("queues", {}), ctx)
     ctx["queues"] = queues
     endpoints = [build_endpoint(ep, ctx) for ep in graph["endpoints"]]
-    endpoint_weights(endpoints, ov.get("endpoint_weights", {}))
+    endpoint_weights(endpoints, answers.get("overrides", {}).get("endpoint_weights", {}))
     deployment = deployment_model(answers, workers, pool, iac)
     if queues:
         deployment["queues"] = queues
@@ -846,7 +767,7 @@ def build(repo: Path, answers: dict) -> dict:
     model = {
         "schema": "branchpoint.model/v1",
         "repo": {
-            "path": repo.name,
+            "path": repo_name,
             "extracted_at": TODAY,
             "stats": {k: v for k, v in graph["stats"].items() if not k.startswith("seconds")},
         },
@@ -855,20 +776,10 @@ def build(repo: Path, answers: dict) -> dict:
         "business": business_model(answers),
         "endpoints": endpoints,
     }
+    if graph.get("source"):
+        model["repo"]["source"] = graph["source"]
     model["checks"] = checks(model)
-    found = collect_assumptions({k: v for k, v in model.items() if k != "checks"})
-    by_source: dict[str, dict] = {}
-    for a in found:
-        g = by_source.setdefault(
-            a["source"],
-            {"source": a["source"], "count": 0, "needs_review": a["needs_review"], "example_path": a["path"]},
-        )
-        g["count"] += 1
-    model["assumptions"] = {
-        "total": len(found),
-        "by_source": sorted(by_source.values(), key=lambda g: -g["count"]),
-        "items": found,
-    }
+    model["assumptions"] = summarize_assumptions(model)
     return model
 
 
@@ -877,12 +788,15 @@ CATALOG = load_catalog()
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("repo", type=Path)
+    ap.add_argument("architecture", type=Path, help="JSON con el formato de submit_architecture")
     ap.add_argument("--answers", type=Path, help="respuestas del usuario; sin ellas, supuestos del catálogo")
     ap.add_argument("-o", "--out", type=Path)
     args = ap.parse_args()
     answers = json.loads(args.answers.read_text(encoding="utf-8")) if args.answers else {}
-    model = build(args.repo.resolve(), answers)
+    from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai  # importa este módulo
+
+    sub = ArchitectureSubmission.model_validate_json(args.architecture.read_text(encoding="utf-8"))
+    model = build_from_ai(sub, answers)
     txt = json.dumps(model, indent=2, ensure_ascii=False)
     if args.out:
         args.out.write_text(txt + "\n", encoding="utf-8")

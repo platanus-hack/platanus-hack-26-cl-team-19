@@ -1,14 +1,15 @@
-"""Branchpoint como servidor MCP (JAJ-54, JAJ-67): las tools del agente para la CLI de IA del usuario.
+"""Branchpoint como servidor MCP (JAJ-54, JAJ-67): las tools del agente para una CLI de IA.
 
-El loop con el LLM corre en la CLI del usuario (por ejemplo Claude Code con su suscripción) y el
-backend solo ejecuta las tools de ``app/agent/tools.py``. Se monta en la API en ``/mcp``:
+Es la vía secundaria del agente (ADR 0001): el modo principal es el chat del editor, y la interfaz no
+ofrece vincular una CLI (JAJ-123). Sirve para pruebas internas y para quien ya usa una CLI. El loop con
+el LLM corre en la CLI (por ejemplo Claude Code) y el backend solo ejecuta las tools de
+``app/agent/tools.py``. ``INSTRUCTIONS`` es también el prompt base del chat. Se monta en la API en ``/mcp``:
 
-    claude mcp add --transport http branchpoint https://<api>/mcp --header "Authorization: Bearer <token>"
+    claude mcp add --scope user --transport http branchpoint https://<api>/mcp --header "Authorization: Bearer <token>"
 
 **Quién llama.** Con login (``SUPABASE_URL``), cada request trae el token de sesión de Supabase, el
 mismo que usa el editor (JAJ-78), y el usuario solo ve sus proyectos. Sin login
-(``BRANCHPOINT_AUTH=off``), los proyectos sin dueño. El token de larga duración para emparejar la
-CLI es JAJ-81.
+(``BRANCHPOINT_AUTH=off``), los proyectos sin dueño. No hay token de larga duración (JAJ-81 cancelada).
 
 **Transporte.** Streamable HTTP sin estado (cada request se valida sola) y respuestas JSON.
 ``BRANCHPOINT_MCP_ALLOWED_HOSTS`` (separados por coma) son los Host aceptados (protección contra DNS
@@ -31,6 +32,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.agent.tools import AgentTools, Limiter, ToolError
 from app.api.auth import AuthError, SupabaseAuth
 from app.api.store import ProjectStore
+from app.ingest.ai_graph import AiComponent, AiEndpoint, AiJob, AiObservation
 
 INSTRUCTIONS = (
     "Branchpoint simula la arquitectura de un repo con un motor de eventos discretos y propone cambios. "
@@ -38,7 +40,17 @@ INSTRUCTIONS = (
     "estimate_cost, y cada resultado trae su procedencia (cítala). Los números del usuario (tráfico, metas, "
     "réplicas) van en set_traffic, set_goals y set_deployment con su frase textual en quote; si no los dijo, "
     "pregúntaselos. Para cambiar la arquitectura usa propose_version con operaciones de ops_schema y después "
-    "compare con la versión anterior. Cita el archivo:línea del cuello de botella."
+    "compare con la versión anterior. Cita el archivo:línea del cuello de botella. Si el cambio que piden no está "
+    "en ops_schema (por ejemplo una réplica de lectura, una CDN o cambiar de base de datos), di que Branchpoint "
+    "todavía no lo simula. No lo aproximes con otra operación sin avisar. "
+    "Si el usuario quiere analizar un repo que tienes en local, léelo tú, sea del framework que sea: busca las "
+    "rutas, sigue cada handler y clasifica sus accesos a la DB, caché, servicios externos y colas, con "
+    "archivo:línea; después mándalo con submit_architecture. No pongas tiempos ni números: los pone el catálogo. "
+    "Si la versión tiene supuestos por revisar (needs_review) sobre el tráfico, el peso de los endpoints o las "
+    "latencias, pide un log de acceso o una captura de sus métricas antes de dar una conclusión: di qué número "
+    "respaldaría, y vuelve a pedirlo al final de cada respuesta mientras falte. Si el usuario dice que no lo tiene, "
+    "deja de pedirlo y avisa que el resultado se apoya en supuestos. Un número que leas en una imagen no lo guardes "
+    "hasta que el usuario lo confirme con su frase: va en quote, como cualquier dato suyo."
 )
 DEFAULT_ALLOWED_HOSTS = "localhost:*,127.0.0.1:*,[::1]:*,testserver"
 
@@ -108,12 +120,12 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
 
     server = MCPServer(name="branchpoint", instructions=INSTRUCTIONS, middleware=[validate_arguments])
 
-    def run(name: str, ctx: Context | None, **args: Any) -> Any:
+    def run(tool: str, ctx: Context | None, /, **args: Any) -> Any:  # posicionales: hay tools con un arg name
         try:
             tools = tools_for(ctx)
         except (ToolError, AuthError) as e:
             return {"error": str(e)}
-        return tools.call(name, {k: v for k, v in args.items() if v is not None})
+        return tools.call(tool, {k: v for k, v in args.items() if v is not None})
 
     # Una función por tool, con su firma: así el schema que ve el LLM es explícito.
     @server.tool(description=_d("list_projects"))
@@ -202,6 +214,35 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
             slo_p95_ms=slo_p95_ms,
             slo_error_rate=slo_error_rate,
             budget_usd_month=budget_usd_month,
+        )
+
+    @server.tool(description=_d("submit_architecture"))
+    def submit_architecture(
+        repo: str,
+        framework: str,
+        language: str,
+        endpoints: list[AiEndpoint],
+        ctx: Context,
+        components: list[AiComponent] | None = None,
+        jobs: list[AiJob] | None = None,
+        observations: list[AiObservation] | None = None,
+        commit: str | None = None,
+        project_id: str | None = None,
+        name: str | None = None,
+    ) -> Any:
+        return run(
+            "submit_architecture",
+            ctx,
+            repo=repo,
+            framework=framework,
+            language=language,
+            endpoints=[e.model_dump() for e in endpoints],
+            components=[c.model_dump() for c in components] if components else None,
+            jobs=[j.model_dump() for j in jobs] if jobs else None,
+            observations=[o.model_dump() for o in observations] if observations else None,
+            commit=commit,
+            project_id=project_id,
+            name=name,
         )
 
     return server

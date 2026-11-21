@@ -21,6 +21,21 @@ from typing import Any
 Process = Generator[Any, Any, None]
 
 
+class SimulationTooLarge(ValueError):
+    """La corrida pasó su presupuesto de eventos (JAJ-99). Es un ``ValueError`` para que quien ya
+    captura los errores de parámetros (la API, el CLI) lo maneje igual, pero la API lo distingue
+    para responder ``run_too_large``."""
+
+    def __init__(self, max_events: int) -> None:
+        self.max_events = max_events
+        limit = f"{max_events:,}".replace(",", ".")
+        super().__init__(
+            f"La simulación pasó el máximo de {limit} eventos y se detuvo. El modelo hace demasiado "
+            "trabajo por request (pasos repetidos o trabajos que se encolan sin fin): revisa sus "
+            "pasos, o baja la duración o la tasa."
+        )
+
+
 class Sim:
     """Reloj, cola de eventos y generador de números aleatorios de una corrida."""
 
@@ -39,13 +54,21 @@ class Sim:
         """Arranca un proceso en el instante actual."""
         self.at(self.now, self._resume, (process, None))
 
-    def run(self, until: float | None = None) -> None:
-        """Procesa eventos hasta vaciar la cola o hasta ``until`` (los posteriores quedan pendientes)."""
+    def run(self, until: float | None = None, max_events: int | None = None) -> None:
+        """Procesa eventos hasta vaciar la cola o hasta ``until`` (los posteriores quedan pendientes).
+
+        ``max_events`` es el presupuesto de la corrida (JAJ-99): al pasarlo lanza
+        ``SimulationTooLarge``. Sin él, un proceso que se reprograma en el mismo instante (el reloj
+        no avanza) no termina nunca."""
         heap, pop = self._heap, heapq.heappop
+        left = max_events if max_events is not None else -1
         while heap:
             if until is not None and heap[0][0] > until:
                 self.now = until
                 return
+            if left == 0:
+                raise SimulationTooLarge(max_events)
+            left -= 1
             t, _, fn, arg = pop(heap)
             self.now = t
             fn(arg)

@@ -1,9 +1,10 @@
 """Las tools del agente (ADR 0001, JAJ-67), sobre los proyectos reales de un usuario.
 
-Se implementan una vez y se exponen dos veces (JAJ-54):
+Se implementan una vez y se exponen dos veces (ADR 0001):
 
-* por **MCP** (``app/agent/mcp.py``), para la CLI de IA del usuario (modo principal);
-* en el **loop del chat** del editor (``app/agent/loop.py``), con la key del usuario o la de demo.
+* en el **loop del chat** del editor (``app/agent/loop.py``): el modo principal, con la cuota de Branchpoint o
+  la key del usuario;
+* por **MCP** (``app/agent/mcp.py``): la vía secundaria, para una CLI de IA.
 
 Reglas, iguales en los dos modos:
 
@@ -15,6 +16,13 @@ Reglas, iguales en los dos modos:
 * **Errores con una sola forma:** ``{"error": "..."}``, con un mensaje que el LLM lee y corrige. Los
   argumentos desconocidos o mal tipados también se rechazan así.
 * **Límites por usuario** (``Limiter``): llamadas por minuto y simulaciones por día.
+* **La arquitectura de un repo** (ADR 0002) la manda la IA de la CLI, que lee el repo local, con
+  ``submit_architecture``: clasifica con evidencia y el catálogo pone los números
+  (``app/ingest/ai_graph.py``). Esa tool no se ofrece en el chat del editor, que no ve el repo.
+* **Adjuntos del chat** (IA-7): con un ``AttachmentStorage``, el chat suma ``list_attachments``,
+  ``read_log``, ``grep_log``, ``analyze_log`` y ``apply_log_traffic``. Los números de un log los saca
+  ``app/agent/logs.py`` sin LLM y quedan ``OBSERVADO``. Por MCP no se publican: dependen de una sesión
+  del editor.
 """
 
 from __future__ import annotations
@@ -24,12 +32,13 @@ import re
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.agent.logs import analyze_log
 from app.agent.ops import OpError, apply_ops, collect_assumptions, ops_json_schema
 from app.api.errors import ApiError
 from app.api.run_cache import cached_run
@@ -37,12 +46,22 @@ from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
 from app.catalog import load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
+from app.costs.estimate import describe_missing
+from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai, replace_architecture
 from app.models import load_model
 from app.models.compare import run_delta
 from app.models.run import Run
+from app.storage.attachments import StorageError
 
 SIM_SECONDS = 60.0  # duración por defecto; la elige el servidor, nunca el LLM
 MIN_SIM_SECONDS = 5.0
+DAILY_SUBMISSIONS = 30  # arquitecturas que la IA puede mandar por usuario y día
+CLI_ONLY = frozenset({"submit_architecture"})  # tools que necesitan leer el repo local
+ATTACHMENT_TOOLS = ("list_attachments", "read_log", "grep_log", "analyze_log", "apply_log_traffic")
+MAX_LOG_BYTES = 10 * 1024 * 1024  # el tope de un adjunto de log (IA-6)
+MAX_READ_LINES = 400
+MAX_LINE_CHARS = 500
+MAX_GREP_MATCHES = 100
 DEFAULT_ERROR_RATE = 0.01  # piso de errores cuando el usuario no declaró uno (SUPUESTO, se avisa)
 SECONDS_DAY = 86_400
 SECONDS_MONTH = 30 * SECONDS_DAY
@@ -156,11 +175,37 @@ class SetDeploymentArgs(VersionRef):
     quote: str = Field(min_length=3, max_length=500, description="La frase textual del usuario.")
 
 
+class SubmitArchitectureArgs(ArchitectureSubmission):
+    project_id: str | None = Field(
+        None,
+        description="Sin valor, crea un proyecto nuevo con esta arquitectura como v1. Con un project_id, guarda una "
+        "versión nueva con esta arquitectura y conserva el despliegue, el tráfico y lo que dijo la IaC.",
+    )
+    name: str | None = Field(None, max_length=120, description="Nombre del proyecto nuevo. Por defecto, repo.")
+
+
 class SetGoalsArgs(ProjectRef):
     slo_p95_ms: float | None = Field(None, gt=0, description="Meta de p95 en ms.")
     slo_error_rate: float | None = Field(None, ge=0, le=1, description="Meta de errores como fracción (1 % = 0.01).")
     budget_usd_month: float | None = Field(None, ge=0, description="Presupuesto mensual en US$.")
     quote: str = Field(min_length=3, max_length=500, description="La frase textual del usuario con las metas.")
+
+
+class AttachmentRef(ProjectRef):
+    attachment_id: str = Field(description="Id del adjunto (de list_attachments o del mensaje del usuario).")
+
+
+class ReadLogArgs(AttachmentRef):
+    start: int = Field(1, ge=1, description="Primera línea (1 = la primera del archivo).")
+    lines: int = Field(200, ge=1, le=MAX_READ_LINES, description=f"Cuántas líneas, hasta {MAX_READ_LINES}.")
+
+
+class GrepLogArgs(AttachmentRef):
+    pattern: str = Field(min_length=1, max_length=200, description="Expresión regular (sintaxis de Python).")
+
+
+class ApplyLogArgs(VersionRef):
+    attachment_id: str = Field(description="Id del log del que sale el tráfico.")
 
 
 # ---------- números dentro de la frase del usuario ----------
@@ -220,28 +265,82 @@ def _provenance(model: dict[str, Any], run: Run) -> dict[str, Any]:
     }
 
 
-def _goal_check(goals: ProjectGoals, run: Run, monthly: float | None) -> dict[str, Any] | None:
+def _saturation_provenance(run: Run) -> dict[str, Any]:
+    """De dónde sale "saturated" (JAJ-89): los umbrales los eligió el equipo. Viene en el propio Run, armado
+    desde las constantes del motor, así no se desactualiza."""
+    s = run.saturation
+    return {"label": s.label, "source": s.source} if s is not None else {}
+
+
+def _goal_check(
+    goals: ProjectGoals, run: Run, monthly: float | None, missing: list[str] | None = None
+) -> dict[str, Any] | None:
+    """Si la versión cumple las metas del proyecto. ``missing``: componentes sin precio (JAJ-88), con los
+    que el presupuesto no se puede evaluar."""
     if goals == ProjectGoals():
         return None
     out: dict[str, Any] = {}
+    saturated = run.saturation is not None and run.saturation.saturated
+    # JAJ-89: con el sistema saturado, error_rate no cuenta las requests que siguen en fila; para las
+    # metas se usa el techo (si esas requests terminaran fallando), así una versión colapsada no cumple.
+    error_rate = run.saturation.error_rate_if_unanswered_fail if saturated else run.error_rate
+    # con qué tasa se juzgó, para que el agente pueda explicar un "no cumple" con 0 % de errores
+    basis = (
+        {
+            "value": error_rate,
+            "basis": "techo por saturación: error_rate más las requests sin respuesta al terminar (JAJ-89)",
+            "error_rate": run.error_rate,
+            # anidado: si va suelto, el label y el source del piso del 1 % (sin meta) lo pisarían
+            "saturated_provenance": _saturation_provenance(run),
+        }
+        if saturated
+        else {"value": error_rate, "basis": "error_rate"}
+    )
     if goals.slo_p95_ms is not None:
         p95 = run.latency.p95_ms
-        out["p95"] = {"goal_ms": goals.slo_p95_ms, "ok": p95 is not None and p95 <= goals.slo_p95_ms}
+        out["p95"] = {
+            "goal_ms": goals.slo_p95_ms,
+            "ok": p95 is not None and p95 <= goals.slo_p95_ms and not saturated,
+        }
+        if saturated:
+            out["p95"]["basis"] = "no cumple por saturación: el p95 solo mide las requests que terminaron (JAJ-89)"
+            out["p95"]["saturated_provenance"] = _saturation_provenance(run)
     if goals.slo_error_rate is not None:
-        out["errors"] = {"goal": goals.slo_error_rate, "ok": run.error_rate <= goals.slo_error_rate}
+        out["errors"] = {"goal": goals.slo_error_rate, "ok": error_rate <= goals.slo_error_rate, **basis}
     else:
         # El p95 solo mide las requests exitosas: una versión que rechaza casi todo puede tener un p95
         # bajísimo. Sin meta de errores del usuario, se exige un piso SUPUESTO y se dice.
         out["errors"] = {
             "goal": DEFAULT_ERROR_RATE,
-            "ok": run.error_rate <= DEFAULT_ERROR_RATE,
+            "ok": error_rate <= DEFAULT_ERROR_RATE,
+            **basis,
             "label": "SUPUESTO",
             "source": f"Sin meta de errores del usuario se usa {DEFAULT_ERROR_RATE:.0%} como piso: el p95 solo mide "
             "las requests exitosas. Pregúntale al usuario cuántos errores acepta (set_goals slo_error_rate).",
         }
     if goals.budget_usd_month is not None and monthly is not None:
-        out["budget"] = {"goal_usd_month": goals.budget_usd_month, "ok": monthly <= goals.budget_usd_month}
-    out["meets_all"] = all(v["ok"] for v in out.values() if isinstance(v, dict))
+        if missing and monthly > goals.budget_usd_month:
+            # JAJ-88: lo que falta solo puede sumar, así que si el parcial ya se pasa, no cumple
+            out["budget"] = {
+                "goal_usd_month": goals.budget_usd_month,
+                "ok": False,
+                "basis": f"no cumple: solo lo que tiene precio ya suma US${monthly:,.2f}/mes, y falta "
+                f"{describe_missing(missing)}.",
+            }
+        elif missing:
+            # JAJ-88: el total no incluye la API o la DB (en local o sin precio): no se puede decir que
+            # cumple el presupuesto contando solo, por ejemplo, la caché
+            out["budget"] = {
+                "goal_usd_month": goals.budget_usd_month,
+                "ok": None,
+                "basis": f"no evaluable: el total (US${monthly:,.2f}/mes) no incluye {describe_missing(missing)}. "
+                "Pregúntale al usuario dónde se desplegaría (set_deployment).",
+            }
+        else:
+            out["budget"] = {"goal_usd_month": goals.budget_usd_month, "ok": monthly <= goals.budget_usd_month}
+    checks = [v["ok"] for v in out.values() if isinstance(v, dict)]
+    # None si nada falla pero algo no se pudo evaluar (el presupuesto sin precio, JAJ-88)
+    out["meets_all"] = False if False in checks else (None if None in checks else True)
     return out
 
 
@@ -254,6 +353,9 @@ def _run_summary(run: Run, model: dict[str, Any]) -> dict[str, Any]:
         "error_rate": round(run.error_rate, 4),
         "errors": run.errors,
         "throughput_rps": round(run.throughput_rps, 1),
+        # JAJ-89: si quedaron requests sin respuesta, error_rate es un piso; el agente debe decirlo
+        # (label y source del bloque son de "saturated"; los conteos salen del motor)
+        "saturation": asdict(run.saturation) if run.saturation is not None else None,
         "bottleneck": {
             "resource": b.resource,
             "utilization": round(b.utilization, 3),
@@ -279,10 +381,15 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "list_assumptions": "Los números SUPUESTO de una versión, con su fuente: lo que conviene preguntarle al usuario.",
     "list_scenarios": "Los escenarios del proyecto (pico_normal, cyberday...) y su tasa (× el pico o req/s fijas).",
     "simulate": "Simula una versión bajo un escenario del proyecto. Devuelve p95, errores, throughput, el cuello "
-    "de botella con su archivo:línea, la procedencia y si cumple las metas.",
+    "de botella con su archivo:línea, la procedencia y si cumple las metas (goals.meets_all: true, false, o null "
+    "si nada falla pero algo no se pudo evaluar, como el presupuesto sin precio; dilo así). Si saturation.saturated "
+    "es true, la tasa de error es un piso: dilo.",
     "compare": "Simula dos versiones con el mismo escenario y semilla. Devuelve el delta de p95, errores y costo "
-    "mensual, las ventas en juego y si cada una cumple las metas.",
-    "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada.",
+    "mensual (sin los componentes de delta.usd_month_missing, que no tienen precio en alguna versión), las ventas "
+    "en juego y si cada una cumple las metas (meets_all puede ser null: no evaluable).",
+    "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada. Si missing no "
+    "está vacío, la API o la DB no tienen precio (en local o sin precios) y el total no las incluye: dilo, "
+    "citando el primer aviso de warnings, y no presentes el total como el costo completo.",
     "ops_schema": "JSON Schema de las operaciones que acepta propose_version.",
     "propose_version": "Aplica operaciones de arquitectura (ops_schema) a una versión y guarda el resultado como "
     "versión nueva con origen agente. No simula: después usa compare.",
@@ -291,16 +398,33 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "set_deployment": "Cambia réplicas, vCPU o plan de DB con los valores que dijo el usuario (en quote), como "
     "versión nueva.",
     "set_goals": "Guarda las metas del proyecto (p95, errores, presupuesto) que dijo el usuario (en quote).",
+    "list_attachments": "Los adjuntos vigentes del proyecto (imágenes y logs que subió el usuario), con id y tipo.",
+    "read_log": f"Lee líneas de un log adjunto, numeradas, hasta {MAX_READ_LINES} por llamada y "
+    f"{MAX_LINE_CHARS} caracteres por línea. Para ver el formato o un tramo; los números salen de analyze_log.",
+    "grep_log": f"Busca una expresión regular en un log adjunto: hasta {MAX_GREP_MATCHES} líneas con su número.",
+    "analyze_log": "Resume un log de acceso con código, sin LLM: pico y media de req/s, tasa de errores 5xx, p95 si "
+    "el log trae duración, y el peso de cada endpoint del modelo. Todo OBSERVADO, con las líneas como fuente. "
+    "Si no reconoce el formato, devuelve error con una muestra: lee con read_log y pregúntale al usuario.",
+    "apply_log_traffic": "Crea una versión nueva con el tráfico observado en un log: el pico en req/s y el peso de "
+    "cada endpoint que aparece en el log, todo OBSERVADO. Vuelve a analizar el log: no recibe números.",
+    "submit_architecture": "Manda la arquitectura de un repo que leíste en local, de cualquier framework. Lista cada "
+    "endpoint con sus pasos en orden (db, cache con on_miss, external, background, cpu), los trabajos de cola, los "
+    "componentes (caché, colas, servicios externos, storage) y, si están escritos en el repo, los workers y el pool "
+    "(observations). Todo con archivo:línea y why. No mandes tiempos, filas ni costos: el catálogo pone los números "
+    "y todo queda ESTIMADO o SUPUESTO con procedencia IA.",
 }
 
 
 class AgentTools:
     """Las tools de un usuario. ``owner`` es su id (o ``None`` sin login); solo ve sus proyectos."""
 
-    def __init__(self, store: ProjectStore, owner: str | None, limiter: Limiter | None = None) -> None:
+    def __init__(
+        self, store: ProjectStore, owner: str | None, limiter: Limiter | None = None, attachments: Any = None
+    ) -> None:
         self.store = store
         self.owner = owner
         self.limiter = limiter or Limiter()
+        self.attachments = attachments  # AttachmentStorage del chat (IA-7); None en MCP
         self._args = {
             "list_projects": ListProjects,
             "get_model": VersionRef,
@@ -314,14 +438,25 @@ class AgentTools:
             "set_traffic": SetTrafficArgs,
             "set_deployment": SetDeploymentArgs,
             "set_goals": SetGoalsArgs,
+            "submit_architecture": SubmitArchitectureArgs,
         }
+        if attachments is not None:
+            self._args.update(
+                list_attachments=ProjectRef,
+                read_log=ReadLogArgs,
+                grep_log=GrepLogArgs,
+                analyze_log=AttachmentRef,
+                apply_log_traffic=ApplyLogArgs,
+            )
 
     # -- catálogo de tools (para MCP y para la API de Claude) --
 
-    def schemas(self) -> list[dict[str, Any]]:
+    def schemas(self, *, cli: bool = True) -> list[dict[str, Any]]:
+        """Las tools con su JSON Schema. ``cli=False`` (el chat del editor) deja fuera las que leen el repo."""
         return [
             {"name": name, "description": TOOL_DESCRIPTIONS[name], "input_schema": model.model_json_schema()}
             for name, model in self._args.items()
+            if cli or name not in CLI_ONLY
         ]
 
     def validate(self, name: str, args: dict[str, Any] | None) -> BaseModel:
@@ -491,11 +626,11 @@ class AgentTools:
         version = self._version(project, a.version)
         self.limiter.simulations(self.owner or "anon", 1)
         run = self._run(project, version, a.scenario, a.seed)
-        monthly = estimate_cost(version.model).total["value"]
+        cost = estimate_cost(version.model)
         return {
             "version": version.number,
             **_run_summary(run, version.model),
-            "goals": _goal_check(self.store.get_goals(project.id), run, monthly),
+            "goals": _goal_check(self.store.get_goals(project.id), run, cost.total["value"], cost.missing),
         }
 
     def _compare(self, a: CompareArgs) -> dict[str, Any]:
@@ -515,22 +650,24 @@ class AgentTools:
                 "version": va.number,
                 **_run_summary(run_a, va.model),
                 "usd_month": cost_a.total,
-                "goals": _goal_check(goals, run_a, cost_a.total["value"]),
+                "goals": _goal_check(goals, run_a, cost_a.total["value"], cost_a.missing),
             },
             "b": {
                 "version": vb.number,
                 **_run_summary(run_b, vb.model),
                 "usd_month": cost_b.total,
-                "goals": _goal_check(goals, run_b, cost_b.total["value"]),
+                "goals": _goal_check(goals, run_b, cost_b.total["value"], cost_b.missing),
             },
             "delta": {
                 "p95_ms": {"a": d.p95_ms.a, "b": d.p95_ms.b, "pct": d.p95_ms.pct},
                 "error_rate": {"a": d.error_rate.a, "b": d.error_rate.b},
                 "throughput_rps": {"a": d.throughput_rps.a, "b": d.throughput_rps.b},
                 "usd_month": cdelta.diff,
+                # JAJ-88: componentes sin precio en alguna versión; usd_month no los cuenta
+                "usd_month_missing": cdelta.missing,
                 "bottleneck_changed": d.bottleneck_changed,
             },
-            "summary": compare_summary(va.number, vb.number, cdelta, fa, fb),
+            "summary": compare_summary(va.number, vb.number, cdelta, fa, fb, run_a, run_b),
         }
 
     # -- escribir --
@@ -643,6 +780,39 @@ class AgentTools:
             "warnings": result.warnings,
         }
 
+    def _submit_architecture(self, a: SubmitArchitectureArgs) -> dict[str, Any]:
+        self.limiter.daily(self.owner or "anon", DAILY_SUBMISSIONS, "arquitecturas enviadas")
+        sub = ArchitectureSubmission.model_validate(a.model_dump(exclude={"project_id", "name"}))
+        note = f"Arquitectura propuesta por la IA del usuario ({sub.framework}, {sub.language})"
+        if a.project_id is None:
+            model = build_from_ai(sub)
+            try:
+                load_model(model)
+            except (ValueError, KeyError, TypeError) as e:
+                raise ToolError(f"La arquitectura no carga en el motor: {e}") from None
+            project = self.store.create(a.name or sub.repo, model, None, owner=self.owner)
+            version = self.store.get_version(project.id, 1)
+        else:
+            project = self._project(a.project_id)
+            base = self._version(project, None)
+            version = self._save(project, base, replace_architecture(base.model, sub), note)
+        saved = version.model
+        ai_eps = [ep for ep in saved["endpoints"] if ep.get("origin")]
+        return {
+            "project_id": project.id,
+            "version": version.number,
+            "endpoints": len(saved["endpoints"]),
+            "endpoints_from_ai": len(ai_eps),
+            "components_from_ai": sum(1 for s in saved["deployment"].get("services", []) if s.get("origin")),
+            "assumptions": saved.get("assumptions", {}).get("total"),
+            "provenance": {
+                "label": "ESTIMADO",
+                "source": f"{note}. Los tiempos salen del catálogo; la CPU base del framework y el despliegue "
+                "quedan SUPUESTO hasta que el usuario los confirme.",
+            },
+            "next": "Pregúntale al usuario el tráfico (set_traffic) y el despliegue (set_deployment), y simula.",
+        }
+
     def _set_goals(self, a: SetGoalsArgs) -> dict[str, Any]:
         project = self._project(a.project_id)
         if a.slo_p95_ms is None and a.slo_error_rate is None and a.budget_usd_month is None:
@@ -664,3 +834,145 @@ class AgentTools:
         )
         saved = self.store.set_goals(project.id, goals)
         return {"goals": saved.__dict__, "source": f"Declarado por el usuario: «{a.quote}»"}
+
+    # -- adjuntos del chat (IA-7) --
+
+    def _log(self, project_id: str, attachment_id: str) -> tuple[Any, bytes]:
+        if self.attachments is None or self.owner is None:
+            raise ToolError("Los adjuntos requieren sesión en el editor.")
+        self._project(project_id)
+        a = self.store.get_attachment(attachment_id, self.owner)
+        if a is None or a.project_id != project_id or a.status != "ready" or a.expired():
+            raise ToolError(f"No existe el adjunto '{attachment_id}' (o venció). Usa list_attachments.")
+        if a.kind != "log":
+            raise ToolError(f"'{a.filename}' es una imagen: no se lee como log. Ya la viste en el mensaje del usuario.")
+        try:
+            return a, self.attachments.download(a.storage_path, MAX_LOG_BYTES)
+        except StorageError as e:
+            raise ToolError(f"No pude leer el adjunto: {e}") from None
+
+    def _list_attachments(self, a: ProjectRef) -> dict[str, Any]:
+        if self.owner is None:
+            raise ToolError("Los adjuntos requieren sesión en el editor.")
+        self._project(a.project_id)
+        return {
+            "attachments": [
+                {"id": x.id, "kind": x.kind, "filename": x.filename, "bytes": x.bytes}
+                for x in self.store.list_attachments(a.project_id, self.owner)
+            ]
+        }
+
+    def _read_log(self, a: ReadLogArgs) -> dict[str, Any]:
+        att, data = self._log(a.project_id, a.attachment_id)
+        out, total = [], 0
+        for n, raw in enumerate(data.splitlines(), 1):
+            total = n
+            if a.start <= n < a.start + a.lines:
+                out.append(f"{n}: {raw.decode('utf-8', errors='replace')[:MAX_LINE_CHARS]}")
+        return {"filename": att.filename, "total_lines": total, "lines": out}
+
+    def _grep_log(self, a: GrepLogArgs) -> dict[str, Any]:
+        att, data = self._log(a.project_id, a.attachment_id)
+        try:
+            rx = re.compile(a.pattern)
+        except re.error as e:
+            raise ToolError(f"La expresión regular no es válida: {e}") from None
+        hits = []
+        for n, raw in enumerate(data.splitlines(), 1):
+            line = raw.decode("utf-8", errors="replace")
+            if rx.search(line):
+                hits.append(f"{n}: {line[:MAX_LINE_CHARS]}")
+                if len(hits) >= MAX_GREP_MATCHES:
+                    break
+        return {"filename": att.filename, "matches": hits, "truncated": len(hits) >= MAX_GREP_MATCHES}
+
+    def _summarize_log(self, project: Project, model: dict[str, Any], attachment_id: str) -> tuple[Any, dict]:
+        att, data = self._log(project.id, attachment_id)
+        return att, analyze_log(data, att.filename, [e["id"] for e in model["endpoints"]])
+
+    def _analyze_log(self, a: AttachmentRef) -> dict[str, Any]:
+        project = self._project(a.project_id)
+        _, summary = self._summarize_log(project, self._version(project, None).model, a.attachment_id)
+        return summary
+
+    def _apply_log_traffic(self, a: ApplyLogArgs) -> dict[str, Any]:
+        project = self._project(a.project_id)
+        base = self._version(project, a.version)
+        att, summary = self._summarize_log(project, base.model, a.attachment_id)  # no confía en números del LLM
+        if "error" in summary:
+            raise ToolError(summary["error"])
+        if "peak_rps" not in summary:
+            raise ToolError(f"{summary.get('note', 'El log no trae la hora de cada request')} No cambié el tráfico.")
+        m = copy.deepcopy(base.model)
+        traffic = m.setdefault("traffic", {})
+        peak = summary["peak_rps"]
+        traffic["peak_rps"] = {**peak, "date": date.today().isoformat()}
+        for sc in (traffic.get("scenarios") or {}).values():
+            mult = (sc.get("multiplier") or {}).get("value")
+            if mult:
+                sc["rps"] = _num(
+                    round(peak["value"] * mult, 2), "req/s", "OBSERVADO", "pico × multiplicador", derived=True
+                )
+        observed = {e["id"]: e["weight"] for e in summary["endpoints"]}
+        weights = {e["id"]: observed.get(e["id"], value_of(e.get("weight"))) for e in m["endpoints"]}
+        total = sum(w for w in weights.values() if w) or 1.0
+        source = summary["source"]
+        for e in m["endpoints"]:
+            w = (weights[e["id"]] or 0.0) / total
+            if e["id"] in observed:
+                e["weight"] = _num(round(w, 4), "fracción", "OBSERVADO", f"{source}: requests del endpoint / requests")
+            elif isinstance(e.get("weight"), dict):
+                e["weight"] = {**e["weight"], "value": round(w, 4)}
+        note = f"Tráfico observado en {att.filename}"
+        version = self._save(project, base, m, note)
+        changes = [f"Pico: {peak['value']:g} req/s ({source})", f"{len(observed)} endpoints con peso observado"]
+        missing = [e["id"] for e in m["endpoints"] if e["id"] not in observed]
+        return {
+            "version": version.number,
+            "parent": base.number,
+            "note": note,
+            "changes": changes,
+            "peak_rps": traffic["peak_rps"],
+            "endpoints_not_in_log": missing[:40],
+        }
+
+
+def value_of(x: Any) -> float | None:
+    v = x.get("value") if isinstance(x, dict) else x
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+# ---------- evidencia que falta (IA-7) ----------
+
+_EVIDENCE_ASKS = {
+    "traffic.peak_rps": ("log de acceso o captura de requests por segundo", ["log", "image"]),
+    "endpoints[].weight": ("log de acceso con las rutas, para saber cuánto pesa cada endpoint", ["log"]),
+    "steps.external.time": ("log o captura con la latencia de los servicios externos", ["log", "image"]),
+    "steps.cache.hit_ratio": ("captura de las métricas de la caché (tasa de aciertos)", ["image", "log"]),
+}
+
+
+def _review(x: Any) -> bool:
+    return isinstance(x, dict) and x.get("label") != "OBSERVADO" and bool(x.get("needs_review"))
+
+
+def pending_evidence(model: dict[str, Any]) -> dict[str, Any]:
+    """Qué evidencia falta, sin LLM: a lo más cuatro pedidos sobre los supuestos por revisar del modelo."""
+    traffic = model.get("traffic") or {}
+    peak = traffic.get("peak_rps")
+    steps = [s for e in model.get("endpoints", []) for s in e.get("steps", [])]
+    flags = {
+        "traffic.peak_rps": peak is None or _review(peak),
+        "endpoints[].weight": any(_review(e.get("weight")) for e in model.get("endpoints", [])),
+        "steps.external.time": any(s.get("kind") == "external" and _review(s.get("time")) for s in steps),
+        "steps.cache.hit_ratio": any(
+            s.get("kind") == "cache" and "on_miss" in s and (s.get("hit_ratio") is None or _review(s["hit_ratio"]))
+            for s in steps
+        ),
+    }
+    pending = [
+        {"field": field, "ask": ask, "accepts": accepts}
+        for field, (ask, accepts) in _EVIDENCE_ASKS.items()
+        if flags[field]
+    ]
+    return {"pending": pending, "total_assumptions": collect_assumptions(model)["total"]}

@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
@@ -29,6 +29,15 @@ class Version:
     model: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class ProjectRepo:
+    """Un repo del proyecto (IA-5). El principal es el que simula el motor."""
+
+    full_name: str
+    branch: str | None
+    primary: bool = True
+
+
 @dataclass
 class Project:
     id: str
@@ -37,6 +46,18 @@ class Project:
     created_at: str
     versions: list[Version] = field(default_factory=list)
     owner: str | None = None  # auth.users.id de quien lo creó; None sin login (JAJ-78)
+    # el repo del que salió la v1 (JAJ-92): "owner/nombre" y la rama analizada. None si salió de un
+    # ejemplo o de un modelo subido a mano
+    repo_full_name: str | None = None
+    branch: str | None = None
+    # todos los repos (IA-5), el principal primero. Vacío en proyectos de un ejemplo o anteriores a IA-5
+    repositories: list[ProjectRepo] = field(default_factory=list)
+
+    def repos(self) -> list[ProjectRepo]:
+        """Los repos del proyecto, el principal primero. Un proyecto de un solo repo lo deriva de su v1."""
+        if self.repositories:
+            return self.repositories
+        return [ProjectRepo(self.repo_full_name, self.branch, True)] if self.repo_full_name else []
 
     def version(self, number: int) -> Version | None:
         return self.versions[number - 1] if 1 <= number <= len(self.versions) else None
@@ -95,6 +116,29 @@ class RepoSource:
         return f"Extraída de {self.repo_full_name}@{self.branch} ({self.commit_sha[:7]})"
 
 
+AttachmentKind = Literal["image", "log"]
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """Un archivo que el usuario subió al chat (IA-6). Vive en Storage hasta ``expires_at``."""
+
+    id: str
+    owner: str
+    project_id: str
+    kind: AttachmentKind
+    filename: str
+    media_type: str
+    bytes: int | None
+    storage_path: str
+    status: Literal["pending", "ready"]
+    created_at: datetime
+    expires_at: datetime
+
+    def expired(self, now: datetime | None = None) -> bool:
+        return self.expires_at <= (now or datetime.now(UTC))
+
+
 @dataclass(frozen=True)
 class GitHubInstallation:
     installation_id: int
@@ -134,9 +178,11 @@ class ProjectStore(Protocol):
         sample: str | None,
         owner: str | None = None,
         source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
     ) -> Project:
         """Crea el proyecto con su v1. Con ``source``, la v1 queda ligada al repo, la rama y el commit
-        analizados (JAJ-57)."""
+        analizados (JAJ-57). ``sources`` son todos los repos del proyecto, el principal (``source``) primero
+        (IA-5)."""
         ...
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
@@ -172,8 +218,12 @@ class ProjectStore(Protocol):
         """Reemplaza las metas. ``KeyError`` si el proyecto no existe."""
         ...
 
-    def find_run(self, cache_key: str) -> dict[str, Any] | None:
-        """El ``Run`` guardado con esa clave (como dict ``branchpoint.run/v1``), o ``None`` (JAJ-75)."""
+    def find_run(self, project_id: str, number: int, cache_key: str) -> dict[str, Any] | None:
+        """El ``Run`` guardado de la versión ``number`` del proyecto con esa clave (como dict
+        ``branchpoint.run/v1``), o ``None`` (JAJ-75).
+
+        Busca por proyecto y versión además de la clave (JAJ-97): un run guardado con la clave de
+        otro proyecto nunca se devuelve, aunque alguien lograra escribirlo."""
         ...
 
     def save_run(
@@ -194,8 +244,8 @@ class ProjectStore(Protocol):
         """Liga la instalación al usuario que la verificó. Si ya existía, pasa a ese usuario."""
         ...
 
-    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
-        """Las instalaciones vigentes de ``owner``."""
+    def list_installations(self, owner: str | None, *, revoked: bool = False) -> list[GitHubInstallation]:
+        """Las instalaciones de ``owner`` con el estado solicitado."""
         ...
 
     def revoke_installation(self, installation_id: int) -> None:
@@ -208,6 +258,28 @@ class ProjectStore(Protocol):
         """La ``repo_connections.id`` de ese repo para ``owner``. Reutiliza la que ya existe."""
         ...
 
+    # ---------- Adjuntos del chat (IA-6) ----------
+
+    def create_attachment(self, attachment: Attachment) -> Attachment:
+        """Registra el adjunto en ``pending``. La ruta ya validó el proyecto con ``get``."""
+        ...
+
+    def get_attachment(self, attachment_id: str, owner: str) -> Attachment | None:
+        """El adjunto si es de ``owner`` (vencido o no)."""
+        ...
+
+    def list_attachments(self, project_id: str, owner: str, include_pending: bool = False) -> list[Attachment]:
+        """Los adjuntos vigentes del proyecto, del más viejo al más nuevo."""
+        ...
+
+    def mark_attachment_ready(self, attachment_id: str, owner: str, size: int) -> None: ...
+
+    def delete_attachment(self, attachment_id: str, owner: str) -> None: ...
+
+    def expired_attachments(self, owner: str | None, limit: int = 100) -> list[Attachment]:
+        """Los vencidos de ``owner``, o de todos con ``None`` (para una limpieza periódica)."""
+        ...
+
 
 class OwnedStore:
     """El store visto por un usuario (JAJ-78): ``create``, ``get`` y ``list`` llevan su ``owner``
@@ -218,8 +290,15 @@ class OwnedStore:
         self._store = store
         self.owner = owner
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None, source: RepoSource | None = None) -> Project:
-        return self._store.create(name, model, sample, self.owner, source)
+    def create(
+        self,
+        name: str,
+        model: dict[str, Any],
+        sample: str | None,
+        source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
+    ) -> Project:
+        return self._store.create(name, model, sample, self.owner, source, sources)
 
     def get(self, project_id: str) -> Project | None:
         return self._store.get(project_id, self.owner)
@@ -231,6 +310,15 @@ class OwnedStore:
         return getattr(self._store, name)
 
 
+def _repositories(source: RepoSource | None, sources: list[RepoSource] | None) -> list[ProjectRepo]:
+    """Los repos de un proyecto nuevo: solo con más de uno se guardan aparte (uno se deriva de la v1)."""
+    if not sources or len(sources) < 2:
+        return []
+    primary = source.repo_full_name if source else sources[0].repo_full_name
+    ordered = sorted(sources, key=lambda s: s.repo_full_name != primary)
+    return [ProjectRepo(s.repo_full_name, s.branch, s.repo_full_name == primary) for s in ordered]
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -240,13 +328,15 @@ class InMemoryProjectStore:
 
     def __init__(self) -> None:
         self._projects: dict[str, Project] = {}
-        self._runs: dict[str, dict[str, Any]] = {}  # cache_key → Run como dict (JAJ-75)
+        # cache_key → (proyecto, versión, Run como dict) (JAJ-75, JAJ-97)
+        self._runs: dict[str, tuple[str, int, dict[str, Any]]] = {}
         self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
         self._goals: dict[str, ProjectGoals] = {}  # proyecto → metas (JAJ-67)
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
-        self._installations: dict[int, tuple[str | None, str]] = {}  # id → (owner, cuenta)
+        self._installations: dict[int, tuple[str | None, str, bool]] = {}  # id → (owner, cuenta, revocada)
         self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
         self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
+        self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
 
     def create(
         self,
@@ -255,8 +345,18 @@ class InMemoryProjectStore:
         sample: str | None,
         owner: str | None = None,
         source: RepoSource | None = None,
+        sources: list[RepoSource] | None = None,
     ) -> Project:
-        project = Project(id=uuid.uuid4().hex[:12], name=name, sample=sample, created_at=_now(), owner=owner)
+        project = Project(
+            id=uuid.uuid4().hex[:12],
+            name=name,
+            sample=sample,
+            created_at=_now(),
+            owner=owner,
+            repo_full_name=source.repo_full_name if source else None,
+            branch=source.branch if source else None,
+            repositories=_repositories(source, sources),
+        )
         note = source.note if source else "Extraída del repo"
         project.versions.append(Version(1, "repo", None, note, project.created_at, copy.deepcopy(model)))
         if source:
@@ -307,9 +407,11 @@ class InMemoryProjectStore:
             self._goals[project_id] = goals
         return goals
 
-    def find_run(self, cache_key: str) -> dict[str, Any] | None:
-        run = self._runs.get(cache_key)
-        return copy.deepcopy(run) if run is not None else None
+    def find_run(self, project_id: str, number: int, cache_key: str) -> dict[str, Any] | None:
+        saved = self._runs.get(cache_key)
+        if saved is None or saved[:2] != (project_id, number):
+            return None
+        return copy.deepcopy(saved[2])
 
     def save_run(
         self,
@@ -323,21 +425,67 @@ class InMemoryProjectStore:
         if self.get_version(project_id, number) is None:
             raise KeyError(f"{project_id} v{number}")
         with self._lock:
-            self._runs.setdefault(cache_key, copy.deepcopy(run))
+            self._runs.setdefault(cache_key, (project_id, number, copy.deepcopy(run)))
 
     def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
         with self._lock:
-            self._installations[installation_id] = (owner, account_login)
+            self._installations[installation_id] = (owner, account_login, False)
 
-    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
-        return [GitHubInstallation(i, login) for i, (o, login) in self._installations.items() if o == owner]
+    def list_installations(self, owner: str | None, *, revoked: bool = False) -> list[GitHubInstallation]:
+        with self._lock:
+            return [
+                GitHubInstallation(i, login)
+                for i, (o, login, is_revoked) in self._installations.items()
+                if o == owner and is_revoked == revoked
+            ]
 
     def revoke_installation(self, installation_id: int) -> None:
         with self._lock:
-            self._installations.pop(installation_id, None)
+            entry = self._installations.get(installation_id)
+            if entry is not None:
+                owner, login, _ = entry
+                self._installations[installation_id] = (owner, login, True)
 
     def connect_repo(
         self, owner: str | None, installation_id: int, repo_id: int, full_name: str, default_branch: str
     ) -> str:
         with self._lock:
             return self._connections.setdefault((owner, repo_id), uuid.uuid4().hex[:12])
+
+    def create_attachment(self, attachment: Attachment) -> Attachment:
+        with self._lock:
+            self._attachments[attachment.id] = attachment
+        return attachment
+
+    def get_attachment(self, attachment_id: str, owner: str) -> Attachment | None:
+        a = self._attachments.get(attachment_id)
+        return a if a is not None and a.owner == owner else None
+
+    def list_attachments(self, project_id: str, owner: str, include_pending: bool = False) -> list[Attachment]:
+        now = datetime.now(UTC)
+        mine = [
+            a
+            for a in self._attachments.values()
+            if a.project_id == project_id
+            and a.owner == owner
+            and not a.expired(now)
+            and (include_pending or a.status == "ready")
+        ]
+        return sorted(mine, key=lambda a: a.created_at)
+
+    def mark_attachment_ready(self, attachment_id: str, owner: str, size: int) -> None:
+        with self._lock:
+            a = self._attachments.get(attachment_id)
+            if a is not None and a.owner == owner:
+                self._attachments[attachment_id] = replace(a, status="ready", bytes=size)
+
+    def delete_attachment(self, attachment_id: str, owner: str) -> None:
+        with self._lock:
+            a = self._attachments.get(attachment_id)
+            if a is not None and a.owner == owner:
+                del self._attachments[attachment_id]
+
+    def expired_attachments(self, owner: str | None, limit: int = 100) -> list[Attachment]:
+        now = datetime.now(UTC)
+        gone = [a for a in self._attachments.values() if a.expired(now) and (owner is None or a.owner == owner)]
+        return sorted(gone, key=lambda a: a.expires_at)[:limit]

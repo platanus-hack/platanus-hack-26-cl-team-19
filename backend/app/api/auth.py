@@ -5,7 +5,7 @@ El frontend inicia sesión con Supabase Auth (JAJ-77) y manda su token de acceso
 request:
 
 * **Firma.** Con las claves públicas del proyecto (JWKS, en ``{SUPABASE_URL}/auth/v1/.well-known/jwks.json``),
-  que se bajan una vez y se guardan en memoria. Si el proyecto todavía firma con el secreto
+  que se bajan una vez y se guardan en memoria (ver ``SupabaseAuth._key``: cuándo se vuelven a bajar). Si el proyecto todavía firma con el secreto
   compartido (HS256, el esquema antiguo de Supabase), se valida con ``SUPABASE_JWT_SECRET``.
 * **Claims.** ``exp`` (no vencido), ``aud = authenticated`` (un usuario con sesión, no la key anónima)
   e ``iss = {SUPABASE_URL}/auth/v1`` (emitido por nuestro proyecto).
@@ -22,6 +22,7 @@ Configuración (``backend/.env``):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -36,8 +37,14 @@ from fastapi import Request
 
 from app.api.errors import AUTH_UNAVAILABLE, UNAUTHORIZED, ApiError
 
+log = logging.getLogger(__name__)
+
 AUDIENCE = "authenticated"
 JWKS_TTL_S = 600  # Supabase rota las claves con aviso; 10 minutos alcanza para tomar una nueva
+# Tras una descarga que no trajo el kid pedido, los kid desconocidos dan 401 sin ir a la red durante este
+# tiempo: así tokens con kid inventado no disparan una descarga por request (JAJ-105).
+MISS_COOLDOWN_S = 30
+RETRY_AFTER_FAILURE_S = 30  # si el refresco por TTL falla, se sigue con las claves guardadas y se reintenta
 _ASYMMETRIC = ["RS256", "ES256", "EdDSA"]
 
 
@@ -71,7 +78,9 @@ class SupabaseAuth:
         self._fetch = fetch_jwks or _fetch_json
         self._leeway = leeway_s
         self._keys: dict[str, jwt.PyJWK] = {}
-        self._fetched_at = 0.0
+        self._loaded = False
+        self._fetched_at = 0.0  # cuándo vencen las claves guardadas: este momento + JWKS_TTL_S
+        self._miss_at = float("-inf")  # última descarga que no trajo el kid pedido
         self._lock = threading.Lock()
 
     def verify(self, token: str) -> User:
@@ -115,17 +124,42 @@ class SupabaseAuth:
         return User(id=user_id, email=claims.get("email"))
 
     def _key(self, kid: str | None) -> jwt.PyJWK:
-        """La clave pública con ese ``kid``. Si no está, vuelve a bajar el JWKS (Supabase rotó las claves)."""
+        """La clave pública con ese ``kid``.
+
+        * **Primera vez o claves vencidas (TTL):** se baja el JWKS. Si el refresco por TTL falla y la clave
+          del token está guardada, se usa, se avisa en el log y se reintenta en ``RETRY_AFTER_FAILURE_S``.
+        * **Un kid que no está:** se vuelve a bajar (Supabase rotó las claves), salvo que otra descarga
+          reciente tampoco lo haya traído (``MISS_COOLDOWN_S``): entonces 401 sin ir a la red.
+        """
         with self._lock:
-            stale = time.monotonic() - self._fetched_at > JWKS_TTL_S
-            if kid not in self._keys or stale:
-                self._refresh()
+            now = time.monotonic()
+            fetched = False
+            if not self._loaded:
+                self._refresh(now)
+                fetched = True
+            elif now - self._fetched_at > JWKS_TTL_S:
+                try:
+                    self._refresh(now)
+                    fetched = True
+                except ApiError:
+                    if kid not in self._keys:
+                        raise
+                    log.warning("No se pudo refrescar el JWKS de Supabase; se usan las claves guardadas.")
+                    self._fetched_at = now - JWKS_TTL_S + RETRY_AFTER_FAILURE_S
+            if kid not in self._keys and not fetched and now - self._miss_at >= MISS_COOLDOWN_S:
+                try:
+                    self._refresh(now)
+                finally:
+                    if kid not in self._keys:
+                        self._miss_at = now
+            elif kid not in self._keys and fetched:
+                self._miss_at = now
             key = self._keys.get(kid)
         if key is None:
             raise AuthError("El token está firmado con una clave que el proyecto no publica.")
         return key
 
-    def _refresh(self) -> None:
+    def _refresh(self, now: float) -> None:
         try:
             data = self._fetch(self.jwks_url)
         except Exception as e:  # red, DNS, JSON roto
@@ -138,7 +172,7 @@ class SupabaseAuth:
                 keys[jwk.get("kid")] = jwt.PyJWK(jwk)
             except jwt.PyJWTError:
                 continue  # una clave de un tipo que no usamos no invalida las demás
-        self._keys, self._fetched_at = keys, time.monotonic()
+        self._keys, self._fetched_at, self._loaded = keys, now, True
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
