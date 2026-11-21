@@ -331,10 +331,9 @@ class EvidenceProblem:
     message: str
 
 
-def _static_segment(path: str) -> str | None:
-    """El segmento fijo más largo de la ruta (sin parámetros). ``None`` para ``/`` o rutas solo de parámetros."""
-    parts = [p for p in path.split("/") if p and not _PARAM_SEGMENT.match(p) and "{" not in p and ":" not in p]
-    return max(parts, key=len) if parts else None
+def _static_segments(path: str) -> list[str]:
+    """Los segmentos fijos de la ruta (sin parámetros). Vacío para ``/`` o rutas solo de parámetros."""
+    return [p for p in path.split("/") if p and not _PARAM_SEGMENT.match(p) and "{" not in p and ":" not in p]
 
 
 class _Files:
@@ -370,15 +369,22 @@ def evidence_problems(sub: ArchitectureSubmission, root: Path) -> list[EvidenceP
         if item.line > len(lines):
             out.append(EvidenceProblem(where, f"{label}: '{item.file}' tiene {len(lines)} líneas, no {item.line}"))
             return False
-        segment = _static_segment(path) if path is not None else None
-        if segment:
+        segments = _static_segments(path) if path is not None else []
+        if segments:
             lo, hi = max(0, item.line - 1 - EVIDENCE_WINDOW), min(len(lines), item.line + EVIDENCE_WINDOW)
-            if not any(segment in text for text in lines[lo:hi]):
+            near = any(seg in text for seg in segments for text in lines[lo:hi])
+            # @router.delete("/{id}") trae solo el parámetro: el segmento ("items") está en el prefix del router,
+            # lejos de la línea (lo encontró la medición de IA-0). Basta con que aparezca como palabra en el archivo.
+            in_file = near or any(
+                re.search(rf"(?<![\w-]){re.escape(seg)}(?![\w-])", text) for seg in segments for text in lines
+            )
+            if not in_file:
+                shown = max(segments, key=len)
                 out.append(
                     EvidenceProblem(
                         where,
-                        f"{label}: '{segment}' no aparece en {item.file} cerca de la línea {item.line} "
-                        f"(±{EVIDENCE_WINDOW}). Cita la línea donde se declara la ruta.",
+                        f"{label}: '{shown}' no aparece en {item.file} cerca de la línea {item.line} "
+                        f"(±{EVIDENCE_WINDOW}) ni en el resto del archivo. Cita la línea donde se declara la ruta.",
                     )
                 )
                 return False

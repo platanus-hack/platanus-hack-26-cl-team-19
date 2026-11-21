@@ -1,0 +1,531 @@
+{
+ "framework": "express",
+ "language": "typescript",
+ "endpoints": [
+  {
+   "method": "GET",
+   "path": "/api/tags",
+   "handler": "getTags",
+   "file": "src/app/routes/tag/tag.controller.ts",
+   "line": 13,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Tag",
+     "detail": "prisma.tag.findMany",
+     "file": "src/app/routes/tag/tag.service.ts",
+     "line": 16,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/users",
+   "handler": "createUser",
+   "file": "src/app/routes/auth/auth.controller.ts",
+   "line": 14,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "prisma.user.findUnique por email",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 10,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "prisma.user.findUnique por username",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 19,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "cpu",
+     "shape": "password_hash_bcrypt",
+     "detail": "bcrypt.hash(password, 10)",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 58,
+     "why": "hash de contraseña"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "prisma.user.create",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 60,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/users/login",
+   "handler": "login",
+   "file": "src/app/routes/auth/auth.controller.ts",
+   "line": 30,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "prisma.user.findUnique por email",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 96,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "cpu",
+     "shape": "password_hash_bcrypt",
+     "detail": "bcrypt.compare",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 111,
+     "why": "hash de contraseña"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/user",
+   "handler": "getCurrentUser",
+   "file": "src/app/routes/auth/auth.controller.ts",
+   "line": 45,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "User",
+     "detail": "prisma.user.findUnique por id",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 132,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/api/user",
+   "handler": "updateUser",
+   "file": "src/app/routes/auth/auth.controller.ts",
+   "line": 61,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "prisma.user.update",
+     "file": "src/app/routes/auth/auth.service.ts",
+     "line": 159,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/profiles/{username}",
+   "handler": "getProfile",
+   "file": "src/app/routes/profile/profile.controller.ts",
+   "line": 14,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "prisma.user.findUnique por username",
+     "file": "src/app/routes/profile/profile.service.ts",
+     "line": 6,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/profiles/{username}/follow",
+   "handler": "followUser",
+   "file": "src/app/routes/profile/profile.controller.ts",
+   "line": 34,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "prisma.user.update (followedBy)",
+     "file": "src/app/routes/profile/profile.service.ts",
+     "line": 23,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/profiles/{username}/follow",
+   "handler": "unfollowUser",
+   "file": "src/app/routes/profile/profile.controller.ts",
+   "line": 54,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "prisma.user.update (followedBy)",
+     "file": "src/app/routes/profile/profile.service.ts",
+     "line": 43,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles",
+   "handler": "getArticles",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 30,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "count",
+     "entity": "Article",
+     "detail": "prisma.article.count con filtros",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 71,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Article",
+     "detail": "prisma.article.findMany con take/skip",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 77,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/feed",
+   "handler": "getFeed",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 45,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "count",
+     "entity": "Article",
+     "detail": "prisma.article.count del feed",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 114,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Article",
+     "detail": "prisma.article.findMany del feed",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 122,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles",
+   "handler": "createArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 71,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findUnique por título",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 180,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "prisma.article.create",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 197,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/{slug}",
+   "handler": "getArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 87,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findUnique por slug",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 242,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/api/articles/{slug}",
+   "handler": "updateArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 110,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findFirst por slug",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 292,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findFirst por título",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 320,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "prisma.article.update",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 345,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{slug}",
+   "handler": "deleteArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 129,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findFirst por slug",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 386,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "prisma.article.delete",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 409,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/{slug}/comments",
+   "handler": "getCommentsByArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 149,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findUnique con comments",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 433,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles/{slug}/comments",
+   "handler": "addComment",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 170,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "prisma.article.findUnique por slug",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 478,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Comment",
+     "detail": "prisma.comment.create",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 487,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{slug}/comments/{id}",
+   "handler": "deleteComment",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 190,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Comment",
+     "detail": "prisma.comment.findFirst",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 528,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Comment",
+     "detail": "prisma.comment.delete",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 555,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles/{slug}/favorite",
+   "handler": "favoriteArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 210,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "prisma.article.update (favoritedBy)",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 563,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{slug}/favorite",
+   "handler": "unfavoriteArticle",
+   "file": "src/app/routes/article/article.controller.ts",
+   "line": 230,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "prisma.article.update (favoritedBy)",
+     "file": "src/app/routes/article/article.service.ts",
+     "line": 609,
+     "why": "consulta del handler"
+    }
+   ]
+  }
+ ],
+ "components": [
+  {
+   "name": "postgres",
+   "role": "db",
+   "technology": "Postgres (Prisma)",
+   "file": "src/app/routes/article/article.service.ts",
+   "line": 77,
+   "why": "las consultas Prisma de los services"
+  }
+ ]
+}
