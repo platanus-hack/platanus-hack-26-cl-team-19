@@ -1,0 +1,233 @@
+<script setup lang="ts">
+import { Pause, Play, RotateCcw } from "@lucide/vue";
+import { useIntervalFn } from "@vueuse/core";
+import ProvenanceBadge from "@/components/design/ProvenanceBadge.vue";
+import SaturationBadge from "@/components/design/SaturationBadge.vue";
+import type { MetricProvenance } from "@/components/design/types";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import SimulationChart from "./SimulationChart.vue";
+import type { SimulationFrame, SimulationPhase } from "./types";
+
+const props = defineProps<{
+  frames: SimulationFrame[];
+  phases: SimulationPhase[];
+  /** Objetivo de latencia en ms. */
+  slo: number;
+  provenance: MetricProvenance;
+}>();
+
+const minute = defineModel<number>("minute", { required: true });
+const playing = defineModel<boolean>("playing", { default: false });
+
+const speeds = [1, 2, 4] as const;
+const speed = ref<(typeof speeds)[number]>(2);
+const last = computed(() => Math.max(0, props.frames.length - 1));
+const frame = computed(() => props.frames[minute.value] ?? props.frames[0]);
+const phase = computed(
+  () =>
+    props.phases.find(
+      (item) => minute.value >= item.from && minute.value <= item.to,
+    ) ?? props.phases[0],
+);
+
+const { pause, resume } = useIntervalFn(
+  () => {
+    if (minute.value >= last.value) {
+      playing.value = false;
+      return;
+    }
+    minute.value += 1;
+  },
+  () => 500 / speed.value,
+  { immediate: false },
+);
+
+watch(
+  playing,
+  (value) => {
+    if (value && minute.value >= last.value) minute.value = 0;
+    if (value) resume();
+    else pause();
+  },
+  { immediate: true },
+);
+
+const slider = computed({
+  get: () => [minute.value],
+  set: ([value]) => {
+    minute.value = value ?? 0;
+  },
+});
+
+const number = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 });
+const percent = new Intl.NumberFormat("es-CL", {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
+
+const phaseTone = {
+  healthy: "bg-status-healthy border-status-healthy-border",
+  "at-risk": "bg-status-at-risk border-status-at-risk-border",
+  saturated: "bg-status-saturated border-status-saturated-border",
+  down: "bg-status-down border-status-down-border",
+} as const;
+const phaseLabel = {
+  healthy: "Normal",
+  "at-risk": "En riesgo",
+  saturated: "Saturación",
+  down: "Colapso",
+} as const;
+const formatMinute = (index: number) => `Minuto ${index + 1}`;
+</script>
+
+<template>
+  <section aria-label="Simulación" class="flex flex-col gap-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        :aria-label="playing ? 'Pausar simulación' : 'Reproducir simulación'"
+        @click="playing = !playing"
+      >
+        <component
+          :is="playing ? Pause : Play"
+          data-icon="inline-start"
+          aria-hidden="true"
+        />
+        {{ playing ? "Pausar" : minute >= last ? "Repetir" : "Simular" }}
+      </Button>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Volver al inicio"
+        :disabled="minute === 0"
+        @click="
+          playing = false;
+          minute = 0;
+        "
+      >
+        <RotateCcw aria-hidden="true" />
+      </Button>
+      <div
+        class="flex items-center rounded-md border border-border"
+        role="group"
+        aria-label="Velocidad"
+      >
+        <Button
+          v-for="option in speeds"
+          :key="option"
+          type="button"
+          size="xs"
+          :variant="speed === option ? 'secondary' : 'ghost'"
+          :aria-pressed="speed === option"
+          class="font-mono"
+          @click="speed = option"
+        >
+          {{ option }}×
+        </Button>
+      </div>
+      <span
+        class="ms-auto flex items-center gap-2 text-xs text-muted-foreground"
+      >
+        <SaturationBadge v-if="phase" :status="phase.status" plain />
+        <span class="font-mono tabular-nums"
+          >{{ minute + 1 }} / {{ frames.length }} min</span
+        >
+      </span>
+    </div>
+
+    <div class="flex flex-col gap-1.5">
+      <Slider
+        v-model="slider"
+        :min="0"
+        :max="last"
+        :step="1"
+        aria-label="Minuto de la simulación"
+      />
+      <ol class="flex h-5 gap-px" aria-label="Fases de la simulación">
+        <li
+          v-for="item in phases"
+          :key="item.from"
+          class="flex min-w-0 items-center overflow-hidden rounded-sm border px-1.5 text-[0.625rem]"
+          :class="phaseTone[item.status]"
+          :style="{ flexGrow: item.to - item.from + 1 }"
+          :title="`${phaseLabel[item.status]}: minutos ${item.from + 1}–${item.to + 1}`"
+        >
+          <span class="truncate">{{ phaseLabel[item.status] }}</span>
+        </li>
+      </ol>
+    </div>
+
+    <dl
+      v-if="frame"
+      class="grid grid-cols-2 gap-x-6 gap-y-3 @xl/canvas:grid-cols-4"
+    >
+      <div class="flex flex-col gap-0.5">
+        <dt class="text-xs text-muted-foreground">Entrantes / exitosas</dt>
+        <dd class="font-mono text-sm tabular-nums">
+          {{ frame.incoming }} / {{ frame.successful }}
+          <span class="text-muted-foreground">req/s</span>
+        </dd>
+      </div>
+      <div class="flex flex-col gap-0.5">
+        <dt class="text-xs text-muted-foreground">Latencia p95</dt>
+        <dd class="flex items-center gap-1 text-sm">
+          <span v-if="frame.p95 !== null" class="font-mono tabular-nums"
+            >{{ frame.p95 }} <span class="text-muted-foreground">ms</span></span
+          >
+          <span v-else>Sin valor fiable</span>
+          <ProvenanceBadge :provenance="provenance" compact />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-0.5">
+        <dt class="text-xs text-muted-foreground">Fallos</dt>
+        <dd class="font-mono text-sm tabular-nums">
+          {{ percent.format(frame.failureRate) }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-0.5">
+        <dt class="text-xs text-muted-foreground">Cola en espera</dt>
+        <dd class="font-mono text-sm tabular-nums">
+          {{ number.format(frame.queue) }}
+          <span class="text-muted-foreground">req</span>
+        </dd>
+      </div>
+    </dl>
+
+    <div class="grid gap-6 @2xl/canvas:grid-cols-2">
+      <SimulationChart
+        title="Latencia p95"
+        unit="ms"
+        :series="[
+          { id: 'p95', label: 'p95', values: frames.map((item) => item.p95) },
+        ]"
+        :threshold="{ value: slo, label: `SLO ${slo} ms` }"
+        :cursor="minute"
+        :format-x="formatMinute"
+        @seek="minute = $event"
+      />
+      <SimulationChart
+        title="Solicitudes por segundo"
+        unit="req/s"
+        :series="[
+          {
+            id: 'successful',
+            label: 'Exitosas',
+            values: frames.map((item) => item.successful),
+          },
+          {
+            id: 'incoming',
+            label: 'Entrantes',
+            values: frames.map((item) => item.incoming),
+            secondary: true,
+          },
+        ]"
+        :cursor="minute"
+        :format-x="formatMinute"
+        @seek="minute = $event"
+      />
+    </div>
+  </section>
+</template>
