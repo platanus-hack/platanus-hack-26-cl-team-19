@@ -348,14 +348,14 @@ async function addDemoRepository() {
           Vista previa: el comando todavía no funciona. Puedes seguir y usar el
           editor sin CLI.
         </p>
-        <div class="flex flex-wrap items-center gap-2">
-          <Button @click="completeOnboarding">
-            Ir a Mis proyectos
-            <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Button>
+        <div class="mt-2 flex flex-wrap items-center justify-end gap-4">
           <Button variant="ghost" @click="step = 'github'">
             <ArrowLeft data-icon="inline-start" aria-hidden="true" />
             Volver
+          </Button>
+          <Button @click="completeOnboarding">
+            Ir a Mis proyectos
+            <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Button>
         </div>
       </div>
