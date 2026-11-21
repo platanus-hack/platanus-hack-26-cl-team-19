@@ -12,10 +12,11 @@ Tools (las mismas del ADR 0001, sobre los modelos de ejemplo de backend/app/samp
     con la misma semilla y devuelve el delta y el costo mensual.
   * ops_schema(): el JSON Schema de las operaciones, para que el LLM sepa qué puede pedir.
 
-Ninguna tool recibe números del LLM fuera de las operaciones validadas: los números salen del motor,
-del catálogo y de la tabla de precios.
+Ninguna tool recibe números libres del LLM: `simulate` solo elige un escenario del modelo, y `propose`
+recibe operaciones validadas (cuyos números de diseño quedan SUPUESTO, o con la `quote` del usuario).
+En JAJ-67 el tráfico entra solo por `set_traffic(..., quote)`. Cada resultado trae su procedencia.
 
-Uso (desde la raíz del repo, con las dependencias del backend y `pip install mcp`):
+Uso (desde la raíz del repo, con las dependencias del backend y `pip install "mcp>=2,<3"`):
     python spikes/jaj-54-byos/mcp_server.py                 # http://127.0.0.1:8765/mcp
     claude mcp add --transport http branchpoint http://127.0.0.1:8765/mcp
 """
@@ -28,9 +29,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
-from mcp.server.mcpserver import MCPServer  # noqa: E402  (mcp 2.x)
-
-from app.agent.ops import OpError, apply_ops, ops_json_schema  # noqa: E402
+from app.agent.ops import OpError, apply_ops, collect_assumptions, ops_json_schema  # noqa: E402
 from app.costs.estimate import estimate_cost  # noqa: E402
 from app.engine import simulate as run_engine  # noqa: E402
 from app.models import load_model  # noqa: E402
@@ -38,6 +37,7 @@ from app.models.compare import run_delta  # noqa: E402
 from app.models.graph import model_summary  # noqa: E402
 from app.models.run import Run  # noqa: E402
 from app.samples import load_sample, sample_ids  # noqa: E402
+from mcp.server.mcpserver import MCPServer  # noqa: E402  (mcp 2.x)
 
 server = MCPServer(
     name="branchpoint",
@@ -57,7 +57,23 @@ def _example(example: str) -> dict[str, Any]:
     return raw
 
 
-def _summary(run: Run) -> dict[str, Any]:
+SIM_SECONDS = 30.0  # duración fija: el LLM no la elige
+
+
+def _provenance(raw: dict[str, Any], run: Run) -> dict[str, Any]:
+    """De dónde salen los números del resumen, para que el LLM lo cite (regla del proyecto)."""
+    supuestos = collect_assumptions(raw)["total"]
+    return {
+        "label": "SUPUESTO" if supuestos else "ESTIMADO",
+        "source": f"Motor de eventos discretos de Branchpoint: escenario {run.scenario}, semilla {run.seed}, "
+        f"{run.duration_s:g} s simulados",
+        "assumptions": supuestos,
+        "note": "Un resultado hereda la etiqueta más débil de sus entradas. Los SUPUESTO del modelo se ven "
+        "en el editor (en JAJ-67, con la tool list_assumptions).",
+    }
+
+
+def _summary(run: Run, raw: dict[str, Any]) -> dict[str, Any]:
     b = run.bottleneck
     return {
         "scenario": run.scenario,
@@ -71,12 +87,13 @@ def _summary(run: Run) -> dict[str, Any]:
             "message": b.message,
             "line": getattr(b, "line", None),
         },
-        "warnings": run.warnings[:5],
+        "warnings": run.warnings,  # todas: entre ellas, si el motor es optimista cerca de la capacidad
+        "provenance": _provenance(raw, run),
     }
 
 
-def _simulate(raw: dict[str, Any], scenario: str, seed: int, duration_s: float, rps: float | None) -> Run:
-    return run_engine(load_model(raw), scenario, seed=seed, duration_s=duration_s, rps=rps)
+def _simulate(raw: dict[str, Any], scenario: str, seed: int) -> Run:
+    return run_engine(load_model(raw), scenario, seed=seed, duration_s=SIM_SECONDS)
 
 
 @server.tool()
@@ -86,12 +103,12 @@ def list_examples() -> list[dict[str, Any]]:
 
 
 @server.tool()
-def simulate(
-    example: str, scenario: str = "cyberday", seed: int = 0, duration_s: float = 30, rps: float | None = None
-) -> dict[str, Any]:
-    """Simula un modelo de ejemplo bajo un escenario (pico_normal, cyberday) y resume el Run:
-    p95, errores, throughput y el cuello de botella con su archivo:línea."""
-    return _summary(_simulate(_example(example), scenario, seed, duration_s, rps))
+def simulate(example: str, scenario: str = "cyberday", seed: int = 0) -> dict[str, Any]:
+    """Simula un modelo de ejemplo bajo uno de sus escenarios (pico_normal, cyberday) y resume el Run:
+    p95, errores, throughput, el cuello de botella con su archivo:línea y la procedencia. La tasa de
+    tráfico sale del escenario del modelo, no se pasa a mano."""
+    raw = _example(example)
+    return _summary(_simulate(raw, scenario, seed), raw)
 
 
 @server.tool()
@@ -110,15 +127,15 @@ def propose(example: str, ops: list[dict[str, Any]], scenario: str = "cyberday",
         result = apply_ops(raw, ops)
     except OpError as e:
         return {"error": str(e)}  # el LLM lo lee y corrige
-    before = _simulate(raw, scenario, seed, 30, None)
-    after = _simulate(result.model, scenario, seed, 30, None)
+    before = _simulate(raw, scenario, seed)
+    after = _simulate(result.model, scenario, seed)
     delta = run_delta(before, after, raw, result.model)
     cost_a, cost_b = estimate_cost(raw), estimate_cost(result.model)
     return {
         "changes": result.changes,
         "warnings": result.warnings,
-        "before": _summary(before),
-        "after": _summary(after),
+        "before": _summary(before, raw),
+        "after": _summary(after, result.model),
         "p95_ms": {"before": delta.p95_ms.a, "after": delta.p95_ms.b},
         "error_rate": {"before": delta.error_rate.a, "after": delta.error_rate.b},
         "usd_month": {"before": cost_a.total, "after": cost_b.total},

@@ -3,9 +3,9 @@
 ## Resultado en 5 líneas
 
 1. **Decisión: Branchpoint es un servidor MCP. El agente corre en la CLI de IA del propio usuario**, por ejemplo Claude Code con su plan Pro/Max. El usuario conecta su CLI a Branchpoint con un comando. Desde ahí, el loop con el LLM y los tokens son suyos, y Branchpoint solo ejecuta las tools: simular, proponer y costear.
-2. **Es el único camino de suscripción que permiten los proveedores.** Anthropic prohíbe que una app de terceros ofrezca el login de claude.ai o mande requests con el plan Pro/Max del usuario. Sí permite que el usuario use su propio Claude Code, sin modificar, con su suscripción. OpenAI no ofrece un "Sign in with ChatGPT" para terceros.
+2. **Con Anthropic es el único camino de suscripción permitido, y los otros proveedores no ofrecen uno.** Anthropic prohíbe que una app de terceros ofrezca el login de claude.ai o mande requests con el plan Pro/Max del usuario. Sí permite que el usuario use su propio Claude Code, sin modificar, con su suscripción. OpenAI no ofrece un "Sign in with ChatGPT" para terceros.
 3. **Branchpoint no guarda ninguna credencial de IA.** En el modo CLI solo existe un token de Branchpoint para conectar la CLI al MCP (JAJ-81). El chat dentro del editor (JAJ-67) se usa solo con una API key del usuario, que no se guarda en el servidor, o con la credencial de demo del equipo, con límite de gasto.
-4. **Proveedores del MVP:** Claude Code primero. Como MCP es un estándar, otras CLIs con MCP por HTTP sirven sin código extra (Gemini CLI confirmado; Codex sin verificar).
+4. **Proveedores del MVP:** Claude Code primero, y **es el único probado**. Como MCP es un estándar, otras CLIs con MCP por HTTP deberían servir sin código extra: según su documentación, Gemini CLI lo soporta, pero no se probó; Codex no está verificado.
 5. **Validado con Claude Code real** (plan Pro, sin API key). Conectado a `mcp_server.py`, el agente:
    * simuló CyberDay y citó el cuello de botella con su `archivo:línea`;
    * probó 4 propuestas con `propose`, porque cada arreglo movía el cuello a otro lado;
@@ -98,7 +98,7 @@ Es para quien no tiene una CLI o para la demo. Usa el mismo conjunto de tools, a
 `check_client.py` es un cliente MCP por streamable HTTP, sin LLM ni credenciales.
 
 ```bash
-pip install -e "./backend[dev]" mcp      # mcp 2.x (MCPServer)
+pip install -e "./backend[dev]" "mcp>=2,<3"   # el spike usa la API de mcp 2.x (MCPServer)
 python spikes/jaj-54-byos/mcp_server.py   # http://127.0.0.1:8765/mcp
 python spikes/jaj-54-byos/check_client.py
 ```
@@ -153,6 +153,15 @@ claude -p "Con la tool simulate de branchpoint, ¿qué pasa en CyberDay en el ej
 - **JAJ-81 (vincular la CLI):** emparejar es generar el token de Branchpoint y mostrar el comando `claude mcp add`. La conexión queda verificada con el primer `tools/list` con ese token. La UI distingue tres estados: sin CLI, token sin usar y conectada.
 - **JAJ-66 y JAJ-86 (LLM en la ingesta):** la ingesta corre en el backend, así que su LLM necesita el modo API key o el de demo. Otra opción es exponer la clasificación de huecos como tool, para que la haga la CLI del usuario.
 - **ADR 0001:** no cambia. El proveedor solo decide quién corre el loop.
+
+## Requisitos para la versión productiva (JAJ-67)
+
+Lo anotó el bot reviewer sobre el spike, y aplica al servidor MCP del backend:
+
+- **Ningún número libre del LLM.** El tráfico entra solo por `set_traffic(..., quote)` y las metas por `set_goals(..., quote)`. `simulate` elige un escenario del proyecto y no recibe `rps` ni duración. El spike ya lo cumple.
+- **Procedencia en cada resultado.** Etiqueta (`SUPUESTO` o `ESTIMADO`), fuente (motor, escenario, semilla y duración) y cantidad de supuestos, para que el agente pueda citarlos. Todas las advertencias, sin recortar. El spike ya lo cumple.
+- **Límites por token.** En modo CLI, Branchpoint no controla el loop, así que el servidor pone un rate limit de llamadas por minuto y un tope de simulaciones por propuesta. La duración ya es fija en el servidor.
+- **Credenciales fuera de los logs.** "No se registra en logs" cubre también los middlewares de request, las trazas de error y el token de Branchpoint.
 
 ## Pendientes
 

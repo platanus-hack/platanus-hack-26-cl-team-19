@@ -35,7 +35,9 @@ async def main() -> None:
             sim = payload(await session.call_tool("simulate", {"example": EXAMPLE, "scenario": "cyberday"}))
             print("\nsimulate cyberday:", json.dumps(sim, ensure_ascii=False, indent=1)[:900])
 
-            bad = payload(await session.call_tool("propose", {"example": EXAMPLE, "ops": [{"op": "scale_api", "replicas": 0}]}))
+            bad = payload(
+                await session.call_tool("propose", {"example": EXAMPLE, "ops": [{"op": "scale_api", "replicas": 0}]})
+            )
             print("\npropose inválido (el LLM lo lee y corrige):", bad)
 
             prop = payload(
@@ -49,6 +51,12 @@ async def main() -> None:
             print(" cuello antes:", prop["before"]["bottleneck"]["message"])
             print(" cuello después:", prop["after"]["bottleneck"]["message"])
             print(" US$/mes:", prop["usd_month"]["before"]["value"], "->", prop["usd_month"]["after"]["value"])
+            print(" procedencia:", prop["after"]["provenance"]["label"], "|", prop["after"]["provenance"]["source"])
+
+            # simulate no tiene rps en su schema: un número inventado por el LLM se descarta
+            sneaky = payload(await session.call_tool("simulate", {"example": EXAMPLE, "rps": 5000}))
+            assert sneaky["rps"] == sim["rps"], "simulate usó un rps que no viene del escenario"
+            print(f"\nsimulate con rps=5000 inventado: usa {sneaky['rps']} req/s, la tasa del escenario")
 
 
 if __name__ == "__main__":
