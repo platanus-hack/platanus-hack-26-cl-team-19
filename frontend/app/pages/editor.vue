@@ -1,16 +1,19 @@
 <script setup lang="ts">
+import { Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
+import EditorCliPanel from "@/components/editor/EditorCliPanel.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
+import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
 import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
-import type { EditorSection } from "@/components/editor/types";
+import type { ChatMessage, EditorSection } from "@/components/editor/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,31 +38,36 @@ import {
   toVersionChanges,
 } from "@/services/editor-view";
 
+definePageMeta({
+  middleware: "supabase-session",
+  key: (route) => route.fullPath,
+});
 useSeoMeta({ title: "Editor · Branchpoint" });
 
 const {
   isMock,
   models,
   project,
+  projectGroup,
   version,
   graph,
   scenario,
   run,
   costs,
+  costsError,
   comparison,
   scenarios,
   versions,
   pending,
   error,
   loadModels,
-  openProject,
   openSample,
+  openProject,
   openVersion,
   saveReplicas,
   simulate,
   loadCosts,
   compare,
-  closeProject,
 } = useEditorProject();
 
 const section = ref<EditorSection>("scenarios");
@@ -113,19 +121,43 @@ const changes = computed(() =>
 );
 
 const route = useRoute();
+const projectId = computed(() =>
+  typeof route.query.project === "string" ? route.query.project : "",
+);
+
+const repoId = computed(() =>
+  typeof route.query.repo === "string" ? route.query.repo : undefined,
+);
+const repositories = computed(() => {
+  const group = projectGroup.value;
+  if (!group) return [];
+  const repos = group.repositories ?? [{ id: group.id, fullName: group.name }];
+  return repos.map((repo) => ({
+    id: repo.id,
+    name: repo.fullName,
+    version: repo.id === project.value?.id ? (version.value?.label ?? "") : "",
+  }));
+});
+
+function selectRepository(id: string) {
+  if (id === project.value?.id || !projectId.value) return;
+  return navigateTo({
+    path: "/editor",
+    query: { project: projectId.value, repo: id },
+  });
+}
+
 onMounted(async () => {
-  // en serie: request() descarta una acción si hay otra en curso
-  await loadModels();
-  // /editor?project=<id>: el proyecto que creó la ingesta de un repo (JAJ-57)
-  const id = route.query.project;
-  if (typeof id === "string" && id) await openProject(id);
+  if (projectId.value) await openProject(projectId.value, repoId.value);
+  else await loadModels();
 });
 watch([base, target], () => {
   comparison.value = null;
 });
-watch(run, () => {
+// Cada corrida nueva se reproduce sola: Simular ya implica ver el resultado.
+watch(run, (value) => {
   cursor.value = 0;
-  playing.value = false;
+  playing.value = !!value;
 });
 watch(version, (detail) => {
   selectedNode.value = null;
@@ -143,16 +175,92 @@ function showCompare(baseId?: string) {
   view.value = "compare";
 }
 
-function backToTemplates() {
-  closeProject();
-  view.value = "editor";
-  section.value = "scenarios";
-  panel.value = "simulation";
+async function createExample(sample: string) {
+  await openSample(sample);
+  if (project.value) {
+    await navigateTo({ path: "/editor", query: { project: project.value.id } });
+  }
 }
 
 function changeView(value: unknown) {
   if (value === "compare") showCompare();
   else if (value === "editor") view.value = "editor";
+}
+
+// Agente en la CLI del usuario (JAJ-81). El panel muestra si hay una CLI conectada; la
+// «Simulación de prueba» es local (testSimulation) y no pasa por el MCP.
+const cli = useCliConnections();
+const activity = ref<ChatMessage[]>([]);
+const testing = ref(false);
+const agentPrompt = computed(() => {
+  const label =
+    scenarios.value.find((entry) => entry.id === scenario.value)?.label ??
+    scenarios.value[0]?.label ??
+    "el escenario principal";
+  return `Usa branchpoint para simular ${label} en ${project.value?.name ?? "este proyecto"} y propón un cambio.`;
+});
+
+function updateTool(
+  id: string,
+  patch: Partial<Extract<ChatMessage, { role: "tool" }>>,
+) {
+  activity.value = activity.value.map((message) =>
+    message.id === id && message.role === "tool"
+      ? { ...message, ...patch }
+      : message,
+  );
+}
+
+// Simulación local para ver cómo se ve una corrida en el panel. No la pide la CLI: en modo MCP la
+// conversación ocurre en la terminal y al editor solo llegan las versiones que proponga (ADR 0001).
+async function testSimulation() {
+  if (testing.value) return;
+  testing.value = true;
+  const id = `${Date.now()}-simulate`;
+  try {
+    if (!scenario.value) {
+      activity.value = [
+        ...activity.value,
+        {
+          id,
+          role: "tool",
+          name: "simulate",
+          input: "",
+          status: "error",
+          output: "Elige un escenario para simular.",
+        },
+      ];
+      return;
+    }
+    activity.value = [
+      ...activity.value,
+      {
+        id,
+        role: "tool",
+        name: "simulate",
+        input: `scenario="${scenario.value}"`,
+        status: "running",
+      },
+    ];
+    const before = run.value;
+    await simulate();
+    // si la corrida no cambió, la simulación falló: no se reportan datos viejos
+    const result = run.value !== before ? run.value : null;
+    const bottleneck = result ? toBottleneck(result) : null;
+    updateTool(id, {
+      status: result ? "done" : "error",
+      output: result
+        ? (bottleneck?.title ?? "Sin cuello de botella")
+        : "La simulación falló.",
+      detail: result
+        ? `${bottleneck?.description ?? ""} Fuente: ${provenance.source}.`.trim()
+        : undefined,
+    });
+  } catch {
+    updateTool(id, { status: "error", output: "La simulación falló." });
+  } finally {
+    testing.value = false;
+  }
 }
 
 async function saveVersion() {
@@ -162,7 +270,10 @@ async function saveVersion() {
 
 <template>
   <EditorShell
-    :repository-name="project?.name"
+    :repository-name="
+      repositories.find((repo) => repo.id === project?.id)?.name ??
+      project?.name
+    "
     :version="version?.label"
     title="Editores"
   >
@@ -177,19 +288,24 @@ async function saveVersion() {
       </Tabs>
     </template>
 
-    <template #actions>
-      <Badge v-if="isMock" variant="outline">Datos de demostración</Badge>
-      <Button
-        v-if="project"
-        variant="outline"
-        size="sm"
+    <template v-if="projectId" #sidebar>
+      <RepositorySidebar
+        :repositories="repositories"
+        :active-id="project?.id"
         :disabled="busy"
-        @click="backToTemplates"
-      >
-        Modelos
-      </Button>
-      <Button v-else variant="ghost" size="sm" as-child>
-        <NuxtLink to="/">Inicio</NuxtLink>
+        :can-connect="false"
+        projects-link="/projects"
+        @select="selectRepository"
+      />
+    </template>
+
+    <template #actions>
+      <Badge v-if="isMock" variant="outline">
+        <span class="sm:hidden">Demo</span>
+        <span class="hidden sm:inline">Datos de demostración</span>
+      </Badge>
+      <Button v-if="!projectId" variant="ghost" size="sm" as-child>
+        <NuxtLink to="/projects">Mis proyectos</NuxtLink>
       </Button>
     </template>
 
@@ -210,7 +326,15 @@ async function saveVersion() {
       </Alert>
     </template>
 
-    <template v-if="!project" #view>
+    <template v-if="!project && projectId" #view>
+      <div v-if="error" class="p-6">
+        <Button variant="outline" @click="openProject(projectId, repoId)"
+          >Reintentar</Button
+        >
+      </div>
+    </template>
+
+    <template v-else-if="!project" #view>
       <section class="mx-auto flex max-w-4xl flex-col gap-6 p-6 sm:p-10">
         <header class="space-y-1">
           <h2 class="text-xl font-semibold">Abre un modelo de ejemplo</h2>
@@ -225,7 +349,10 @@ async function saveVersion() {
               <CardDescription>{{ model.endpoints }} endpoints</CardDescription>
             </CardHeader>
             <CardFooter>
-              <Button size="sm" :disabled="busy" @click="openSample(model.id)"
+              <Button
+                size="sm"
+                :disabled="busy"
+                @click="createExample(model.id)"
                 >Abrir {{ model.id }}</Button
               >
             </CardFooter>
@@ -294,7 +421,14 @@ async function saveVersion() {
               simulate();
             "
           >
-            Simular
+            <Loader2
+              v-if="pending === 'Simulando…'"
+              data-icon="inline-start"
+              class="animate-spin"
+              aria-hidden="true"
+            />
+            <Play v-else data-icon="inline-start" aria-hidden="true" />
+            {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
           </Button>
         </template>
         <ComponentList
@@ -367,6 +501,17 @@ async function saveVersion() {
       >
     </template>
 
+    <template v-if="project" #agent>
+      <EditorCliPanel
+        :connections="cli"
+        :activity="activity"
+        :prompt="agentPrompt"
+        :testing="testing"
+        @test="testSimulation"
+        @clear="activity = []"
+      />
+    </template>
+
     <template #metrics>
       <Tabs v-model="panel" class="gap-0">
         <TabsList variant="line" aria-label="Panel de análisis" class="mx-4">
@@ -384,7 +529,7 @@ async function saveVersion() {
             time-unit="second"
           />
           <p v-else class="text-sm text-muted-foreground">
-            Elige un escenario y pulsa Simular para ver el resultado.
+            Elige un escenario y pulsa Simular para reproducir el resultado.
           </p>
           <ul
             v-if="run?.warnings.length"
@@ -397,13 +542,17 @@ async function saveVersion() {
         </TabsContent>
         <TabsContent value="costs" class="p-4">
           <EditorVersionCosts v-if="costs" :costs="costs" />
-          <Button
-            v-else
-            variant="outline"
-            :disabled="busy || !version"
-            @click="loadCosts"
-            >Estimar costos</Button
+          <div v-else-if="costsError" class="flex flex-col items-start gap-3">
+            <p class="text-sm text-muted-foreground">{{ costsError }}</p>
+            <Button variant="outline" @click="loadCosts">Reintentar</Button>
+          </div>
+          <p
+            v-else-if="version"
+            class="flex items-center gap-2 text-sm text-muted-foreground"
           >
+            <Loader2 class="size-4 animate-spin" aria-hidden="true" />
+            Estimando costos…
+          </p>
         </TabsContent>
       </Tabs>
     </template>

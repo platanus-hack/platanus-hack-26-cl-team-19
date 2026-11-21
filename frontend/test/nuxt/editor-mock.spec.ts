@@ -26,4 +26,14 @@ describe("editor de demostración", () => {
       new Set([13]),
     );
   });
+
+  it("parte de cero si el sessionStorage está corrupto", async () => {
+    const storage = {
+      getItem: () => "{no es json",
+      setItem: () => {},
+    } as unknown as Storage;
+    const api = createMockEditorApi(storage);
+
+    await expect(api.listProjects()).resolves.not.toHaveLength(0);
+  });
 });

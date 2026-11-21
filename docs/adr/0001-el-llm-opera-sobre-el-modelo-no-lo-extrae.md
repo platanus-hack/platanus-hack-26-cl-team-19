@@ -35,6 +35,8 @@ Cada clasificación trae `evidence` (archivo:línea) y queda con etiqueta `ESTIM
 
 ## [4] Tools del agente
 
+> Desde JAJ-54 las mismas tools se exponen de dos formas. En el **modo MCP** (principal), el loop corre en la CLI de IA del usuario, y el máximo de iteraciones y la transmisión al chat de la última parte de esta sección no aplican. Ver Consecuencias. En el **modo chat** del editor, el loop es del backend y aplica todo lo de abajo.
+
 Una tool es una función del backend que el LLM puede pedir ejecutar. El backend valida los argumentos, la ejecuta y le devuelve el resultado.
 
 | Tool | Qué hace | Regla de números |
@@ -70,11 +72,13 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 ## Consecuencias
 
 * Los cambios de arquitectura que el agente puede proponer son los que soportan las ops. Agregar uno nuevo es código, no prompt.
-* El proveedor de IA ([JAJ-54](https://linear.app/jajathom/issue/JAJ-54)) solo decide qué credencial llama al loop. No cambia esta arquitectura.
+* El proveedor de IA ([JAJ-54](https://linear.app/jajathom/issue/JAJ-54)) decidió **dónde corre el loop**, no solo qué credencial lo llama. El modo principal es **MCP**: el loop corre en la CLI de IA del usuario (por ejemplo Claude Code con su suscripción), y Branchpoint expone estas mismas tools como servidor MCP. En ese modo, Branchpoint no controla el máximo de iteraciones ni transmite las tool calls a su chat: la conversación la ve el usuario en su CLI. Para compensar, el servidor MCP **debe** tener un rate limit por token de Branchpoint (el que conecta la CLI, no tokens del LLM) y un tope de simulaciones por token y por día. Cuentan `simulate` (1) y `compare` (2). `propose_version` no simula: solo crea la versión. Es un requisito de JAJ-67. Cada `propose` aceptado queda como versión visible en el editor. El loop propio del backend, con máximo de iteraciones y streaming al editor, queda para el chat del editor con la API key del usuario o en modo demo. Las reglas de números de esta página valen igual en los dos modos, porque se cumplen en las tools. Ver `spikes/jaj-54-byos/README.md`.
 * El chat que pide los datos de uso ([JAJ-59](https://linear.app/jajathom/issue/JAJ-59)) se construye con `set_traffic`, `set_deployment` y `set_goals`.
 
 ## Issues
 
 * [JAJ-66](https://linear.app/jajathom/issue/JAJ-66): exponer `gaps[]` en el extractor y clasificarlos con el LLM (paso 2).
 * [JAJ-68](https://linear.app/jajathom/issue/JAJ-68): operaciones tipadas de `propose_version`.
-* [JAJ-67](https://linear.app/jajathom/issue/JAJ-67): loop del agente y sus tools (paso 4). Depende de JAJ-68 y bloquea JAJ-59.
+* [JAJ-67](https://linear.app/jajathom/issue/JAJ-67): loop del agente y sus tools (paso 4), expuestas por MCP y en el chat del editor. Depende de JAJ-68 y bloquea JAJ-59.
+* [JAJ-54](https://linear.app/jajathom/issue/JAJ-54): dónde corre el loop (MCP en la CLI del usuario). Enmienda la sección Consecuencias de este ADR.
+* [JAJ-81](https://linear.app/jajathom/issue/JAJ-81): conectar la CLI del usuario al MCP (token de Branchpoint y `claude mcp add`).

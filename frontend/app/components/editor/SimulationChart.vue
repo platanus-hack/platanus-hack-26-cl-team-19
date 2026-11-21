@@ -117,7 +117,7 @@ const valueText = (value: number | null | undefined) =>
 
     <div class="flex gap-2">
       <div
-        class="flex h-28 w-8 shrink-0 flex-col justify-between text-right font-mono text-[0.625rem] text-muted-foreground tabular-nums"
+        class="flex h-20 w-8 shrink-0 flex-col justify-between text-right font-mono text-[0.625rem] text-muted-foreground tabular-nums"
         aria-hidden="true"
       >
         <span>{{ number.format(Math.round(max)) }}</span>
@@ -125,7 +125,7 @@ const valueText = (value: number | null | undefined) =>
       </div>
       <div
         ref="plot"
-        class="relative h-28 min-w-0 flex-1 cursor-crosshair border-b border-l border-border"
+        class="relative h-20 min-w-0 flex-1 cursor-crosshair border-b border-l border-border"
         role="img"
         :aria-label="`${title}. ${series.map((serie) => `${serie.label}: ${valueText(serie.values[cursor])}`).join('. ')}.`"
         @pointermove="hover = indexAt($event)"

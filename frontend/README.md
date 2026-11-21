@@ -19,8 +19,15 @@ La aplicación queda disponible en `http://localhost:3000`.
 
 ## Probar el editor
 
-Desde la home, pulsa **Abrir editor**. Con `pnpm dev` el editor funciona con
-datos de demostración. Para conectar FastAPI, arranca los dos procesos desde la
+Desde la home, pulsa **Ver proyectos** para abrir `/projects`. El proyecto
+de demostración muestra sus repos y ramas. Abre el editor para cambiar de repo
+en la barra lateral y volver a **Mis proyectos**. Con `pnpm dev` el editor funciona con
+datos de demostración. El dashboard conserva las versiones de demo en la sesión
+de esa pestaña. Con la URL de FastAPI y Supabase Auth configuradas, el frontend envía la sesión
+a las rutas de proyectos. Configura también `SUPABASE_URL` en FastAPI para que
+valide esa sesión y filtre los proyectos por usuario.
+
+Para probar FastAPI directamente en desarrollo, arranca los dos procesos desde la
 raíz del repo, en terminales separadas.
 
 ```bash

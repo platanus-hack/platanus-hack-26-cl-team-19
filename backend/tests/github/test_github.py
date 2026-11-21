@@ -59,11 +59,13 @@ class FakeGitHub(GitHubApp):
         self.repos = {42: [Repo(7, "acme/tienda", True, "main", 42)]}
         self.tarballs = {"acme/tienda": tarball({"app/main.py": FASTAPI_APP})}
         self.fetched: list[tuple[int, str, str]] = []
+        self.exchanged_with: list[str | None] = []  # redirect_uri de cada canje de code
 
     def installation_token(self, installation_id: int, repo_name: str | None = None) -> str:
         return TOKEN
 
-    def user_installations(self, code: str) -> dict[int, str]:
+    def user_installations(self, code: str, redirect_uri: str | None = None) -> dict[int, str]:
+        self.exchanged_with.append(redirect_uri)
         if code != "ok":
             raise GitHubError(401, "GitHub rechazó la autorización (el código venció o ya se usó). Vuelve a conectar.")
         return dict(self.user_installations_seen)
@@ -107,7 +109,7 @@ def connect(client) -> None:
 
 def redirect_params(r) -> dict[str, str]:
     loc = urllib.parse.urlparse(r.headers["location"])
-    assert f"{loc.scheme}://{loc.netloc}{loc.path}" == "http://front.test/conectar"
+    assert f"{loc.scheme}://{loc.netloc}{loc.path}" == "http://front.test/onboarding"
     return {k: v[0] for k, v in urllib.parse.parse_qs(loc.query).items()}
 
 
@@ -167,6 +169,32 @@ def test_authorize_saves_every_installation_the_user_sees(client, github):
     r = client.get("/github/callback", params={"code": "ok", "state": state})
     assert redirect_params(r)["github"] == "ok"
     assert {i["installation_id"] for i in client.get("/github/installations").json()} == {42, 43}
+
+
+def test_authorize_url_sends_this_backends_callback_as_redirect_uri(client, github):
+    """Con redirect_uri, producción y local usan la misma app: cada una vuelve a su backend (JAJ-84)."""
+    url = client.get("/github/authorize-url").json()["url"]
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    assert query["redirect_uri"] == ["http://testserver/github/callback"]
+    client.get("/github/callback", params={"code": "ok", "state": query["state"][0]})
+    assert github.exchanged_with == ["http://testserver/github/callback"]  # el mismo en el canje
+
+
+def test_redirect_uri_comes_from_branchpoint_api_url(client, github, monkeypatch):
+    """Detrás del proxy de Render el request llega por http: la URL pública sale de la variable."""
+    monkeypatch.setenv("BRANCHPOINT_API_URL", "https://api.example.com/")
+    url = client.get("/github/authorize-url").json()["url"]
+    assert urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["redirect_uri"] == [
+        "https://api.example.com/github/callback"
+    ]
+    client.get("/github/callback", params={"code": "ok", "state": sign_state(SECRET, None)})
+    assert github.exchanged_with == ["https://api.example.com/github/callback"]
+
+
+def test_install_callback_exchanges_without_redirect_uri(client, github):
+    """Si la app sigue con OAuth durante la instalación, GitHub no recibió redirect_uri: el canje tampoco."""
+    connect(client)
+    assert github.exchanged_with == [None]
 
 
 def test_authorize_without_the_app_installed(client, github):

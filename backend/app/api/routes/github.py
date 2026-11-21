@@ -8,7 +8,7 @@ Flujo (el diseño está en ``spikes/jaj-53-acceso-github/README.md``):
 2. El usuario instala la app en GitHub y elige los repos. GitHub vuelve a ``GET /github/callback``
    con ``code``, ``installation_id`` y ``state``. La API valida el state, confirma con el ``code`` que
    la instalación es de ese usuario de GitHub, la guarda y redirige al frontend
-   (``BRANCHPOINT_FRONTEND_URL/conectar?github=ok`` o ``?github=error&message=...``).
+   (``BRANCHPOINT_FRONTEND_URL/onboarding?github=ok`` o ``?github=error&message=...``).
 3. ``GET /github/repos`` y ``GET /github/repos/{owner}/{repo}/branches``: qué puede elegir.
 4. ``POST /github/ingestions``: analiza ese repo y rama en segundo plano. ``GET /github/ingestions/{id}``
    da el progreso y, al terminar, el ``project_id`` con su v1.
@@ -98,9 +98,17 @@ def _github_error(e: GitHubError) -> ApiError:
     return ApiError(status, GITHUB_ERROR, e.message)
 
 
+def callback_url(request: Request) -> str:
+    """La Callback URL de este backend, que va como ``redirect_uri`` del OAuth (JAJ-84). Tiene que estar
+    registrada en la GitHub App. En producción sale de ``BRANCHPOINT_API_URL``, porque detrás del proxy
+    de Render el request llega por http. En local, de la URL del request."""
+    base = os.environ.get("BRANCHPOINT_API_URL", "").strip().rstrip("/")
+    return f"{base}/github/callback" if base else str(request.url_for("callback"))
+
+
 def _frontend(path_query: dict[str, str]) -> str:
     base = os.environ.get("BRANCHPOINT_FRONTEND_URL", DEFAULT_FRONTEND_URL).rstrip("/")
-    return f"{base}/conectar?{urllib.parse.urlencode(path_query)}"
+    return f"{base}/onboarding?{urllib.parse.urlencode(path_query)}"
 
 
 # ---------- instalar ----------
@@ -112,10 +120,14 @@ def install_url(github: GitHubApp = Depends(get_github), user: User | None = Dep
 
 
 @router.get("/authorize-url", response_model=InstallUrl)
-def authorize_url(github: GitHubApp = Depends(get_github), user: User | None = Depends(current_user)) -> InstallUrl:
-    """Para quien ya tenía la app instalada: GitHub no redirige al cambiar una instalación existente,
-    así que se autoriza con OAuth y el callback guarda las instalaciones que ve el usuario."""
-    return InstallUrl(url=github.authorize_url(sign_state(github.config.client_secret, owner_of(user))))
+def authorize_url(
+    request: Request, github: GitHubApp = Depends(get_github), user: User | None = Depends(current_user)
+) -> InstallUrl:
+    """El paso que liga la app al usuario: después de instalarla en otra pestaña, o si ya estaba
+    instalada. Es el OAuth web con ``redirect_uri``, así vuelve a este backend y no a la primera
+    Callback URL de la app (JAJ-84). El callback guarda las instalaciones que ve el usuario."""
+    state = sign_state(github.config.client_secret, owner_of(user))
+    return InstallUrl(url=github.authorize_url(state, callback_url(request)))
 
 
 @router.get("/callback", include_in_schema=False)
@@ -144,7 +156,9 @@ def callback(
             return fail("La instalación quedó pendiente: un admin de la organización tiene que aprobarla.")
         return fail("La instalación se canceló o no terminó. Puedes volver a intentarlo.")
     try:
-        visible = github.user_installations(code)
+        # con installation_id volvió de la instalación (OAuth durante la instalación, sin redirect_uri);
+        # sin él, del OAuth web de /authorize-url, que sí mandó redirect_uri
+        visible = github.user_installations(code, None if installation_id is not None else callback_url(request))
     except GitHubError as e:
         return fail(e.message)
     if installation_id is not None:  # volvió de instalar: solo esa, y tiene que ser del usuario
