@@ -1,6 +1,6 @@
 # Bot reviewer de PRs (JAJ-63)
 
-El bot le pide a Claude una revisión de cada PR abierta hacia `dev` o `main` que no sea borrador. El resultado queda en un solo comentario con tres secciones:
+El bot le pide a Claude una revisión de cada PR abierta hacia `main` que no sea borrador, o sea, de cada release de `dev` a `main`. Las PRs de trabajo hacia `dev` no se revisan: así lo decidió el equipo. El resultado queda en un solo comentario con tres secciones:
 
 - ¿En qué aporta esta PR?
 - ¿Qué le falta?
@@ -22,7 +22,7 @@ Hay dos formas de correrlo, sin guardar ninguna API key en GitHub.
 
 ## Cuándo revisa
 
-Con el workflow en `dev`, GitHub lo corre en **toda PR hacia `dev` o `main`**:
+GitHub lo corre en **toda PR hacia `main`**. Toma el workflow de la PR combinada con su base, así que la PR de `dev` a `main` usa esta versión:
 
 - **Cuándo:** al abrirla, en cada push, al reabrirla y al pasar de borrador a lista.
 - **Borradores:** no se revisan.

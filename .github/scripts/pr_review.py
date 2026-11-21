@@ -43,7 +43,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MARKER = "<!-- branchpoint-review-bot"  # el comentario empieza con <!-- branchpoint-review-bot sha=... -->
 MODEL = os.environ.get("REVIEW_MODEL") or "claude-opus-5-5"
-BASES = ("dev", "main")
+BASES = ("main",)  # solo los releases hacia main, igual que el workflow
 MAX_DIFF_CHARS = 180_000  # unos 50.000 tokens de diff como máximo
 MAX_FILE_DIFF_CHARS = 25_000
 # Archivos que se listan pero cuyo diff no se manda: generados, lockfiles o datos grandes
@@ -456,7 +456,7 @@ def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = Fa
 
 
 def open_prs(repo: str) -> list[int]:
-    """PRs abiertas hacia dev o main que no son borrador."""
+    """PRs abiertas hacia main que no son borrador."""
     prs = github("GET", f"/repos/{repo}/pulls?state=open&per_page=100")
     return [p["number"] for p in prs if p["base"]["ref"] in BASES and not p.get("draft")]
 
