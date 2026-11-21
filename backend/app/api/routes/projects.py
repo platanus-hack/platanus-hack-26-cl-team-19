@@ -317,7 +317,7 @@ def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -
     ]
     if not saturated:
         return ""
-    parts = " y ".join(f"v{n} deja {s.unanswered_rate:.0%} de las requests sin respuesta" for n, s in saturated)
+    parts = " y ".join(f"v{n} deja {s.unanswered_rate * 100:.0f} % de las requests sin respuesta" for n, s in saturated)
     who = "Ninguna versión alcanza" if len(saturated) == 2 else f"v{saturated[0][0]} no alcanza"
     return f" Ojo: {who} a atender este tráfico ({parts} al terminar): su tasa de error es un piso."
 
