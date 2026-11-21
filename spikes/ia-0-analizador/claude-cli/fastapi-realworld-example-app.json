@@ -1,0 +1,414 @@
+{
+ "framework": "fastapi",
+ "language": "python",
+ "endpoints": [
+  {
+   "method": "POST",
+   "path": "/api/users/login",
+   "handler": "login",
+   "file": "app/api/routes/authentication.py",
+   "line": 22,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "users_repo.get_user_by_email",
+     "file": "app/api/routes/authentication.py",
+     "line": 34,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/users",
+   "handler": "register",
+   "file": "app/api/routes/authentication.py",
+   "line": 56,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "users_repo.create_user",
+     "file": "app/api/routes/authentication.py",
+     "line": 79,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/user",
+   "handler": "retrieve_current_user",
+   "file": "app/api/routes/users.py",
+   "line": 18,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": []
+  },
+  {
+   "method": "PUT",
+   "path": "/api/user",
+   "handler": "update_current_user",
+   "file": "app/api/routes/users.py",
+   "line": 38,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "users_repo.update_user",
+     "file": "app/api/routes/users.py",
+     "line": 59,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/profiles/{username}",
+   "handler": "retrieve_profile_by_username",
+   "file": "app/api/routes/profiles.py",
+   "line": 16,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Profile",
+     "detail": "profiles_repo.get_profile_by_username",
+     "file": "app/api/dependencies/profiles.py",
+     "line": 21,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/profiles/{username}/follow",
+   "handler": "follow_for_user",
+   "file": "app/api/routes/profiles.py",
+   "line": 27,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Follower",
+     "detail": "profiles_repo.add_user_into_followers",
+     "file": "app/api/routes/profiles.py",
+     "line": 49,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/profiles/{username}/follow",
+   "handler": "unsubscribe_from_user",
+   "file": "app/api/routes/profiles.py",
+   "line": 57,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Follower",
+     "detail": "profiles_repo.remove_user_from_followers",
+     "file": "app/api/routes/profiles.py",
+     "line": 79,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/feed",
+   "handler": "get_articles_for_user_feed",
+   "file": "app/api/routes/articles/articles_common.py",
+   "line": 22,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Article",
+     "detail": "articles_repo.get_articles_for_user_feed",
+     "file": "app/api/routes/articles/articles_common.py",
+     "line": 33,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles/{slug}/favorite",
+   "handler": "mark_article_as_favorite",
+   "file": "app/api/routes/articles/articles_common.py",
+   "line": 47,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Favorite",
+     "detail": "articles_repo.add_article_into_favorites",
+     "file": "app/api/routes/articles/articles_common.py",
+     "line": 58,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{slug}/favorite",
+   "handler": "remove_article_from_favorites",
+   "file": "app/api/routes/articles/articles_common.py",
+   "line": 77,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Favorite",
+     "detail": "articles_repo.remove_article_from_favorites",
+     "file": "app/api/routes/articles/articles_common.py",
+     "line": 88,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles",
+   "handler": "list_articles",
+   "file": "app/api/routes/articles/articles_resource.py",
+   "line": 30,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Article",
+     "detail": "articles_repo.filter_articles",
+     "file": "app/api/routes/articles/articles_resource.py",
+     "line": 36,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles",
+   "handler": "create_new_article",
+   "file": "app/api/routes/articles/articles_resource.py",
+   "line": 53,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "articles_repo.create_article",
+     "file": "app/api/routes/articles/articles_resource.py",
+     "line": 71,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/{slug}",
+   "handler": "retrieve_article_by_slug",
+   "file": "app/api/routes/articles/articles_resource.py",
+   "line": 82,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "Article",
+     "detail": "articles_repo.get_article_by_slug",
+     "file": "app/api/dependencies/articles.py",
+     "line": 43,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/api/articles/{slug}",
+   "handler": "update_article_by_slug",
+   "file": "app/api/routes/articles/articles_resource.py",
+   "line": 89,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "articles_repo.update_article",
+     "file": "app/api/routes/articles/articles_resource.py",
+     "line": 101,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{slug}",
+   "handler": "delete_article_by_slug",
+   "file": "app/api/routes/articles/articles_resource.py",
+   "line": 109,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Article",
+     "detail": "articles_repo.delete_article",
+     "file": "app/api/routes/articles/articles_resource.py",
+     "line": 120,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/articles/{slug}/comments",
+   "handler": "list_comments_for_article",
+   "file": "app/api/routes/comments.py",
+   "line": 26,
+   "why": "prefijo /articles/{slug}/comments en api.py:14",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Comment",
+     "detail": "comments_repo.get_comments_for_article",
+     "file": "app/api/routes/comments.py",
+     "line": 36,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/articles/{slug}/comments",
+   "handler": "create_comment_for_article",
+   "file": "app/api/routes/comments.py",
+   "line": 40,
+   "why": "prefijo /articles/{slug}/comments en api.py:14",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Comment",
+     "detail": "comments_repo.create_comment_for_article",
+     "file": "app/api/routes/comments.py",
+     "line": 52,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/articles/{slug}/comments/{comment_id}",
+   "handler": "delete_comment_from_article",
+   "file": "app/api/routes/comments.py",
+   "line": 60,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "Comment",
+     "detail": "comments_repo.get_comment_by_id",
+     "file": "app/api/dependencies/comments.py",
+     "line": 27,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Comment",
+     "detail": "comments_repo.delete_comment",
+     "file": "app/api/routes/comments.py",
+     "line": 71,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/tags",
+   "handler": "get_all_tags",
+   "file": "app/api/routes/tags.py",
+   "line": 10,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "scan",
+     "entity": "Tag",
+     "detail": "tags_repo.get_all_tags",
+     "file": "app/api/routes/tags.py",
+     "line": 14,
+     "why": "consulta del handler"
+    }
+   ]
+  }
+ ],
+ "components": [
+  {
+   "name": "postgres",
+   "role": "db",
+   "technology": "Postgres (asyncpg)",
+   "file": "docker-compose.yml",
+   "line": 1,
+   "why": "servicio de la base en el compose"
+  }
+ ]
+}

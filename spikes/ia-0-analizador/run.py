@@ -47,6 +47,7 @@ def norm(endpoint: str) -> str:
     """'GET /articles/{slug}/' y 'GET /api/articles/:slug' quedan comparables: parámetros como {}, sin barra final."""
     method, _, path = endpoint.partition(" ")
     path = re.sub(r"\{[^}]*\}|:[A-Za-z_]\w*|<[^>]*>|\(\?P<[^>]+>[^)]*\)", "{}", path)
+    path = re.sub(r"^/api(/v\d+)?(?=/)", "", path)  # el prefijo de montaje no cambia el endpoint
     return f"{method.upper()} {path.rstrip('/') or '/'}"
 
 
@@ -54,8 +55,8 @@ def reference_endpoints(name: str) -> set[str] | int:
     spec = REFERENCE["repos"][name]["endpoints"]
     if isinstance(spec, int):
         return spec
-    if spec == "realworld":
-        return {norm(e) for e in REFERENCE["realworld"]}
+    if spec in ("realworld", "django"):
+        return {norm(e) for e in REFERENCE[spec]}
     kind, _, sample = spec.partition(":")
     base = HERE.parents[1] / "backend"
     path = base / ("app/samples" if kind == "from_sample" else "tests/fixtures") / f"{sample}.model.json"
@@ -63,9 +64,8 @@ def reference_endpoints(name: str) -> set[str] | int:
 
 
 def matches(found: set[str], real: set[str]) -> set[str]:
-    """Los encontrados que están en la referencia, con o sin el prefijo /api (algunos lo montan afuera)."""
-    alt = {e.replace(" /api/", " /", 1) for e in real} | real
-    return {e for e in found if e in alt or e.replace(" /", " /api/", 1) in real}
+    """Los encontrados que están en la referencia (los dos ya sin prefijo /api ni /api/vN)."""
+    return found & real
 
 
 class CountingLLM:
