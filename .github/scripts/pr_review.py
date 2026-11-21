@@ -1,23 +1,30 @@
 """Bot reviewer de Branchpoint (JAJ-63): revisa una PR con la API de Claude y deja un solo comentario.
 
 Responde tres preguntas (¿en qué aporta?, ¿qué le falta?, ¿está bien para mergear?) con un veredicto:
-listo para mergear, con cambios menores o no listo. Lo corre `.github/workflows/pr-review.yml` en cada
-push a una PR hacia `dev` o `main`, y actualiza el mismo comentario en vez de crear otro.
+listo para mergear, con cambios menores o no listo. Cada revisión edita el mismo comentario en vez de
+crear otro, y el comentario guarda el commit revisado: un push nuevo es lo único que dispara otra.
+
+Corre de dos formas, con el mismo código:
+
+  * **En tu laptop**, con tu sesión de la CLI `ant` (`ant auth login`, sin key) o una key en el entorno.
+    Usa tu sesión de `gh` para leer y comentar:
+      python .github/scripts/pr_review.py --pr 34     # revisa una PR
+      python .github/scripts/pr_review.py --watch     # revisa cada PR abierta con un push nuevo
+  * **En GitHub Actions** (`.github/workflows/pr-review.yml`), sin secrets: se autentica con Workload
+    Identity Federation (el token OIDC de GitHub se cambia por uno de Anthropic). Usa GITHUB_TOKEN,
+    PR_NUMBER y GITHUB_REPOSITORY.
 
 Contexto que recibe Claude:
   * La PR: título, descripción, rama, commits y el diff (sin lockfiles ni JSON generados).
-  * Las reglas del repo: AGENTS.md, README.md y los ADR de docs/adr/.
+  * Las reglas del repo, tal como están en la rama base: AGENTS.md, README.md y los ADR de docs/adr/.
   * La issue de Linear enlazada (JAJ-NN en la rama, el título o la descripción) y el overview del
-    proyecto, si está el secret LINEAR_API_KEY.
+    proyecto, si está LINEAR_API_KEY.
 
-Nunca bloquea la PR: sin ANTHROPIC_API_KEY, o si la API falla, avisa en el log y termina con 0.
+Nunca bloquea una PR: sin credenciales de Claude, o si falla la API de Claude, Linear o GitHub, avisa y sigue.
 
-Variables de entorno: GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, BASE_SHA, HEAD_SHA y, opcionales,
-ANTHROPIC_API_KEY, LINEAR_API_KEY, REVIEW_MODEL (por defecto claude-opus-5-5).
-
-Para probar en local sin llamar a la API ni comentar:
-  python .github/scripts/pr_review.py --dry-run --pr 32
-(usa `gh` para leer la PR e imprime el prompt y su tamaño).
+Credenciales de Claude: las resuelve el SDK (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, las variables
+ANTHROPIC_FEDERATION_* de Workload Identity Federation o el perfil de `ant auth login`). Opcionales:
+LINEAR_API_KEY y REVIEW_MODEL (por defecto claude-opus-5-5). Para ver el prompt sin llamar a la API ni comentar: --dry-run --pr 32.
 """
 
 from __future__ import annotations
@@ -28,13 +35,15 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MARKER = "<!-- branchpoint-review-bot -->"
+MARKER = "<!-- branchpoint-review-bot"  # el comentario empieza con <!-- branchpoint-review-bot sha=... -->
 MODEL = os.environ.get("REVIEW_MODEL") or "claude-opus-5-5"
+BASES = ("dev", "main")
 MAX_DIFF_CHARS = 180_000  # unos 50.000 tokens de diff como máximo
 MAX_FILE_DIFF_CHARS = 25_000
 # Archivos que se listan pero cuyo diff no se manda: generados, lockfiles o datos grandes
@@ -88,41 +97,72 @@ La primera línea es solo `VEREDICTO: ` seguido de una de las tres palabras: `li
 
 # ---------- utilidades ----------
 
+IN_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
+
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
 def warn(msg: str) -> None:
-    """Aviso visible en la PR (anotación de GitHub Actions) sin hacer fallar el job."""
-    print(f"::warning title=Bot reviewer::{msg}", flush=True)
+    """En Actions, una anotación visible sin hacer fallar el job; en local, una línea en la terminal."""
+    print(f"::warning title=Bot reviewer::{msg}" if IN_ACTIONS else f"aviso: {msg}", flush=True)
 
 
 def git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
 
 
+class GitHubError(Exception):
+    pass
+
+
 def github(method: str, path: str, body: dict | None = None) -> object:
-    req = urllib.request.Request(
-        f"https://api.github.com{path}",
-        method=method,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={
-            "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "Content-Type": "application/json",
-        },
+    """API REST de GitHub: con GITHUB_TOKEN en Actions, con la sesión de `gh` en local."""
+    if os.environ.get("GITHUB_TOKEN"):
+        req = urllib.request.Request(
+            f"https://api.github.com{path}",
+            method=method,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={
+                "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = r.read()
+        except urllib.error.URLError as e:
+            raise GitHubError(str(e)) from e
+        return json.loads(data) if data else None
+    cmd = ["gh", "api", "--method", method, path]
+    if body is not None:
+        cmd += ["--input", "-"]
+    p = subprocess.run(cmd, input=json.dumps(body) if body else None, capture_output=True, text=True, cwd=ROOT)
+    if p.returncode != 0:
+        raise GitHubError(p.stderr.strip() or f"gh api {path} falló")
+    return json.loads(p.stdout) if p.stdout.strip() else None
+
+
+def repo_name() -> str:
+    if os.environ.get("GITHUB_REPOSITORY"):
+        return os.environ["GITHUB_REPOSITORY"]
+    out = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        data = r.read()
-    return json.loads(data) if data else None
+    return out.stdout.strip()
 
 
 # ---------- contexto de la PR ----------
 
 
-def pr_from_github(repo: str, number: int) -> dict:
+def get_pr(repo: str, number: int) -> dict:
     pr = github("GET", f"/repos/{repo}/pulls/{number}")
     commits = github("GET", f"/repos/{repo}/pulls/{number}/commits?per_page=100")
     return {
@@ -133,39 +173,22 @@ def pr_from_github(repo: str, number: int) -> dict:
         "head": pr["head"]["ref"],
         "base": pr["base"]["ref"],
         "draft": pr.get("draft", False),
+        "state": pr["state"],
+        "base_sha": pr["base"]["sha"],
+        "head_sha": pr["head"]["sha"],
         "commits": [c["commit"]["message"].splitlines()[0] for c in commits],
     }
 
 
-def pr_from_gh_cli(number: int) -> dict:
-    """Para --dry-run en local: la misma información, leída con `gh`."""
-    out = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "view",
-            str(number),
-            "--json",
-            "title,body,author,headRefName,baseRefName,isDraft,commits,baseRefOid,headRefOid",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    d = json.loads(out)
-    return {
-        "number": number,
-        "title": d["title"],
-        "body": d.get("body") or "",
-        "author": d["author"]["login"],
-        "head": d["headRefName"],
-        "base": d["baseRefName"],
-        "draft": d["isDraft"],
-        "commits": [c["messageHeadline"] for c in d["commits"]],
-        "base_sha": d["baseRefOid"],
-        "head_sha": d["headRefOid"],
-    }
+def ensure_commits(*shas: str) -> None:
+    """En local el clon puede no tener los commits de la PR: se bajan (no toca tu rama ni tus archivos)."""
+    missing = [
+        s
+        for s in shas
+        if subprocess.run(["git", "cat-file", "-e", f"{s}^{{commit}}"], cwd=ROOT, capture_output=True).returncode
+    ]
+    if missing:
+        git("fetch", "-q", "origin", *missing)
 
 
 def build_diff(base: str, head: str) -> tuple[str, list[str], bool]:
@@ -208,12 +231,21 @@ def linear_issue(identifier: str) -> dict | None:
         return None
 
 
-def context_files() -> str:
-    paths = [ROOT / p for p in CONTEXT_FILES] + sorted((ROOT / "docs" / "adr").glob("*.md"))
+def context_files(base_sha: str) -> str:
+    """Las reglas del repo (AGENTS.md, README, ADR) tal como están en la base, no como las deja la PR.
+
+    Ojo: con `pull_request`, Actions corre el script y el workflow de la propia PR, así que una PR sí puede
+    cambiar cómo se revisa (este archivo o el SYSTEM). Leer las reglas de la base solo evita que el diff
+    cambie el contexto sin que se vea en el diff.
+    """
+    adrs = [p for p in git("ls-tree", "--name-only", base_sha, "docs/adr/").splitlines() if p.endswith(".md")]
     out = []
-    for p in paths:
-        if p.is_file():
-            out.append(f'<archivo ruta="{p.relative_to(ROOT)}">\n{p.read_text(encoding="utf-8")}\n</archivo>')
+    for path in CONTEXT_FILES + sorted(adrs):
+        try:
+            text = git("show", f"{base_sha}:{path}")
+        except subprocess.CalledProcessError:
+            continue
+        out.append(f'<archivo ruta="{path}">\n{text}\n</archivo>')
     return "\n\n".join(out)
 
 
@@ -255,10 +287,11 @@ def build_prompt(pr: dict, diff: str, skipped: list[str], truncated: bool, issue
 # ---------- Claude ----------
 
 
-def review(prompt: str) -> tuple[str, dict]:
+def review(context: str, prompt: str) -> tuple[str, dict]:
     import anthropic  # solo hace falta cuando se llama a la API
 
-    client = anthropic.Anthropic(max_retries=3, timeout=240.0)  # lee ANTHROPIC_API_KEY del entorno
+    # Sin argumentos el SDK busca las credenciales: key, federación (CI) o el perfil de `ant auth login`
+    client = anthropic.Anthropic(max_retries=3, timeout=240.0)
     with client.messages.stream(
         model=MODEL,
         max_tokens=16000,
@@ -267,7 +300,7 @@ def review(prompt: str) -> tuple[str, dict]:
         # Las reglas y archivos del repo cambian poco: un push seguido reutiliza la caché
         system=[
             {"type": "text", "text": SYSTEM},
-            {"type": "text", "text": context_files(), "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": context, "cache_control": {"type": "ephemeral"}},
         ],
         messages=[{"role": "user", "content": prompt}],
     ) as stream:
@@ -324,17 +357,108 @@ def render_comment(text: str, usage: dict, head_sha: str) -> str:
         + (" · ⚠️ la respuesta se cortó por largo" if usage["truncated"] else "")
         + ". No aprueba ni mergea: la decisión es del equipo.</sub>"
     )
-    return f"{MARKER}\n## 🤖 Revisión del bot · {verdict}\n\n{body}\n\n---\n{footer}"
+    return f"{MARKER} sha={head_sha} -->\n## 🤖 Revisión del bot · {verdict}\n\n{body}\n\n---\n{footer}"
 
 
-def upsert_comment(repo: str, number: int, body: str) -> str:
+_LOGIN: str | None = None
+
+
+def my_login() -> str:
+    """Quién comenta: github-actions[bot] en Actions, tu usuario de `gh` en local."""
+    global _LOGIN
+    if _LOGIN is None:
+        _LOGIN = "github-actions[bot]" if IN_ACTIONS else github("GET", "/user")["login"]
+    return _LOGIN
+
+
+def bot_comment(repo: str, number: int) -> dict | None:
+    """El comentario del bot que este mismo autor puede editar (el de Actions y el local no se pisan)."""
     comments = github("GET", f"/repos/{repo}/issues/{number}/comments?per_page=100")
-    mine = next((c for c in comments if MARKER in (c.get("body") or "")), None)
-    if mine:
-        github("PATCH", f"/repos/{repo}/issues/comments/{mine['id']}", {"body": body})
-        return f"actualizado {mine['html_url']}"
+    me = my_login()
+    return next(
+        (c for c in comments if (c.get("body") or "").startswith(MARKER) and c["user"]["login"] == me),
+        None,
+    )
+
+
+def any_reviewed_sha(repo: str, number: int) -> set[str]:
+    """Commits ya revisados por cualquier autor: si Actions ya revisó, el modo local no vuelve a pagar."""
+    comments = github("GET", f"/repos/{repo}/issues/{number}/comments?per_page=100")
+    return {sha for c in comments if (sha := reviewed_sha(c))}
+
+
+def reviewed_sha(comment: dict | None) -> str | None:
+    m = re.match(re.escape(MARKER) + r" sha=([0-9a-f]{40})", (comment or {}).get("body") or "")
+    return m.group(1) if m else None
+
+
+def upsert_comment(repo: str, number: int, body: str, existing: dict | None) -> str:
+    if existing:
+        github("PATCH", f"/repos/{repo}/issues/comments/{existing['id']}", {"body": body})
+        return f"comentario actualizado: {existing['html_url']}"
     c = github("POST", f"/repos/{repo}/issues/{number}/comments", {"body": body})
-    return f"creado {c['html_url']}"
+    return f"comentario creado: {c['html_url']}"
+
+
+# ---------- una PR ----------
+
+
+def explain(e: Exception) -> str:
+    """El error, con el paso que falta cuando es de credenciales."""
+    msg = f"{type(e).__name__}: {e}"
+    if type(e).__name__ in ("AuthenticationError", "CredentialsError", "WorkloadIdentityError") or (
+        "authentication method" in str(e)
+    ):
+        if IN_ACTIONS:
+            msg += (
+                ". Revisa la regla de federación en la Claude Console y el motivo del rechazo en la pestaña History"
+                " de Workload identity (ver docs/bot-reviewer.md)"
+            )
+        else:
+            msg += ". En tu laptop: `ant auth login` (ver docs/bot-reviewer.md)"
+    return msg
+
+
+ATTEMPTED: set[tuple[int, str]] = set()  # (PR, commit) ya enviados a Claude en esta corrida de --watch
+
+
+def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = False) -> None:
+    """Revisa una PR. Si ya hay una revisión del mismo commit, no hace nada (salvo --force)."""
+    pr = get_pr(repo, number)
+    if not force and not dry_run and (pr["state"] != "open" or pr["draft"]):
+        log(f"#{number}: está {'cerrada' if pr['state'] != 'open' else 'en borrador'}; no se revisa (usa --force)")
+        return
+    existing = None if dry_run else bot_comment(repo, number)
+    if not dry_run and not force:
+        if pr["head_sha"] in any_reviewed_sha(repo, number):
+            log(f"#{number}: {pr['head_sha'][:7]} ya está revisado")
+            return
+        if (number, pr["head_sha"]) in ATTEMPTED:
+            log(f"#{number}: {pr['head_sha'][:7]} ya se envió a Claude en esta corrida; no se vuelve a pagar")
+            return
+    ensure_commits(pr["base_sha"], pr["head_sha"])
+    diff, skipped, truncated = build_diff(pr["base_sha"], pr["head_sha"])
+    ids = ISSUE_RE.findall(" ".join([pr["head"], pr["title"], pr["body"]]))
+    issue = linear_issue(ids[0].upper()) if ids else None
+    context = context_files(pr["base_sha"])
+    prompt = build_prompt(pr, diff, skipped, truncated, issue)
+    if dry_run:
+        print(SYSTEM, "\n\n", context[:2000], "\n[...]\n\n", prompt[:6000], "\n[...]")
+        log(
+            f"#{number}: prompt de {len(prompt):,} caracteres + {len(context):,} de contexto; "
+            f"{len(skipped)} archivos sin diff; truncado={truncated}; issue de Linear={'sí' if issue else 'no'}"
+        )
+        return
+    log(f"#{number}: revisando {pr['head_sha'][:7]} con {MODEL}...")
+    text, usage = review(context, prompt)
+    ATTEMPTED.add((number, pr["head_sha"]))  # ya está pagado: si falla el comentario, no se vuelve a pedir
+    log(f"#{number}: {upsert_comment(repo, number, render_comment(text, usage, pr['head_sha']), existing)}")
+
+
+def open_prs(repo: str) -> list[int]:
+    """PRs abiertas hacia dev o main que no son borrador."""
+    prs = github("GET", f"/repos/{repo}/pulls?state=open&per_page=100")
+    return [p["number"] for p in prs if p["base"]["ref"] in BASES and not p.get("draft")]
 
 
 # ---------- entrada ----------
@@ -342,51 +466,65 @@ def upsert_comment(repo: str, number: int, body: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--dry-run", action="store_true", help="arma el prompt con `gh` y lo imprime; no llama a la API")
-    ap.add_argument("--pr", type=int, help="número de la PR (por defecto PR_NUMBER)")
+    ap.add_argument("--pr", type=int, help="número de la PR (en Actions, PR_NUMBER)")
+    ap.add_argument("--watch", action="store_true", help="revisa en bucle cada PR abierta con un push nuevo")
+    ap.add_argument("--interval", type=int, default=120, help="segundos entre vueltas de --watch (por defecto 120)")
+    ap.add_argument("--force", action="store_true", help="revisa aunque ese commit ya tenga revisión")
+    ap.add_argument("--dry-run", action="store_true", help="arma el prompt y lo imprime; no llama a la API ni comenta")
     args = ap.parse_args()
+    if args.watch and args.dry_run:
+        ap.error("--dry-run es para una PR: usa --dry-run --pr N")
 
-    number = args.pr or int(os.environ["PR_NUMBER"])
-    if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
-        warn("Falta el secret ANTHROPIC_API_KEY: no hay revisión automática en esta PR (no bloquea el merge).")
-        return 0
-    if args.dry_run:
-        pr = pr_from_gh_cli(number)
-        base, head = pr["base_sha"], pr["head_sha"]
-        git("fetch", "-q", "origin", base, head)
-    else:
-        repo = os.environ["GITHUB_REPOSITORY"]
-        try:
-            pr = pr_from_github(repo, number)
-        except urllib.error.URLError as e:
-            warn(f"No se pudo leer la PR desde GitHub ({e}). La PR no queda bloqueada.")
-            return 0
-        base, head = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
-
-    diff, skipped, truncated = build_diff(base, head)
-    ids = ISSUE_RE.findall(" ".join([pr["head"], pr["title"], pr["body"]]))
-    issue = linear_issue(ids[0].upper()) if ids else None
-    prompt = build_prompt(pr, diff, skipped, truncated, issue)
-
-    if args.dry_run:
-        print(SYSTEM, "\n\n", context_files()[:2000], "\n[...]\n\n", prompt[:6000], "\n[...]")
-        log(
-            f"prompt: {len(prompt):,} caracteres de PR + {len(context_files()):,} de contexto; "
-            f"{len(skipped)} archivos sin diff; truncado={truncated}; issue de Linear={'sí' if issue else 'no'}"
+    # En Actions, sin key ni federación configurada no hay cómo autenticarse: se avisa y se termina en verde.
+    # En local no se revisa aquí: el SDK puede usar el perfil de `ant auth login`.
+    if (
+        IN_ACTIONS
+        and not args.dry_run
+        and not any(
+            os.environ.get(v) for v in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_FEDERATION_RULE_ID")
         )
+    ):
+        warn("Sin credenciales de Claude (ver docs/bot-reviewer.md): no hay revisión automática; no bloquea la PR.")
+        return 0
+    try:
+        repo = repo_name()
+    except subprocess.CalledProcessError as e:
+        warn(f"No se pudo saber el repo ({e.stderr.strip()}). ¿Estás dentro del clon y con `gh auth login`?")
         return 0
 
+    if args.watch:
+        log(
+            f"Vigilando las PRs abiertas de {repo} hacia {' y '.join(BASES)} cada {args.interval} s. Ctrl+C para salir."
+        )
+        while True:
+            try:
+                numbers = open_prs(repo)
+            except GitHubError as e:
+                warn(f"No se pudieron listar las PRs ({e}); reintento en la próxima vuelta.")
+                numbers = []
+            for n in numbers:
+                try:
+                    review_pr(repo, n, force=args.force)
+                except Exception as e:  # noqa: BLE001 - una PR que falla no detiene a las demás
+                    warn(f"#{n}: la revisión falló ({explain(e)}); se reintenta en la próxima vuelta.")
+            args.force = False
+            try:
+                time.sleep(args.interval)
+            except KeyboardInterrupt:
+                return 0
+
+    number = args.pr or (int(os.environ["PR_NUMBER"]) if os.environ.get("PR_NUMBER") else None)
+    if number is None:
+        ap.error("falta --pr N (o --watch)")
     try:
-        text, usage = review(prompt)
-    except Exception as e:  # noqa: BLE001 - cualquier falla de la API no debe bloquear la PR
-        warn(f"La revisión con Claude falló ({type(e).__name__}: {e}). La PR no queda bloqueada.")
-        return 0
-    try:
-        log(upsert_comment(repo, number, render_comment(text, usage, head)))
-    except urllib.error.URLError as e:
-        warn(f"No se pudo comentar en la PR ({e}). La PR no queda bloqueada.")
+        review_pr(repo, number, dry_run=args.dry_run, force=args.force)
+    except Exception as e:  # noqa: BLE001 - cualquier falla no debe bloquear la PR
+        warn(f"#{number}: la revisión falló ({explain(e)}). La PR no queda bloqueada.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)
