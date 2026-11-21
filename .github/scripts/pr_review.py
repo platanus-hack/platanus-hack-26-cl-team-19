@@ -182,7 +182,11 @@ def get_pr(repo: str, number: int) -> dict:
 
 def ensure_commits(*shas: str) -> None:
     """En local el clon puede no tener los commits de la PR: se bajan (no toca tu rama ni tus archivos)."""
-    missing = [s for s in shas if subprocess.run(["git", "cat-file", "-e", f"{s}^{{commit}}"], cwd=ROOT).returncode]
+    missing = [
+        s
+        for s in shas
+        if subprocess.run(["git", "cat-file", "-e", f"{s}^{{commit}}"], cwd=ROOT, capture_output=True).returncode
+    ]
     if missing:
         git("fetch", "-q", "origin", *missing)
 
@@ -228,7 +232,12 @@ def linear_issue(identifier: str) -> dict | None:
 
 
 def context_files(base_sha: str) -> str:
-    """Las reglas del repo tal como están en la base: una PR no puede cambiarle las reglas a su propia revisión."""
+    """Las reglas del repo (AGENTS.md, README, ADR) tal como están en la base, no como las deja la PR.
+
+    Ojo: con `pull_request`, Actions corre el script y el workflow de la propia PR, así que una PR sí puede
+    cambiar cómo se revisa (este archivo o el SYSTEM). Leer las reglas de la base solo evita que el diff
+    cambie el contexto sin que se vea en el diff.
+    """
     adrs = [p for p in git("ls-tree", "--name-only", base_sha, "docs/adr/").splitlines() if p.endswith(".md")]
     out = []
     for path in CONTEXT_FILES + sorted(adrs):
@@ -351,9 +360,31 @@ def render_comment(text: str, usage: dict, head_sha: str) -> str:
     return f"{MARKER} sha={head_sha} -->\n## 🤖 Revisión del bot · {verdict}\n\n{body}\n\n---\n{footer}"
 
 
+_LOGIN: str | None = None
+
+
+def my_login() -> str:
+    """Quién comenta: github-actions[bot] en Actions, tu usuario de `gh` en local."""
+    global _LOGIN
+    if _LOGIN is None:
+        _LOGIN = "github-actions[bot]" if IN_ACTIONS else github("GET", "/user")["login"]
+    return _LOGIN
+
+
 def bot_comment(repo: str, number: int) -> dict | None:
+    """El comentario del bot que este mismo autor puede editar (el de Actions y el local no se pisan)."""
     comments = github("GET", f"/repos/{repo}/issues/{number}/comments?per_page=100")
-    return next((c for c in comments if (c.get("body") or "").startswith(MARKER)), None)
+    me = my_login()
+    return next(
+        (c for c in comments if (c.get("body") or "").startswith(MARKER) and c["user"]["login"] == me),
+        None,
+    )
+
+
+def any_reviewed_sha(repo: str, number: int) -> set[str]:
+    """Commits ya revisados por cualquier autor: si Actions ya revisó, el modo local no vuelve a pagar."""
+    comments = github("GET", f"/repos/{repo}/issues/{number}/comments?per_page=100")
+    return {sha for c in comments if (sha := reviewed_sha(c))}
 
 
 def reviewed_sha(comment: dict | None) -> str | None:
@@ -380,13 +411,23 @@ def explain(e: Exception) -> str:
     return msg
 
 
+ATTEMPTED: set[tuple[int, str]] = set()  # (PR, commit) ya enviados a Claude en esta corrida de --watch
+
+
 def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = False) -> None:
     """Revisa una PR. Si ya hay una revisión del mismo commit, no hace nada (salvo --force)."""
     pr = get_pr(repo, number)
-    existing = None if dry_run else bot_comment(repo, number)
-    if not dry_run and not force and reviewed_sha(existing) == pr["head_sha"]:
-        log(f"#{number}: {pr['head_sha'][:7]} ya está revisado")
+    if not force and (pr["state"] != "open" or pr["draft"]):
+        log(f"#{number}: está {'cerrada' if pr['state'] != 'open' else 'en borrador'}; no se revisa (usa --force)")
         return
+    existing = None if dry_run else bot_comment(repo, number)
+    if not dry_run and not force:
+        if pr["head_sha"] in any_reviewed_sha(repo, number):
+            log(f"#{number}: {pr['head_sha'][:7]} ya está revisado")
+            return
+        if (number, pr["head_sha"]) in ATTEMPTED:
+            log(f"#{number}: {pr['head_sha'][:7]} ya se envió a Claude en esta corrida; no se vuelve a pagar")
+            return
     ensure_commits(pr["base_sha"], pr["head_sha"])
     diff, skipped, truncated = build_diff(pr["base_sha"], pr["head_sha"])
     ids = ISSUE_RE.findall(" ".join([pr["head"], pr["title"], pr["body"]]))
@@ -401,6 +442,7 @@ def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = Fa
         )
         return
     log(f"#{number}: revisando {pr['head_sha'][:7]} con {MODEL}...")
+    ATTEMPTED.add((number, pr["head_sha"]))  # antes de llamar: si después falla el comentario, no se repaga
     text, usage = review(context, prompt)
     log(f"#{number}: {upsert_comment(repo, number, render_comment(text, usage, pr['head_sha']), existing)}")
 

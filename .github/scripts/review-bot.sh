@@ -10,10 +10,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VENV="${BRANCHPOINT_REVIEW_VENV:-$HOME/.cache/branchpoint-review-bot/venv}"
 
-if [[ ! -x "$VENV/bin/python" ]]; then
-  echo "Creando el entorno del bot en $VENV (solo la primera vez)..." >&2
-  python3 -m venv "$VENV"
-  "$VENV/bin/pip" install -q "anthropic==2.12.0"
+ANTHROPIC_SDK="2.12.0" # la misma versión que instala .github/workflows/pr-review.yml
+if ! "$VENV/bin/python" -c "import anthropic, sys; sys.exit(anthropic.__version__ != '$ANTHROPIC_SDK')" 2>/dev/null; then
+  echo "Preparando el entorno del bot en $VENV (anthropic $ANTHROPIC_SDK)..." >&2
+  [[ -x "$VENV/bin/python" ]] || python3 -m venv "$VENV"
+  "$VENV/bin/pip" install -q "anthropic==$ANTHROPIC_SDK"
 fi
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${ANTHROPIC_AUTH_TOKEN:-}" && " $* " != *" --dry-run "* ]]; then

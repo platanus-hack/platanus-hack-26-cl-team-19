@@ -32,14 +32,13 @@ Hay dos formas de correrlo, sin guardar ninguna API key en GitHub.
 ### Configuración en la Claude Console (una vez)
 
 1. Entra a <https://platform.claude.com/settings/workload-identity-federation>, aprieta **Connect workload** y elige **GitHub Actions**. Necesitas el rol admin en tu organización de Anthropic.
-2. El asistente crea tres cosas. Configúralas así:
-   - **Issuer:** `https://token.actions.githubusercontent.com`. El asistente lo pone solo.
-   - **Service account:** una cuenta para el bot, por ejemplo `branchpoint-pr-review`, agregada al workspace que quieras usar.
-   - **Federation rule:**
-     - Audience: `https://api.anthropic.com`.
-     - Subject: el de las PRs de este repo, `repo:platanus-hack/platanus-hack-26-cl-team-19:pull_request`. Ojo: si se fija a `ref:refs/heads/main`, no calza con las PRs.
-     - Claim `repository_owner`: `platanus-hack`.
-     - Scope: `workspace:inference`, que solo permite Messages y Models y basta para el bot.
+2. El asistente crea tres cosas. Así quedaron configuradas para este repo:
+   - **Issuer:** `https://token.actions.githubusercontent.com` (el asistente lo pone solo).
+   - **Service account:** `branchpoint-pr-review`, en un solo workspace.
+   - **Federation rule** `branchpoint-pr-review`, en **Advanced match options**:
+     - **Subject pattern** (exacto, sin `*`): `repo:platanus-hack@189188603/platanus-hack-26-cl-team-19@1466160503:pull_request`. Esta organización de GitHub usa el formato de subject con IDs; el que arma el asistente (`repo:platanus-hack/platanus-hack-26-cl-team-19:...`) no calza y el intercambio falla con `match_subject_prefix`.
+     - **Claims:** `repository_owner` = `platanus-hack`, `repository` = `platanus-hack/platanus-hack-26-cl-team-19`, `event_name` = `pull_request`, `repository_owner_id` = `189188603` y `repository_id` = `1466160503`.
+     - **Expected audience:** en blanco (por defecto `https://api.anthropic.com`, la que pide el workflow).
 3. Copia los cuatro IDs que muestra el asistente: el de la regla (`fdrl_...`), el de la organización (un UUID), el de la service account (`svac_...`) y el del workspace (`wrkspc_...`). **No son secretos.** Van en el bloque `env:` de `.github/workflows/pr-review.yml`, en `CLAUDE_FEDERATION_RULE_ID`, `CLAUDE_ORGANIZATION_ID`, `CLAUDE_SERVICE_ACCOUNT_ID` y `CLAUDE_WORKSPACE_ID`.
 4. Haz un push a una PR. El asistente de la Console detecta el primer intercambio exitoso, y en la PR aparece el comentario del bot. Si falla, la pestaña **History** de esa página dice por qué se rechazó.
 
@@ -74,7 +73,7 @@ Sirve para probar, o si no quieres configurar la federación. Los comentarios sa
 
    `--pr N` revisa una PR. `--watch` revisa cada 2 minutos las PRs abiertas con un push nuevo, y se corta con Ctrl+C. Para repetir la revisión del mismo commit, agrega `--force`. Para ver el prompt sin gastar tokens, usa `--dry-run --pr N`.
 
-La primera vez el lanzador crea su entorno de Python en `~/.cache/branchpoint-review-bot`. Si en tu terminal hay una `ANTHROPIC_API_KEY` exportada, se usa esa en vez de tu sesión.
+La primera vez el lanzador crea su entorno de Python en `~/.cache/branchpoint-review-bot`. Si en tu terminal hay una `ANTHROPIC_API_KEY` exportada, se usa esa en vez de tu sesión. Con la federación activa no hace falta prender el watcher: si GitHub ya revisó un commit, el modo local se lo salta. Los comentarios de Actions y los locales son distintos (cada uno edita el suyo).
 
 ## Linear (opcional, en las dos formas)
 
