@@ -87,7 +87,7 @@ class AnthropicLLM:
             thinking={"type": "adaptive"},
             system=system,
             tools=tools,
-            messages=messages,
+            messages=with_cache_breakpoint(messages),
         ) as stream:
             msg = stream.get_final_message()
         u = msg.usage
@@ -102,6 +102,23 @@ class AnthropicLLM:
                 "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0,
             },
         )
+
+
+def with_cache_breakpoint(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Marca el último bloque de la conversación con ``cache_control`` (caché de prompt de Anthropic).
+
+    El loop reenvía todo el historial en cada vuelta: con la marca, lo ya enviado se cobra a precio de lectura
+    de caché en la vuelta siguiente (spikes/ia-0-analizador). No modifica ``messages``."""
+    if not messages:
+        return messages
+    last = dict(messages[-1])
+    content = last["content"]
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else [dict(b) for b in content]
+    if not blocks or blocks[-1].get("type") in ("thinking", "redacted_thinking"):
+        return messages
+    blocks[-1]["cache_control"] = {"type": "ephemeral"}
+    last["content"] = blocks
+    return [*messages[:-1], last]
 
 
 def cost_usd(model: str, usage: dict[str, int]) -> dict[str, Any] | None:

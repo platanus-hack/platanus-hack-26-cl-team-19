@@ -108,7 +108,7 @@ Pendientes: se llenan con `results/runs.jsonl`.
 
 ## Ajustes para IA-4
 
-Salen de la estimación y del código, no todavía de la medición:
+Salen de la estimación y del código, no todavía de la medición. IA-4 (JAJ-120) aplicó el 1, el 2, el 4 y el 7; el 3, el 5 y el 6 esperan la medición:
 
 1. **Caché de prompt en el analizador.** Marcar con `cache_control` el último bloque del historial en cada vuelta de `analyze_repo` con Anthropic. Es el ajuste de mayor efecto en el costo (mealie: de ~US$25 a ~3,7).
 2. **Tope de tokens de la key de Branchpoint:** dejar 1.500.000, el valor provisorio de la spec de IA-4. Cubre con holgura los repos de hasta ~50 endpoints (unos 50k estimados) y corta un repo como mealie sin caché antes de gastar unos US$6. Revisarlo con la medición.

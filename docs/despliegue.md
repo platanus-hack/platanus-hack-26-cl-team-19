@@ -48,6 +48,7 @@ Los dos servicios despliegan la rama `main` del espejo cada vez que cambia.
 | `BRANCHPOINT_ATTACHMENT_TTL_HOURS` | `24` | Horas que vive un adjunto del chat |
 | `BRANCHPOINT_TEAM_CHAT_LIMIT` | `30` | Mensajes de chat al día (UTC) por usuario con la key del equipo |
 | `BRANCHPOINT_TEAM_EXTRACT_LIMIT` | `5` | Repos analizados con IA al día (UTC) por usuario con la key del equipo |
+| `BRANCHPOINT_TEAM_EXTRACT_TOKENS` | `1500000` | Tokens máximos de un análisis con la key del equipo. Provisorio hasta medir con `spikes/ia-0-analizador` |
 
 Sin las variables `GITHUB_APP_*`, `/github/*` responde 503. No configurarlas mientras el backend corra sin login: cualquiera vería y podría analizar los repos de las instalaciones.
 
