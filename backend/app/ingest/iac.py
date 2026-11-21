@@ -46,6 +46,7 @@ ROLE_BY_IMAGE = [
 WORKER_CMD = re.compile(r"\b(celery\b.*\bworker|rq\s+worker|arq\b|dramatiq|huey_consumer|taskiq\s+worker)")
 API_CMD = re.compile(r"\b(uvicorn|gunicorn|hypercorn|fastapi\s+(run|dev)|granian)\b")
 WORKERS_FLAG = re.compile(r"(?:--workers|--concurrency|(?<![\w-])-w|(?<![\w-])-c)[\s=\"',]+(\d+)")
+CELERY_QUEUES_FLAG = re.compile(r"(?:^|\s)(?:--queues|-Q)[\s=]+['\"]?([^\s'\"]+)")
 
 
 def num(value: Any, unit: str, source: str, at: str) -> dict[str, Any]:
@@ -73,6 +74,7 @@ class Service:
     workers: dict | None = None
     plan: dict | None = None  # db.t4g.micro, starter, ... cuando el archivo lo dice
     source_file: str = ""
+    queue: str | None = None  # suscripción exclusiva del worker a una cola
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in self.__dict__.items() if v not in (None, "")}
@@ -161,6 +163,15 @@ def _workers_in(cmd: str) -> int | None:
     if m:
         return int(m.group(1))
     return 1 if SINGLE_PROCESS_DEFAULT.search(cmd) and not WORKER_CMD.search(cmd) else None
+
+
+def _dedicated_celery_queue(cmd: str) -> str | None:
+    if not re.search(r"\bcelery\b.*\bworker\b", cmd):
+        return None
+    queues = CELERY_QUEUES_FLAG.findall(cmd)
+    if len(queues) == 1 and re.fullmatch(r"[\w.-]+", queues[0]):
+        return queues[0]
+    return None
 
 
 def _workers_source(w: int, cmd: str, where: str) -> str:
@@ -278,6 +289,8 @@ def read_compose(path: Path, rel: str, repo: Path, findings: Findings) -> None:
             w = _workers_in(command)
             if w:
                 existing.workers = num(w, "procesos", _workers_source(w, command, cmd_where), cmd_at)
+            if command:
+                existing.queue = _dedicated_celery_queue(command)
             deploy = svc.get("deploy") if isinstance(svc.get("deploy"), dict) else {}
             if "replicas" in deploy:
                 existing.replicas = num(
@@ -336,6 +349,7 @@ def read_kubernetes(path: Path, rel: str, findings: Findings) -> None:
             w = _workers_in(command)
             if w:
                 svc.workers = num(w, "procesos", _workers_source(w, command, f"el contenedor de {name}"), at)
+            svc.queue = _dedicated_celery_queue(command)
             findings.services.append(svc)
         elif kind == "HorizontalPodAutoscaler":
             target = (spec.get("scaleTargetRef") or {}).get("name")
