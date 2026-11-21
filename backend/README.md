@@ -462,6 +462,12 @@ CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingesti
 
 - **La IA clasifica; los números salen del catálogo.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache` (con `on_miss`), `external` (con el nombre del servicio), `background` (con `task` y `queue`) o `cpu`. El schema no acepta tiempos, filas ni costos.
 - **La configuración se cita, no se inventa.** Los workers de la API y el pool de conexiones van en `observations`, con el `archivo:línea` donde está escrito el número. En la ingesta, el servidor revisa que el número esté en esa línea: si está, queda `OBSERVADO`, y si no, se descarta con un aviso. Desde la CLI no puede revisarlo, así que queda `ESTIMADO` y por revisar.
+- **Valores que el motor no modela (JAJ-108).** Un número citado bajo su mínimo se descarta con un aviso y queda el valor por defecto, por revisar:
+  - `api.workers` < 1, porque con 0 procesos la API no atiende requests;
+  - `db.pool_size` < 1, porque en SQLAlchemy 0 es un pool sin límite;
+  - `db.pool_timeout_s` < 1.
+  
+  Lo mismo pasa con un `--workers 0` en un comando de despliegue (Dockerfile, compose, Procfile…). Antes, ese 0 armaba un modelo que la API rechaza o, sin consultas a la DB, rompía `checks()`. La IA tampoco puede mandar dos métodos en un endpoint (`GET,POST`), un WebSocket ni endpoints repetidos: `ArchitectureSubmission` los rechaza.
 - **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`, `via: "cli"` o `"ingesta"`). Los tiempos de sus pasos son `ESTIMADO` como máximo. La CPU base queda `SUPUESTO` si el framework no es en el que la midió el catálogo.
 - **La IaC manda.** Si un archivo de despliegue declara un servicio con el mismo nombre que un componente de la IA, se queda el de la IaC. Los workers de la IaC ganan sobre los que cita la IA.
 - **Volver a mandar.** Con `project_id`, `submit_architecture` guarda una versión nueva (origen `agente`) con la arquitectura nueva, y conserva el despliegue, el tráfico y lo que dijo la IaC.
