@@ -410,6 +410,7 @@ function reset() {
         :edges="edges"
         :selected-id="selectedNode"
         :bottleneck="bottleneck"
+        can-explain
         @select="selectedNode = $event"
         @explain="send(`¿Por qué se satura ${service.name}?`)"
       />

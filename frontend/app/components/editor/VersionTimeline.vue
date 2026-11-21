@@ -7,9 +7,11 @@ defineProps<{
   /** De la más reciente a la más antigua. */
   versions: VersionEntry[];
   currentId?: string;
+  canOpen?: boolean;
+  disabled?: boolean;
 }>();
 
-const emit = defineEmits<{ compare: [id: string] }>();
+const emit = defineEmits<{ compare: [id: string]; open: [id: string] }>();
 
 const origins: Record<VersionOrigin, string> = {
   repo: "Repositorio",
@@ -51,11 +53,23 @@ const origins: Record<VersionOrigin, string> = {
         </p>
         <p class="text-xs text-muted-foreground">{{ version.summary }}</p>
         <Button
+          v-if="canOpen && version.id !== currentId"
+          type="button"
+          size="xs"
+          variant="ghost"
+          class="-ms-2 self-start"
+          :disabled="disabled"
+          @click="emit('open', version.id)"
+        >
+          Abrir {{ version.label }}
+        </Button>
+        <Button
           v-if="currentId && version.id !== currentId"
           type="button"
           size="xs"
           variant="ghost"
           class="-ms-2 self-start text-muted-foreground"
+          :disabled="disabled"
           @click="emit('compare', version.id)"
         >
           Comparar con {{ versions.find((v) => v.id === currentId)?.label }}

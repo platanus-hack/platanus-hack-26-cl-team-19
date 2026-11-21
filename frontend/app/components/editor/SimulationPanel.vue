@@ -7,13 +7,14 @@ import type { MetricProvenance } from "@/components/design/types";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import SimulationChart from "./SimulationChart.vue";
-import type { SimulationFrame, SimulationPhase } from "./types";
+import type { SimulationPhase, SimulationSample } from "./types";
 
 const props = defineProps<{
-  frames: SimulationFrame[];
+  frames: SimulationSample[];
   phases: SimulationPhase[];
   /** Objetivo de latencia en ms. */
-  slo: number;
+  slo?: number;
+  timeUnit?: "minute" | "second";
   provenance: MetricProvenance;
 }>();
 
@@ -78,7 +79,9 @@ const phaseLabel = {
   saturated: "Saturación",
   down: "Colapso",
 } as const;
-const formatMinute = (index: number) => `Minuto ${index + 1}`;
+const isSecond = computed(() => props.timeUnit === "second");
+const formatTime = (index: number) =>
+  `${isSecond.value ? "Segundo" : "Minuto"} ${index + 1}`;
 </script>
 
 <template>
@@ -95,7 +98,15 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
           data-icon="inline-start"
           aria-hidden="true"
         />
-        {{ playing ? "Pausar" : minute >= last ? "Repetir" : "Simular" }}
+        {{
+          playing
+            ? "Pausar"
+            : minute >= last
+              ? "Repetir"
+              : isSecond
+                ? "Reproducir"
+                : "Simular"
+        }}
       </Button>
       <Button
         type="button"
@@ -133,7 +144,8 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
       >
         <SaturationBadge v-if="phase" :status="phase.status" plain />
         <span class="font-mono tabular-nums"
-          >{{ minute + 1 }} / {{ frames.length }} min</span
+          >{{ minute + 1 }} / {{ frames.length }}
+          {{ isSecond ? "s" : "min" }}</span
         >
       </span>
     </div>
@@ -144,7 +156,9 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
         :min="0"
         :max="last"
         :step="1"
-        aria-label="Minuto de la simulación"
+        :aria-label="
+          isSecond ? 'Segundo de la simulación' : 'Minuto de la simulación'
+        "
       />
       <ol class="flex h-5 gap-px" aria-label="Fases de la simulación">
         <li
@@ -153,7 +167,7 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
           class="flex min-w-0 items-center overflow-hidden rounded-sm border px-1.5 text-[0.625rem]"
           :class="phaseTone[item.status]"
           :style="{ flexGrow: item.to - item.from + 1 }"
-          :title="`${phaseLabel[item.status]}: minutos ${item.from + 1}–${item.to + 1}`"
+          :title="`${phaseLabel[item.status]}: ${isSecond ? 'segundos' : 'minutos'} ${item.from + 1}–${item.to + 1}`"
         >
           <span class="truncate">{{ phaseLabel[item.status] }}</span>
         </li>
@@ -184,7 +198,9 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
       <div class="flex flex-col gap-0.5">
         <dt class="text-xs text-muted-foreground">Fallos</dt>
         <dd class="font-mono text-sm tabular-nums">
-          {{ percent.format(frame.failureRate) }}
+          {{
+            frame.failureRate === null ? "—" : percent.format(frame.failureRate)
+          }}
         </dd>
       </div>
       <div class="flex flex-col gap-0.5">
@@ -203,9 +219,11 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
         :series="[
           { id: 'p95', label: 'p95', values: frames.map((item) => item.p95) },
         ]"
-        :threshold="{ value: slo, label: `SLO ${slo} ms` }"
+        :threshold="
+          slo === undefined ? undefined : { value: slo, label: `SLO ${slo} ms` }
+        "
         :cursor="minute"
-        :format-x="formatMinute"
+        :format-x="formatTime"
         @seek="minute = $event"
       />
       <SimulationChart
@@ -225,7 +243,7 @@ const formatMinute = (index: number) => `Minuto ${index + 1}`;
           },
         ]"
         :cursor="minute"
-        :format-x="formatMinute"
+        :format-x="formatTime"
         @seek="minute = $event"
       />
     </div>
