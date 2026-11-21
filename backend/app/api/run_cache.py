@@ -14,6 +14,7 @@ dejan de usarse, sin que nadie tenga que acordarse de subir un número.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from pathlib import Path
@@ -46,12 +47,13 @@ def _engine_version() -> str:
 ENGINE_VERSION = _engine_version()
 
 
-def cache_key(project_id: str, number: int, params: RunParams) -> str:
+def cache_key(project_id: str, number: int, params: RunParams, label: str | None = None) -> str:
     payload = {
         "project": project_id,
         "version": number,
         "params": params.model_dump(mode="json"),
         "engine": ENGINE_VERSION,
+        "label": label,
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -65,15 +67,25 @@ def run_from_json(data: dict[str, Any]) -> Run:
 
 
 def cached_run(
-    store: ProjectStore, project_id: str, number: int, model: dict[str, Any], params: RunParams
+    store: ProjectStore,
+    project_id: str,
+    number: int,
+    model: dict[str, Any],
+    params: RunParams,
+    label: str | None = None,
 ) -> tuple[Run, bool]:
     """El ``Run`` de la versión: el guardado si existe (``True``) o uno recién simulado y guardado
-    (``False``). Una simulación que falla (422) no se guarda."""
-    key = cache_key(project_id, number, params)
+    (``False``). Una simulación que falla (422) no se guarda.
+
+    ``label`` reemplaza el nombre del escenario en el ``Run`` (JAJ-76: cuando la tasa sale de la tabla
+    de escenarios del proyecto) y entra en la clave."""
+    key = cache_key(project_id, number, params, label)
     saved = store.find_run(key)
     if saved is not None:
         return run_from_json(saved), True
     run = run_model(model, params)
+    if label is not None:
+        run = dataclasses.replace(run, scenario=label)
     resolved = {**params.model_dump(mode="json"), "rps": run.rps}  # con la tasa final
     store.save_run(project_id, number, key, resolved, run_to_json(run), ENGINE_VERSION)
     return run, False

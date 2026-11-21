@@ -156,6 +156,25 @@ class ProjectDetail(BaseModel):
     versions: list[VersionSummary]
 
 
+class ScenarioIn(BaseModel):
+    """Body de ``PUT /projects/{id}/scenarios/{name}`` (JAJ-76): una de las dos tasas."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    multiplier: float | None = Field(
+        None, gt=0, le=1000, description="× el pico del modelo de cada versión (traffic.peak_rps). Ej. 20."
+    )
+    rps: float | None = Field(None, gt=0, description="O req/s fijas, iguales en todas las versiones.")
+    description: str | None = Field(None, max_length=500, description="La situación en palabras del usuario.")
+
+
+class ScenarioOut(BaseModel):
+    name: str
+    multiplier: float | None
+    rps: float | None
+    description: str | None
+
+
 Region = Literal["us-east-1", "sa-east-1"]  # regiones con precios de AWS en el snapshot de JAJ-11
 
 

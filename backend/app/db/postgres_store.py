@@ -16,7 +16,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from app.api.store import Origin, Project, Version
+from app.api.store import Origin, Project, ProjectScenario, Version, scenarios_from_model
 
 _SUMMARY = "number, origin::text as origin, parent_number, note, created_at"
 
@@ -54,21 +54,14 @@ def _project(row: dict[str, Any], versions: list[Version]) -> Project:
     )
 
 
-def _scenario_rates(model: dict[str, Any]) -> list[tuple[str, float | None, float | None]]:
-    """Los escenarios del modelo como ``(nombre, multiplier, rps)``, con uno solo de los dos.
-
-    Se guarda el multiplicador cuando lo hay: así la tasa se recalcula con el pico de cada versión
-    (decisión 4 del README de ``app/db``).
-    """
-    rates = []
-    for name, sc in (model.get("traffic", {}).get("scenarios") or {}).items():
-        multiplier = (sc.get("multiplier") or {}).get("value")
-        rps = (sc.get("rps") or {}).get("value")
-        if multiplier is not None and multiplier > 0:
-            rates.append((name, multiplier, None))
-        elif rps is not None and rps > 0:
-            rates.append((name, None, rps))
-    return rates
+def _scenario(row: dict[str, Any]) -> ProjectScenario:
+    # numeric llega como Decimal
+    return ProjectScenario(
+        name=row["name"],
+        multiplier=float(row["multiplier"]) if row["multiplier"] is not None else None,
+        rps=float(row["rps"]) if row["rps"] is not None else None,
+        description=row["description"],
+    )
 
 
 class PostgresProjectStore:
@@ -108,7 +101,7 @@ class PostgresProjectStore:
             with conn.cursor() as cur:
                 cur.executemany(
                     "insert into scenarios (project_id, name, multiplier, rps) values (%s, %s, %s, %s)",
-                    [(row["id"], *rate) for rate in _scenario_rates(model)],
+                    [(row["id"], s.name, s.multiplier, s.rps) for s in scenarios_from_model(model)],
                 )
         return _project(row, [_version(v1)])
 
@@ -159,6 +152,31 @@ class PostgresProjectStore:
                 (pid, counted["version_count"], parent, origin, note, Jsonb(model)),
             ).fetchone()
         return _version(row)
+
+    def list_scenarios(self, project_id: str) -> list[ProjectScenario]:
+        pid = _uuid(project_id)
+        if pid is None:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "select name, multiplier, rps, description from scenarios where project_id = %s order by name",
+                (pid,),
+            ).fetchall()
+        return [_scenario(r) for r in rows]
+
+    def upsert_scenario(self, project_id: str, scenario: ProjectScenario) -> ProjectScenario:
+        pid = _uuid(project_id)
+        with self._conn() as conn:
+            if pid is None or conn.execute("select 1 from projects where id = %s", (pid,)).fetchone() is None:
+                raise KeyError(project_id)
+            row = conn.execute(
+                "insert into scenarios (project_id, name, multiplier, rps, description) values (%s, %s, %s, %s, %s)"
+                " on conflict (project_id, name) do update set multiplier = excluded.multiplier,"
+                " rps = excluded.rps, description = excluded.description"
+                " returning name, multiplier, rps, description",
+                (pid, scenario.name, scenario.multiplier, scenario.rps, scenario.description),
+            ).fetchone()
+        return _scenario(row)
 
     def find_run(self, cache_key: str) -> dict[str, Any] | None:
         with self._conn() as conn:
