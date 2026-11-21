@@ -650,10 +650,14 @@ def _saturation(
         wait_mid = _implied_wait_s(rec, rec.seconds // 2 - 1)
         wait_end = _implied_wait_s(rec, rec.seconds - 1)
         growing = wait_end >= WAIT_GROWTH * wait_mid + WAIT_GROWTH_MIN_S
-        # llegar cerca del timeout solo cuenta si ya hay timeouts de verdad: un endpoint sano que tarda
-        # 25 s también deja una espera de 25 s, pero sus requests no vencen
+        # llegar cerca del timeout solo cuenta si hay timeouts de verdad y algún recurso está saturado: un
+        # endpoint sano que tarda 25 s también deja una espera de 25 s (y alguno puede vencer por azar),
+        # pero eso es latencia, no falta de capacidad
         timed_out = rec.error_types.get(ERROR_CLIENT_TIMEOUT, 0) > 0
-        at_timeout = client_timeout_s is not None and timed_out and wait_end >= TIMEOUT_SHARE * client_timeout_s
+        full = any(s.utilization >= SATURATION_WARNING for s in stats)
+        at_timeout = (
+            client_timeout_s is not None and timed_out and full and wait_end >= TIMEOUT_SHARE * client_timeout_s
+        )
     saturated = rate >= UNANSWERED_SATURATED and (growing or at_timeout)
     message = None
     if saturated:
@@ -669,11 +673,15 @@ def _saturation(
             else f"La espera llegó a unos {_secs(wait_end)}, cerca del timeout del cliente ({_secs(client_timeout_s)}): "
             "las que vencen pasan a error."
         )
+        advice = (
+            "Simula más tiempo para ver los timeouts, o toma la tasa de error como piso."
+            if growing
+            else "Toma la tasa de error como piso: la fila no se vacía."
+        )
         message = (
             f"El sistema no alcanza a atender este tráfico: {_thousands(unanswered)} de {_thousands(requests)} "
             f"requests ({_pct(rate)}) seguían sin respuesta al terminar y no cuentan como error. {wait}{where} Si "
-            f"terminaran fallando, la tasa de error sería {_pct(worst)}. Simula más tiempo para ver los timeouts, o "
-            "toma la tasa de error como piso."
+            f"terminaran fallando, la tasa de error sería {_pct(worst)}. {advice}"
         )
     return Saturation(
         saturated=saturated,
