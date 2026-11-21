@@ -1,6 +1,6 @@
 # Backend de Branchpoint
 
-Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49). La persistencia va a ir en `app/db`, que ya está reservada.
+Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49, JAJ-52). La persistencia va a ir en `app/db`, que ya está reservada.
 
 ## Estructura
 
@@ -10,16 +10,20 @@ backend/
 ├── app/
 │   ├── api/                 # API HTTP (FastAPI)
 │   │   ├── main.py          #   arma la app: CORS, errores y rutas
-│   │   ├── schemas.py       #   lo que recibe POST /runs (RunRequest)
+│   │   ├── schemas.py       #   lo que recibe y devuelve cada ruta
 │   │   ├── errors.py        #   formato de los errores ({"error": {"code", "message"}})
-│   │   └── routes/          #   una ruta por archivo: health.py, runs.py
+│   │   ├── store.py         #   proyectos y versiones (en memoria hasta JAJ-17)
+│   │   └── routes/          #   rutas por tema: health, runs, models, projects
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
-│   │   └── run.py           #   salida: el Run (branchpoint.run/v1)
+│   │   ├── run.py           #   salida: el Run (branchpoint.run/v1)
+│   │   ├── graph.py         #   grafo del diagrama (nodos y aristas) desde el modelo
+│   │   └── compare.py       #   delta entre dos Run y cambios entre dos modelos
 │   ├── engine/              # motor de eventos discretos
 │   │   ├── kernel.py        #   reloj, cola de eventos y recursos (genérico)
 │   │   ├── simulate.py      #   arma los recursos desde el modelo y recorre los pasos de cada request
 │   │   └── metrics.py       #   percentiles y series por segundo
+│   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # persistencia: vacía por ahora (JAJ-17), ver su README
 │   └── cli.py               # correr una simulación desde la terminal
 └── tests/
@@ -102,6 +106,25 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | -- | -- | -- |
 | `GET` | `/health` | Revisa que la API está arriba. |
 | `POST` | `/runs` | Simula un modelo y devuelve el `Run` (`branchpoint.run/v1`). No guarda nada (eso es JAJ-17). |
+| `GET` | `/models` | Modelos de ejemplo para abrir el editor sin ingerir un repo: id, repo, despliegue y req/s de cada escenario. |
+| `GET` | `/models/{id}` | Un modelo de ejemplo completo (`branchpoint.model/v1`). |
+| `POST` | `/graph` | Grafo del diagrama desde `{"model": ...}`: nodos, aristas con sus endpoints y `archivo:línea`, y el peso de cada endpoint. |
+| `POST` | `/projects` | Crea un proyecto desde `{"sample": id}` o `{"model": ...}`, con `name` opcional. Queda con **v1** (`origin: repo`). |
+| `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos). |
+| `POST` | `/projects/{id}/versions` | Guarda `{"model", "origin", "parent", "note"}` como versión nueva. `origin`: `repo`, `manual` (por defecto) o `agente`; `parent`: por defecto, la última. |
+| `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
+| `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. |
+| `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). |
+
+**Proyectos en memoria:** se pierden al reiniciar la API. `ProjectStore` (`app/api/store.py`) es la interfaz que va a implementar la persistencia (JAJ-17) sin cambiar las rutas.
+
+```bash
+# abrir el editor con v1, guardar una v2 y comparar
+P=$(curl -s -H "Content-Type: application/json" -d '{"sample": "full-stack-fastapi-template"}' localhost:8000/projects | python -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -s localhost:8000/projects/$P/versions/1 | python -c 'import json,sys; m = json.load(sys.stdin)["model"]; m["deployment"]["api"]["replicas"]["value"] = 4; print(json.dumps({"model": m, "note": "API ×4"}))' > v2.json
+curl -s -H "Content-Type: application/json" --data @v2.json localhost:8000/projects/$P/versions
+curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "scenario": "cyberday"}' localhost:8000/projects/$P/compare
+```
 
 Body de `POST /runs`. Solo `model` es obligatorio:
 
@@ -124,7 +147,7 @@ python -c 'import json; m = json.load(open("tests/fixtures/full-stack-fastapi-te
 curl -s -H "Content-Type: application/json" --data @req.json localhost:8000/runs
 ```
 
-Los errores responden 422 con `{"error": {"code", "message", ...}}`. El `message` está en español y está pensado para mostrarlo tal cual:
+Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "message", ...}}`. El `message` está en español y está pensado para mostrarlo tal cual:
 
 | `code` | Cuándo |
 | -- | -- |
@@ -132,6 +155,7 @@ Los errores responden 422 con `{"error": {"code", "message", ...}}`. El `message
 | `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
 | `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo). |
+| `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.

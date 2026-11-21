@@ -16,6 +16,7 @@ INVALID_MODEL = "invalid_model"  # el modelo no es branchpoint.model/v1 o le fal
 UNKNOWN_SCENARIO = "unknown_scenario"  # el escenario no está en el modelo
 INVALID_PARAMETERS = "invalid_parameters"  # parámetros fuera de rango o combinación inválida
 RUN_TOO_LARGE = "run_too_large"  # la simulación pedida es demasiado grande para una request
+NOT_FOUND = "not_found"  # el modelo de ejemplo, proyecto o versión no existe (trae ``resource``)
 
 
 class ApiError(Exception):
