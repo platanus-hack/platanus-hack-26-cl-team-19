@@ -1,4 +1,15 @@
-import { Cog, Database, Globe, Layers, Server, Zap } from "@lucide/vue";
+import {
+  Box,
+  Cog,
+  Database,
+  Globe,
+  HardDrive,
+  Layers,
+  Search,
+  Server,
+  ServerCog,
+  Zap,
+} from "@lucide/vue";
 import type { ComponentKind } from "./types";
 
 export const componentKinds = {
@@ -8,4 +19,8 @@ export const componentKinds = {
   queue: { label: "Cola", icon: Layers },
   worker: { label: "Worker", icon: Cog },
   external: { label: "Externo", icon: Globe },
+  service: { label: "Servicio", icon: ServerCog },
+  storage: { label: "Storage", icon: HardDrive },
+  search: { label: "Búsqueda", icon: Search },
+  other: { label: "Componente", icon: Box },
 } as const satisfies Record<ComponentKind, { label: string; icon: unknown }>;

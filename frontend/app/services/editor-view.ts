@@ -68,29 +68,85 @@ function saturation(utilization: number): SaturationStatus {
   return "healthy";
 }
 
+const KINDS = new Set<ComponentKind>([
+  "api",
+  "database",
+  "cache",
+  "queue",
+  "worker",
+  "external",
+  "service",
+  "storage",
+  "search",
+  "other",
+]);
+
 function nodeKind(node: GraphNode): ComponentKind {
-  return node.kind === "db" ? "database" : node.kind;
+  const kind = node.kind === "db" ? "database" : node.kind;
+  return KINDS.has(kind as ComponentKind) ? (kind as ComponentKind) : "other";
+}
+
+/** El nombre corto de un repo: "org/worker" → "worker". */
+function repoName(fullName: string) {
+  return fullName.split("/").at(-1) ?? fullName;
+}
+
+/** true si el grafo trae componentes de más de un repo (IA-5). */
+export function isMultiRepo(graph: Graph) {
+  return new Set(graph.nodes.map((node) => node.repo).filter(Boolean)).size > 1;
 }
 
 export function toNodes(graph: Graph, run: Run | null) {
+  const multi = isMultiRepo(graph);
   return graph.nodes.map((node) => {
-    const utilization =
-      run?.resources
-        .filter((resource) => node.resources.includes(resource.name))
-        .map((resource) => resource.utilization) ?? [];
+    const simulated = node.simulated !== false; // modelos antiguos y de ejemplo: todo simulado
+    const utilization = simulated
+      ? (run?.resources
+          .filter((resource) => node.resources.includes(resource.name))
+          .map((resource) => resource.utilization) ?? [])
+      : [];
+    const size =
+      node.details.replicas === undefined
+        ? (node.details.plan ?? node.details.technology)
+        : `${node.details.replicas} rép.`;
     return {
       id: node.id,
       name: node.label,
       kind: nodeKind(node),
-      detail:
-        node.details.replicas === undefined
-          ? node.details.plan
-          : `${node.details.replicas} rép.`,
+      detail: multi && node.repo ? repoName(node.repo) : size,
+      repo: node.repo ?? undefined,
+      simulated,
       status: utilization.length
         ? saturation(Math.max(...utilization))
         : undefined,
     };
   });
+}
+
+/** El inspector de un componente que no se simula: de qué repo viene y qué se sabe de él (IA-10). */
+export function toUnsimulatedNode(
+  node: GraphNode,
+  primaryRepo?: string,
+): InspectedNode | null {
+  if (node.simulated !== false) return null;
+  const facts = [
+    node.details.technology,
+    node.details.endpoints === undefined
+      ? undefined
+      : `${node.details.endpoints} endpoints`,
+  ].filter(Boolean);
+  return {
+    name: node.label,
+    kind: nodeKind(node),
+    status: "healthy",
+    notSimulated:
+      `Viene de ${node.repo ?? "otro repo"}.` +
+      (primaryRepo ? ` Branchpoint simula solo ${primaryRepo}.` : "") +
+      (node.details.error ? ` No se pudo analizar: ${node.details.error}` : ""),
+    summary: facts.length ? facts.join(" · ") : undefined,
+    metrics: [],
+    capacity: { label: "", used: 0, total: 0, unit: "" },
+  };
 }
 
 export function toEdges(graph: Graph) {

@@ -278,10 +278,19 @@ const alertOf = (status?: SaturationStatus) =>
               <button
                 type="button"
                 class="flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
-                :class="alertOf(node.status)?.border"
+                :class="
+                  node.simulated === false
+                    ? 'border-dashed bg-muted/40 text-muted-foreground'
+                    : alertOf(node.status)?.border
+                "
                 :aria-pressed="node.id === selectedId"
                 :title="
-                  [node.name, componentKinds[node.kind].label, node.detail]
+                  [
+                    node.name,
+                    componentKinds[node.kind].label,
+                    node.detail,
+                    node.simulated === false ? 'No simulado' : undefined,
+                  ]
                     .filter(Boolean)
                     .join(' · ')
                 "
@@ -295,7 +304,14 @@ const alertOf = (status?: SaturationStatus) =>
                 <span class="flex min-w-0 flex-1 flex-col">
                   <span class="truncate">{{ node.name }}</span>
                   <span
-                    v-if="node.detail"
+                    v-if="node.simulated === false"
+                    class="truncate text-[0.625rem] text-muted-foreground"
+                    >No simulado{{
+                      node.detail ? ` · ${node.detail}` : ""
+                    }}</span
+                  >
+                  <span
+                    v-else-if="node.detail"
                     class="truncate font-mono text-[0.625rem] text-muted-foreground"
                     >{{ node.detail }}</span
                   >

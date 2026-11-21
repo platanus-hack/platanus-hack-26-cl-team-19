@@ -18,11 +18,8 @@ import {
 
 const provider = defineModel<ChatProvider>("provider", { required: true });
 const props = withDefaults(
-  defineProps<{ disabled?: boolean; repos?: number }>(),
-  {
-    disabled: false,
-    repos: 1,
-  },
+  defineProps<{ disabled?: boolean; repos?: number; refreshKey?: string }>(),
+  { disabled: false, repos: 1, refreshKey: undefined },
 );
 const emit = defineEmits<{ usable: [value: boolean] }>();
 const credentials = useApiCredentials();
@@ -33,6 +30,13 @@ const hint = computed(() =>
     credentials.enabled ? credentials.chatSettings.value : undefined,
     props.repos,
   ),
+);
+// después de un análisis, la cuota que quedó se vuelve a pedir
+watch(
+  () => props.refreshKey,
+  (key) => {
+    if (key && credentials.enabled) void credentials.load();
+  },
 );
 watch(
   () => hint.value.usable,

@@ -43,6 +43,7 @@ import {
   toComparisonRows,
   toEdges,
   toInspectedNode,
+  toUnsimulatedNode,
   toNodes,
   toPlayback,
   toVersionChanges,
@@ -120,7 +121,14 @@ const inspected = computed(() => {
   const node = graph.value?.nodes.find(
     (node) => node.id === selectedNode.value,
   );
-  return node ? toInspectedNode(node, run.value, provenance) : null;
+  if (!node) return null;
+  const primary = projectGroup.value?.repositories?.find(
+    (repo) => repo.primary,
+  )?.fullName;
+  return (
+    toUnsimulatedNode(node, primary) ??
+    toInspectedNode(node, run.value, provenance)
+  );
 });
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
 const rows = computed(() =>
@@ -145,6 +153,7 @@ const repositories = computed(() => {
   return repos.map((repo) => ({
     id: repo.id,
     name: repo.fullName,
+    primary: repos.length > 1 ? repo.primary === true : undefined,
     version: repo.id === project.value?.id ? (version.value?.label ?? "") : "",
   }));
 });
