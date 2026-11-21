@@ -89,6 +89,10 @@ def test_agent_budget_is_not_judged_without_prices(template):
     assert check["meets_all"] is None  # nada falla, pero el presupuesto no se pudo evaluar
     priced = estimate_cost(template)
     assert _goal_check(goals, run, priced.total["value"], priced.missing)["budget"]["ok"] is True
+    # si el parcial ya se pasa del presupuesto, no cumple: lo que falta solo puede sumar
+    over = _goal_check(ProjectGoals(budget_usd_month=1.0), run, est.total["value"], est.missing)
+    assert est.total["value"] > 1.0 and over["budget"]["ok"] is False and over["meets_all"] is False
+    assert over["budget"]["basis"].startswith("no cumple")
     # si otra meta falla, meets_all es False aunque el presupuesto no se pueda evaluar
     strict = ProjectGoals(budget_usd_month=1_000_000, slo_p95_ms=0.001)
     assert _goal_check(strict, run, est.total["value"], est.missing)["meets_all"] is False

@@ -275,7 +275,15 @@ def _goal_check(
             "las requests exitosas. Pregúntale al usuario cuántos errores acepta (set_goals slo_error_rate).",
         }
     if goals.budget_usd_month is not None and monthly is not None:
-        if missing:
+        if missing and monthly > goals.budget_usd_month:
+            # JAJ-88: lo que falta solo puede sumar, así que si el parcial ya se pasa, no cumple
+            out["budget"] = {
+                "goal_usd_month": goals.budget_usd_month,
+                "ok": False,
+                "basis": f"no cumple: solo lo que tiene precio ya suma US${monthly:,.2f}/mes, y falta "
+                f"{describe_missing(missing)}.",
+            }
+        elif missing:
             # JAJ-88: el total no incluye la API o la DB (en local o sin precio): no se puede decir que
             # cumple el presupuesto contando solo, por ejemplo, la caché
             out["budget"] = {

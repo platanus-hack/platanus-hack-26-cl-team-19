@@ -459,7 +459,7 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 - **`CostDelta.missing`:** los que faltan en alguna de las dos versiones. `missing_a` y `missing_b` dicen en cuál. `a`, `b`, `diff`, `pct` y `by_line` **cuentan solo los componentes con precio en las dos**. Si v1 está en local y v2 en Fargate, sumar la API (y su ALB) haría que todo el "+US$X" fuera la API de v2, presentado como una diferencia. En ese caso el resumen dice "sin contar la API (con precio solo en v2)". Los totales completos siguen en `cost_a` y `cost_b`.
 - **Proveedores con precio:** lo que falta se detecta de las mismas funciones que calculan el precio. `PRICED_API` y `PRICED_DB` solo arman el aviso, y un test comprueba que coinciden.
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
-- **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
+- **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Si lo que tiene precio ya supera el presupuesto, queda en `false`, porque lo que falta solo puede sumar. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
 
 ### Costo de fallar (JAJ-74)
 
