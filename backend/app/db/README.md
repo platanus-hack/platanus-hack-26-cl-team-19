@@ -98,16 +98,19 @@ erDiagram
 | `get_version(project_id, number)` | `select number, origin, parent_number, note, created_at, model from model_versions where project_id = $1 and number = $2`. |
 | `list()` | `select … from projects where owner_id = $user order by created_at desc` (sin login: `owner_id is null`). |
 | `add_version(project_id, model, origin, parent, note)` | `update projects set version_count = version_count + 1, updated_at = now() where id = $1 returning version_count` → `n`; `insert into model_versions (project_id, number, parent_number, origin, note, model) values ($1, n, parent, origin, note, model)`. La FK compuesta rechaza una antecesora que no existe. |
+| `find_run(cache_key)` | `select result from runs where cache_key = $1`. |
+| `save_run(project_id, number, cache_key, params, run, engine_version)` | `select id from model_versions where project_id = $1 and number = $2`; `insert into runs (…, scenario_id, …) values (…, (select id from scenarios where project_id = $1 and name = run.scenario), …) on conflict (cache_key) do nothing`. Si dos requests iguales llegan a la vez, las dos simulan y solo la primera inserta. |
 
 Los ids de proyecto son `uuid`. Un id que no lo es (por ejemplo `nope`) da `None`, y la ruta responde 404.
 
 ### Cambios a la interfaz
 
 - **Hecho: `get` no trae los modelos.** `Project.versions` trae solo resúmenes (`model` es `None`) y `get_version(project_id, number)` lee una fila con su `model`, que pesa unos 100 KB.
-- **Pendiente: guardar runs.**
-  - `find_run(cache_key)` y `save_run(...)`.
-  - `POST /projects/{id}/versions/{n}/runs` y `POST /projects/{id}/compare` buscan primero por `cache_key` y simulan solo si no está.
+- **Hecho: guardar runs (JAJ-75).**
+  - `find_run(cache_key)` y `save_run(...)`, en memoria y en Postgres.
+  - `POST /projects/{id}/versions/{n}/runs` y `POST /projects/{id}/compare` buscan primero por `cache_key` y simulan solo si no está (`app/api/run_cache.py`).
   - Comparar no se guarda: es la diferencia entre dos runs guardados.
+  - La clave usa el proyecto y el número de versión en vez de `model_version_id`. Es lo mismo, porque la versión `n` de un proyecto no cambia, y sirve también para el store en memoria, que no tiene ese id. `engine_version` es el hash del código del motor (ver el README del backend).
 - **Pendiente: escenarios.** `create` ya los carga, pero las rutas todavía los leen de `traffic.scenarios` del modelo. Falta `list_scenarios(project_id)` y `upsert_scenario(...)`. Hoy los escenarios salen de `traffic.scenarios` del modelo.
 
 ## Depende de otras investigaciones

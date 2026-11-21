@@ -58,6 +58,22 @@ class ProjectStore(Protocol):
         self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
     ) -> Version: ...
 
+    def find_run(self, cache_key: str) -> dict[str, Any] | None:
+        """El ``Run`` guardado con esa clave (como dict ``branchpoint.run/v1``), o ``None`` (JAJ-75)."""
+        ...
+
+    def save_run(
+        self,
+        project_id: str,
+        number: int,
+        cache_key: str,
+        params: dict[str, Any],
+        run: dict[str, Any],
+        engine_version: str,
+    ) -> None:
+        """Guarda el ``Run`` de la versión ``number``. Si la clave ya existe, no hace nada (JAJ-75)."""
+        ...
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -68,6 +84,7 @@ class InMemoryProjectStore:
 
     def __init__(self) -> None:
         self._projects: dict[str, Project] = {}
+        self._runs: dict[str, dict[str, Any]] = {}  # cache_key → Run como dict (JAJ-75)
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
 
     def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project:
@@ -95,3 +112,21 @@ class InMemoryProjectStore:
             version = Version(len(project.versions) + 1, origin, parent, note, _now(), copy.deepcopy(model))
             project.versions.append(version)
         return version
+
+    def find_run(self, cache_key: str) -> dict[str, Any] | None:
+        run = self._runs.get(cache_key)
+        return copy.deepcopy(run) if run is not None else None
+
+    def save_run(
+        self,
+        project_id: str,
+        number: int,
+        cache_key: str,
+        params: dict[str, Any],  # en memoria no se usan: Postgres los guarda en runs.params
+        run: dict[str, Any],
+        engine_version: str,  # y en runs.engine_version
+    ) -> None:
+        if self.get_version(project_id, number) is None:
+            raise KeyError(f"{project_id} v{number}")
+        with self._lock:
+            self._runs.setdefault(cache_key, copy.deepcopy(run))

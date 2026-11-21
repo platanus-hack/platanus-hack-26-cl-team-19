@@ -1,6 +1,7 @@
 """``POST /runs``: simula un modelo bajo un escenario y devuelve el ``Run`` completo.
 
-No guarda nada (la persistencia es JAJ-56): cada llamada simula de nuevo. Con 60 s simulados en
+No guarda nada, porque el modelo no tiene versión: cada llamada simula de nuevo. Los runs de una
+versión de un proyecto sí se guardan (``app/api/run_cache.py``, JAJ-75). Con 60 s simulados en
 ~200 ms, una respuesta completa alcanza para el MVP (el streaming es JAJ-20).
 """
 

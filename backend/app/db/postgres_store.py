@@ -160,6 +160,55 @@ class PostgresProjectStore:
             ).fetchone()
         return _version(row)
 
+    def find_run(self, cache_key: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            row = conn.execute("select result from runs where cache_key = %s", (cache_key,)).fetchone()
+        return row["result"] if row is not None else None
+
+    def save_run(
+        self,
+        project_id: str,
+        number: int,
+        cache_key: str,
+        params: dict[str, Any],
+        run: dict[str, Any],
+        engine_version: str,
+    ) -> None:
+        """Una fila en ``runs`` con el ``Run`` completo y sus métricas en columnas (para listar sin
+        leer el JSON). Dos requests iguales a la vez simulan las dos; la segunda no inserta nada."""
+        pid = _uuid(project_id)
+        with self._conn() as conn:
+            version = conn.execute(
+                "select id from model_versions where project_id = %s and number = %s", (pid, number)
+            ).fetchone()
+            if version is None:
+                raise KeyError(f"{project_id} v{number}")
+            conn.execute(
+                "insert into runs (project_id, model_version_id, scenario_id, scenario_name, seed, params,"
+                " engine_version, cache_key, result, p95_ms, error_rate, throughput_rps, bottleneck_resource,"
+                " elapsed_ms)"
+                " values (%s, %s, (select id from scenarios where project_id = %s and name = %s), %s, %s, %s,"
+                " %s, %s, %s, %s, %s, %s, %s, %s)"
+                " on conflict (cache_key) do nothing",
+                (
+                    pid,
+                    version["id"],
+                    pid,
+                    run["scenario"],
+                    run["scenario"],
+                    run["seed"],
+                    Jsonb(params),
+                    engine_version,
+                    cache_key,
+                    Jsonb(run),
+                    run["latency"]["p95_ms"],
+                    run["error_rate"],
+                    run["throughput_rps"],
+                    run["bottleneck"]["resource"],
+                    run["elapsed_ms"],
+                ),
+            )
+
     @staticmethod
     def _summaries(conn: Connection, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Version]]:
         by_project: dict[uuid.UUID, list[Version]] = {pid: [] for pid in project_ids}
