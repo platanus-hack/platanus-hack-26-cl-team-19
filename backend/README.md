@@ -344,15 +344,21 @@ Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "mes
 
 | `code` | Cuándo |
 | -- | -- |
-| `invalid_model` | El modelo no es `branchpoint.model/v1` o le falta un campo. |
+| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, o pasa un límite del servicio (ver "Límites de trabajo" abajo). |
 | `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
-| `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo). |
+| `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo), o la simulación pasó el presupuesto de eventos (trae `max_events`). |
 | `invalid_operations` | Una operación de `/ops` no se puede aplicar. El `message` dice cuál y qué valores sí existen. No guarda nada. |
 | `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.
+- **Límites de trabajo (JAJ-99).** La simulación retiene el GIL y `POST /runs` no pide login, así que una corrida que no termina deja la API sin responder. El tope de 300.000 requests no basta, porque no dice cuánto trabajo hace cada request. Hay tres frenos más:
+  - **Pasos por request:** hasta 10.000 (`MAX_STEPS_PER_REQUEST` en `app/models/architecture.py`), contando `repeat` y el peor caso de las cachés, en que todas fallan y se recorren sus `on_miss`. Vale lo mismo para el trabajo de una cola. El template llega a ~200. Más que eso responde `invalid_model`.
+  - **Colas en ciclo:** un trabajo que encola, directa o indirectamente, en su propia cola se rechaza con `invalid_model`, porque cada trabajo crearía otro sin fin. Un paso `background` de un trabajo tampoco infiere la cola cuando hay una sola: se encolaría a sí mismo. Si nombra una cola que no existe, queda un aviso y solo se simula la espera de encolar, como en un endpoint.
+  - **Presupuesto de eventos:** 20 millones por corrida (`MAX_EVENTS` en `app/engine/simulate.py`). La simulación legítima más pesada que se permite usa unos 14,4 millones: fastapi-realworld-example-app en `pico_normal`, al tope de requests, en ~11 s. Al pasarlo, el kernel lanza `SimulationTooLarge` y la API responde `run_too_large`. Garantiza que ninguna corrida quede simulando para siempre, aunque un modelo esquive los otros dos frenos.
+
+  Son límites del servicio, no números del modelo.
 
 ### Operaciones
 

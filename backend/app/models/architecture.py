@@ -207,8 +207,21 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
     for q in queues.values():
         if q.workers < 1:
             raise ValueError(f"cola {q.name}: workers debe ser al menos 1")
+    # una cola que no existe se trata como en un endpoint: solo se simula el encolar (antes, KeyError
+    # al simular). Sin inferir la única cola: haría que un trabajo se encole a sí mismo.
+    queues = {
+        name: replace(
+            q, job_steps=tuple(_resolve_queue(s, queues, f"cola {name}", warnings, infer=False) for s in q.job_steps)
+        )
+        for name, q in queues.items()
+    }
+    _check_queue_cycles(queues)
+    for q in queues.values():
+        _check_steps_per_request(q.job_steps, f"cola {q.name}")
 
     endpoints = tuple(_load_endpoint(e, queues, warnings) for e in raw["endpoints"])
+    for e in endpoints:
+        _check_steps_per_request(e.steps, e.id)
     total = sum(e.weight for e in endpoints)
     if total <= 0:
         raise ValueError("Los pesos de los endpoints suman 0: no hay tráfico que simular")
@@ -262,14 +275,19 @@ def _load_step(s: dict[str, Any], where: str, warnings: list[str]) -> Step:
     )
 
 
-def _resolve_queue(step: Step, queues: dict[str, QueueDeployment], where: str, warnings: list[str]) -> Step:
-    """Asigna la cola a un paso ``background``. Sin cola configurada, el worker no se simula."""
+def _resolve_queue(
+    step: Step, queues: dict[str, QueueDeployment], where: str, warnings: list[str], infer: bool = True
+) -> Step:
+    """Asigna la cola a un paso ``background``. Sin cola configurada, el worker no se simula.
+
+    ``infer``: si el paso no nombra cola y hay una sola, usar esa. Los pasos de un trabajo de una cola
+    no infieren (JAJ-99): con una sola cola, el trabajo se encolaría a sí mismo."""
     if step.on_miss:
-        step = replace(step, on_miss=tuple(_resolve_queue(m, queues, where, warnings) for m in step.on_miss))
+        step = replace(step, on_miss=tuple(_resolve_queue(m, queues, where, warnings, infer) for m in step.on_miss))
     if step.resource != RESOURCE_BACKGROUND:
         return step
     name = step.queue
-    if name is None and step.infer_queue and len(queues) == 1:
+    if name is None and infer and step.infer_queue and len(queues) == 1:
         name = next(iter(queues))
     if name is None or name not in queues:
         warnings.append(
@@ -278,6 +296,54 @@ def _resolve_queue(step: Step, queues: dict[str, QueueDeployment], where: str, w
         )
         name = None
     return replace(step, queue=name)
+
+
+# Pasos que puede recorrer una request (o un trabajo de una cola), contando ``repeat`` y los pasos de
+# ``on_miss`` (JAJ-99). Cada paso es al menos una iteración del motor, aunque tarde 0 ms, así que sin
+# tope un ``repeat`` enorme ocupa la CPU por minutos. Los modelos reales están muy por debajo: el
+# template llega a ~200 (N+1 con repeat 20). Es un límite del servicio, no un número del modelo.
+MAX_STEPS_PER_REQUEST = 10_000
+
+
+def _steps_per_request(steps: tuple[Step, ...]) -> int:
+    """Pasos que recorre una request en el peor caso (todas las cachés fallan)."""
+    return sum(s.repeat * (1 + (_steps_per_request(s.on_miss) if s.on_miss else 0)) for s in steps)
+
+
+def _check_steps_per_request(steps: tuple[Step, ...], where: str) -> None:
+    n = _steps_per_request(steps)
+    if n > MAX_STEPS_PER_REQUEST:
+        count, limit = (f"{x:,}".replace(",", ".") for x in (n, MAX_STEPS_PER_REQUEST))
+        raise ValueError(
+            f"{where}: recorre {count} pasos por request contando repeat (el máximo es {limit}). "
+            "Revisa el repeat de sus pasos."
+        )
+
+
+def _check_queue_cycles(queues: dict[str, QueueDeployment]) -> None:
+    """Rechaza colas cuyos trabajos se encolan en ciclo (``a`` encola en ``b`` y ``b`` en ``a``, o
+    ``a`` en sí misma): cada trabajo crea otro sin fin, y con tiempo 0 el reloj no avanza (JAJ-99)."""
+    edges = {
+        name: [s.queue for s in walk_steps(q.job_steps) if s.resource == RESOURCE_BACKGROUND and s.queue in queues]
+        for name, q in queues.items()
+    }
+    done: set[str] = set()
+
+    def visit(name: str, path: list[str]) -> None:
+        if name in path:
+            cycle = " → ".join([*path[path.index(name) :], name])
+            raise ValueError(
+                f"Las colas se encolan en ciclo ({cycle}): cada trabajo crea otro sin fin. "
+                "Un trabajo no puede volver a encolar, directa o indirectamente, en su propia cola."
+            )
+        if name in done:
+            return
+        for nxt in edges[name]:
+            visit(nxt, [*path, name])
+        done.add(name)
+
+    for name in queues:
+        visit(name, [])
 
 
 def _load_endpoint(e: dict[str, Any], queues: dict[str, QueueDeployment], warnings: list[str]) -> Endpoint:
