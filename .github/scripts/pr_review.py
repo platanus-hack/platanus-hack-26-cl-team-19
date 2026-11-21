@@ -442,8 +442,8 @@ def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = Fa
         )
         return
     log(f"#{number}: revisando {pr['head_sha'][:7]} con {MODEL}...")
-    ATTEMPTED.add((number, pr["head_sha"]))  # antes de llamar: si después falla el comentario, no se repaga
     text, usage = review(context, prompt)
+    ATTEMPTED.add((number, pr["head_sha"]))  # ya está pagado: si falla el comentario, no se vuelve a pedir
     log(f"#{number}: {upsert_comment(repo, number, render_comment(text, usage, pr['head_sha']), existing)}")
 
 
@@ -464,6 +464,8 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="revisa aunque ese commit ya tenga revisión")
     ap.add_argument("--dry-run", action="store_true", help="arma el prompt y lo imprime; no llama a la API ni comenta")
     args = ap.parse_args()
+    if args.watch and args.dry_run:
+        ap.error("--dry-run es para una PR: usa --dry-run --pr N")
 
     # En Actions, sin key ni federación configurada no hay cómo autenticarse: se avisa y se termina en verde.
     # En local no se revisa aquí: el SDK puede usar el perfil de `ant auth login`.
@@ -507,7 +509,7 @@ def main() -> int:
     if number is None:
         ap.error("falta --pr N (o --watch)")
     try:
-        review_pr(repo, number, dry_run=args.dry_run, force=args.force or IN_ACTIONS)
+        review_pr(repo, number, dry_run=args.dry_run, force=args.force)
     except Exception as e:  # noqa: BLE001 - cualquier falla no debe bloquear la PR
         warn(f"#{number}: la revisión falló ({explain(e)}). La PR no queda bloqueada.")
     return 0

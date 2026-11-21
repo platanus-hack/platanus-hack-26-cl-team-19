@@ -56,10 +56,12 @@ jobs:
       # solo se definen si hay federación configurada (una variable vacía también le gana a las demás).
       - name: Get the GitHub OIDC token for Anthropic
         if: env.CLAUDE_FEDERATION_RULE_ID != ''
+        shell: bash # bash -eo pipefail: si curl falla, el paso falla en vez de dejar el archivo vacío
         run: |
           token_file="$RUNNER_TEMP/anthropic-oidc.jwt"
           curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | jq -r .value > "$token_file"
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" | jq -er .value > "$token_file"
+          test -s "$token_file"
           {
             echo "ANTHROPIC_FEDERATION_RULE_ID=$CLAUDE_FEDERATION_RULE_ID"
             echo "ANTHROPIC_ORGANIZATION_ID=$CLAUDE_ORGANIZATION_ID"
