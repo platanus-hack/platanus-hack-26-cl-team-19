@@ -260,7 +260,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/models/{id}` | Un modelo de ejemplo completo (`branchpoint.model/v1`). |
 | `POST` | `/graph` | Grafo del diagrama desde `{"model": ...}`: nodos, aristas con sus endpoints y `archivo:línea`, y el peso de cada endpoint. |
 | `POST` | `/projects` | Crea un proyecto desde `{"sample": id}` o `{"model": ...}`, con `name` opcional. Queda con **v1** (`origin: repo`). |
-| `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos). |
+| `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos) y `repositories`, el repo del que salió (ver "Repo de cada proyecto" abajo). |
 | `POST` | `/projects/{id}/versions` | Guarda `{"model", "origin", "parent", "note"}` como versión nueva. `origin`: `repo`, `manual` (por defecto) o `agente`; `parent`: por defecto, la última. |
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. Si ya se simuló con los mismos parámetros, devuelve el run guardado (ver "Runs guardados" abajo). |
@@ -273,6 +273,18 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
+
+**Repo de cada proyecto (JAJ-92):** `GET /projects` y `GET /projects/{id}` traen `repositories`, lo que muestran las tarjetas de "Mis proyectos", su búsqueda y el filtro por repos:
+
+```json
+"repositories": [{"id": "<id del proyecto>", "fullName": "acme/tienda", "branch": "main"}]
+```
+
+- **Las claves siguen el tipo `ProjectRepository` del editor**, por eso `fullName` va en camelCase.
+- **`id` es el id del proyecto, no el de la conexión.** El editor abre `GET /projects/{id}` con él al elegir el repo en la barra lateral. Hoy cada proyecto tiene un solo repo, así que es el mismo proyecto. Es una lista porque el editor ya sabe agrupar varios.
+- **`branch` es la rama analizada para la v1** (`projects.branch`), que puede no ser la rama por defecto del repo.
+- **`null` si el proyecto salió de un ejemplo o de un modelo subido a mano.** Con `null`, y no `[]`, el editor usa su fallback y muestra el nombre del proyecto. La tarjeta muestra `sample`.
+- **De dónde sale:** en Postgres, un `left join` de `projects` con `repo_connections` por `repo_connection_id`. La conexión la crea la ingesta con el mismo dueño del proyecto, así que el filtro por `owner_id` de JAJ-78 también aísla el repo.
 
 **Login y proyectos por usuario (JAJ-78):** con `SUPABASE_URL` en el entorno, todas las rutas de `/projects` piden el token de sesión de Supabase Auth: `Authorization: Bearer <access_token>`, el que entrega `supabase.auth.getSession()` en el frontend.
 - **Cómo se valida** (`app/api/auth.py`): la firma se revisa con las claves públicas del proyecto (JWKS, en `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`), que se bajan una vez y se vuelven a bajar si aparece una clave nueva. También se revisan `exp`, `aud = authenticated` e `iss = {SUPABASE_URL}/auth/v1`. Para un proyecto que todavía firma con el secreto compartido (HS256), va `SUPABASE_JWT_SECRET`.
