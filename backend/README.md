@@ -395,19 +395,19 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "scenario": "cy
 
 ### Agente: tools, MCP y chat (JAJ-67)
 
-El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las ejecuta. Las tools están una sola vez, en `app/agent/tools.py`, y se exponen de dos formas (JAJ-54):
+El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las ejecuta. Las tools están una sola vez, en `app/agent/tools.py`, y se exponen de dos formas. El modo principal es el chat del editor (punto 2). La CLI del usuario dejó de ser el modo principal y su vinculación salió de la interfaz (JAJ-123).
 
-1. **MCP en `/mcp` (modo principal).** El loop corre en la CLI de IA del usuario, por ejemplo Claude Code con su suscripción, y el backend solo ejecuta las tools. Branchpoint no ve ninguna credencial de IA.
+1. **MCP en `/mcp` (vía secundaria).** Sirve para pruebas internas y para quien ya trabaja con una CLI de IA. La interfaz no lo ofrece. El loop corre en la CLI, por ejemplo Claude Code, y el backend solo ejecuta las tools.
 
    ```bash
    claude mcp add --scope user --transport http branchpoint http://localhost:8000/mcp --header "Authorization: Bearer <token de sesión de Supabase>"
    ```
 
-   - **Con login:** el token es el mismo que usa el editor (JAJ-78), y cada usuario ve solo sus proyectos. Sin token, `/mcp` responde 401. El token de larga duración para emparejar la CLI llega con JAJ-81.
+   - **Con login:** el token es el mismo que usa el editor (JAJ-78), y cada usuario ve solo sus proyectos. Sin token, `/mcp` responde 401. No hay token de larga duración: JAJ-81 se canceló.
    - **Sin login** (`BRANCHPOINT_AUTH=off`): no hace falta el header.
    - **`--scope user`:** así la tool está en cualquier carpeta. Sin eso, Claude Code la carga solo en la carpeta donde se agregó, y no aparece al abrir el repo que se quiere analizar.
 
-2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`) u OpenAI Responses (`gpt-4.1-mini`), con un máximo de 8 vueltas por mensaje. El modelo de cada proveedor se cambia con `BRANCHPOINT_<ANTHROPIC|OPENAI>_<CHAT|EXTRACT>_MODEL` (`model_for` en `app/agent/loop.py`). Los dos adaptadores aceptan imágenes en los mensajes del usuario, como bloques `image` con la forma de Anthropic. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage`, `cost` de la tabla de precios y `evidence`) y `error`.
+2. **Chat del editor: `POST /projects/{id}/chat` (modo principal).** El loop corre en el backend con Claude (`claude-opus-5-5`) u OpenAI Responses (`gpt-4.1-mini`), con un máximo de 8 vueltas por mensaje. El modelo de cada proveedor se cambia con `BRANCHPOINT_<ANTHROPIC|OPENAI>_<CHAT|EXTRACT>_MODEL` (`model_for` en `app/agent/loop.py`). Los dos adaptadores aceptan imágenes en los mensajes del usuario, como bloques `image` con la forma de Anthropic. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage`, `cost` de la tabla de precios y `evidence`) y `error`.
 
    **Adjuntos y evidencia (IA-7).** Cada mensaje del usuario puede llevar `attachments` (hasta 5 ids de la sección de adjuntos). En el último mensaje, una imagen va al modelo como bloque de imagen y un log como una línea con su id; las imágenes de mensajes anteriores no se reenvían. Con sesión y Storage, el chat suma cinco tools (no se publican por MCP):
 

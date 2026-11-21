@@ -1,5 +1,7 @@
 # JAJ-54: cómo usamos la IA del usuario (Bring Your Own Subscription)
 
+> **Decisión reemplazada (2026-11-21).** El modo principal ya no es la CLI del usuario: el agente corre en el chat del backend, con la cuota de Branchpoint o con la key del usuario (JAJ-94, JAJ-114). `/mcp` queda como vía secundaria y la vinculación de la CLI salió de la interfaz (JAJ-81 cancelada, JAJ-123). Ver el ADR 0001. Este spike queda como registro.
+
 > **La versión productiva está en el backend (JAJ-67).** Las tools están en `backend/app/agent/tools.py`, el MCP en `/mcp` y el chat en `POST /projects/{id}/chat`; ver la sección "Agente" de `backend/README.md`. Este spike queda como registro de la decisión.
 
 ## Resultado en 5 líneas
