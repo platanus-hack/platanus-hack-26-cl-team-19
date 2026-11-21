@@ -137,10 +137,10 @@ def propose(example: str, ops: list[dict[str, Any]], scenario: str = "cyberday",
         result = apply_ops(raw, ops)
         before = _simulate(raw, scenario, seed)
         after = _simulate(result.model, scenario, seed)
+        delta = run_delta(before, after, raw, result.model)
+        cost_a, cost_b = estimate_cost(raw), estimate_cost(result.model)
     except (ToolError, OpError) as e:
         return {"error": str(e)}  # el LLM lo lee y corrige
-    delta = run_delta(before, after, raw, result.model)
-    cost_a, cost_b = estimate_cost(raw), estimate_cost(result.model)
     return {
         "changes": result.changes,
         "warnings": result.warnings,

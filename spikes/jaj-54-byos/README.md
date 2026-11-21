@@ -95,7 +95,14 @@ Es para quien no tiene una CLI o para la demo. Usa el mismo conjunto de tools, a
 - `ops_schema`
 - `propose`
 
-`check_client.py` es un cliente MCP por streamable HTTP, sin LLM ni credenciales.
+`check_client.py` es un cliente MCP por streamable HTTP, sin LLM ni credenciales. Comprueba con `assert` cinco casos:
+- `propose` inválido;
+- `add_cache` sin `quote`;
+- un escenario que no existe;
+- un `rps` inventado;
+- la procedencia del costo.
+
+Solo usa código que ya está en `dev`: `app.agent.ops` (JAJ-68), `app.costs.estimate` (JAJ-72), `app.models.compare` y `app.samples`.
 
 ```bash
 pip install -e "./backend[dev]" "mcp>=2,<3"   # el spike usa la API de mcp 2.x (MCPServer)

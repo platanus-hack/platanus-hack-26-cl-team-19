@@ -3,7 +3,7 @@
 Se conecta por streamable HTTP (lo mismo que `claude mcp add --transport http`), lista las tools y
 hace las llamadas que haría el agente ante "¿qué pasa en CyberDay?": simular y proponer un cambio.
 
-    python spikes/jaj-54-byos/mcp_server.py &       # en otra terminal
+    python spikes/jaj-54-byos/mcp_server.py         # en otra terminal, o con & al final
     python spikes/jaj-54-byos/check_client.py
 """
 
@@ -38,6 +38,7 @@ async def main() -> None:
             bad = payload(
                 await session.call_tool("propose", {"example": EXAMPLE, "ops": [{"op": "scale_api", "replicas": 0}]})
             )
+            assert "replicas" in bad.get("error", ""), bad
             print("\npropose inválido (el LLM lo lee y corrige):", bad)
 
             prop = payload(
@@ -50,7 +51,15 @@ async def main() -> None:
             print(" p95 ms:", prop["p95_ms"], "| errores:", prop["error_rate"])
             print(" cuello antes:", prop["before"]["bottleneck"]["message"])
             print(" cuello después:", prop["after"]["bottleneck"]["message"])
-            print(" US$/mes:", prop["usd_month"]["before"]["value"], "->", prop["usd_month"]["after"]["value"])
+            cost = prop["usd_month"]["after"]
+            assert cost["label"] and cost["source"], cost  # el costo también trae procedencia
+            print(
+                " US$/mes:",
+                prop["usd_month"]["before"]["value"],
+                "->",
+                cost["value"],
+                f"({cost['label']}: {cost['source']})",
+            )
             print(" procedencia:", prop["after"]["provenance"]["label"], "|", prop["after"]["provenance"]["source"])
 
             no_quote = payload(
