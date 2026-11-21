@@ -46,19 +46,36 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=None, help="guarda el Run completo en JSON")
     a = ap.parse_args(argv)
 
-    model = load_model(a.model)
-    run = simulate(
-        model,
-        a.scenario,
-        seed=a.seed,
-        duration_s=a.duration,
-        rps=a.rps,
-        arrivals=a.arrivals,
-        client_timeout_s=a.client_timeout or None,
-        cache_hit_ratio=a.cache_hit,
-        cpu_credits=a.cpu_credits,
-        traffic_profile=preset(a.profile, a.duration) if a.profile else None,
-    )
+    # un escenario que no existe, un archivo que no es un modelo o un parámetro fuera de rango: el
+    # mensaje en stderr y código 2, como los errores de argparse, en vez de un traceback (JAJ-110)
+    try:
+        model = load_model(a.model)
+        run = simulate(
+            model,
+            a.scenario,
+            seed=a.seed,
+            duration_s=a.duration,
+            rps=a.rps,
+            arrivals=a.arrivals,
+            client_timeout_s=a.client_timeout or None,
+            cache_hit_ratio=a.cache_hit,
+            cpu_credits=a.cpu_credits,
+            traffic_profile=preset(a.profile, a.duration) if a.profile else None,
+        )
+    except OSError as e:
+        print(f"error: no se pudo leer {a.model}: {e.strerror or e}", file=sys.stderr)
+        return 2
+    except KeyError as e:  # load_model: falta un campo; simulate: escenario que no existe (con mensaje)
+        detail = e.args[0] if e.args else e
+        message = detail if isinstance(detail, str) and " " in detail else f"al modelo le falta el campo {detail!r}"
+        print(f"error: {message}", file=sys.stderr)
+        return 2
+    except (ValueError, TypeError) as e:  # incluye un JSON roto y SimulationTooLarge (JAJ-99)
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except AttributeError:  # el JSON no es un objeto (ej. una lista)
+        print(f"error: {a.model} no es un modelo branchpoint.model/v1", file=sys.stderr)
+        return 2
 
     lat = run.latency
     fmt = lambda v: "-" if v is None else f"{v:.1f} ms"  # noqa: E731
