@@ -83,7 +83,18 @@ def test_line_out_of_range(repo):
 
 def test_path_not_near_the_line(repo):
     [problem] = check_evidence(sub(endpoint("/invoices/{id}")), repo)
-    assert "'invoices' no aparece en src/routes.js cerca de la línea 3" in problem
+    assert "'invoices' no aparece en src/routes.js cerca de la línea 3" in problem and "ni en el resto" in problem
+
+
+def test_router_prefix_far_from_the_line_is_fine(tmp_path):
+    """Lo encontró IA-0: "/{id}" en el decorador y el segmento "items" en el prefix del router, lejos."""
+    lines = ['router = APIRouter(prefix="/items")', *["# ..."] * 60, '@router.delete("/{id}")', "def delete_item(id):"]
+    (tmp_path / "items.py").write_text("\n".join(lines) + "\n")
+    assert (
+        check_evidence(sub(endpoint("/api/v1/items/{id}", file="items.py", line=62, method="DELETE")), tmp_path) == []
+    )
+    # un segmento que no está en ninguna parte del archivo sigue siendo un problema
+    assert check_evidence(sub(endpoint("/api/v1/orders/{id}", file="items.py", line=62, method="DELETE")), tmp_path)
 
 
 def test_root_path_skips_the_segment_check(repo):

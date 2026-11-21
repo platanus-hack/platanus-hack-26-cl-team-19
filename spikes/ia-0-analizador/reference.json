@@ -30,8 +30,8 @@
       "commit": "29c9d42",
       "framework": "django",
       "compose": false,
-      "source": "urls.py de conduit/apps (url() y el router de ArticleViewSet), contrastado con la spec RealWorld: 19",
-      "endpoints": "realworld"
+      "source": "urls.py de conduit/apps leídos a mano: ArticleViewSet no define destroy (no hay DELETE /api/articles/{slug}) y RetrieveUpdateAPIView expone PATCH /api/user. 19 endpoints, distintos de la spec RealWorld",
+      "endpoints": "django"
     },
     "mealie": {
       "url": "https://github.com/mealie-recipes/mealie",
@@ -43,11 +43,45 @@
     }
   },
   "realworld": [
-    "POST /api/users/login", "POST /api/users", "GET /api/user", "PUT /api/user",
-    "GET /api/profiles/{}", "POST /api/profiles/{}/follow", "DELETE /api/profiles/{}/follow",
-    "GET /api/articles", "GET /api/articles/feed", "GET /api/articles/{}", "POST /api/articles",
-    "PUT /api/articles/{}", "DELETE /api/articles/{}", "POST /api/articles/{}/comments",
-    "GET /api/articles/{}/comments", "DELETE /api/articles/{}/comments/{}", "POST /api/articles/{}/favorite",
-    "DELETE /api/articles/{}/favorite", "GET /api/tags"
+    "POST /api/users/login",
+    "POST /api/users",
+    "GET /api/user",
+    "PUT /api/user",
+    "GET /api/profiles/{}",
+    "POST /api/profiles/{}/follow",
+    "DELETE /api/profiles/{}/follow",
+    "GET /api/articles",
+    "GET /api/articles/feed",
+    "GET /api/articles/{}",
+    "POST /api/articles",
+    "PUT /api/articles/{}",
+    "DELETE /api/articles/{}",
+    "POST /api/articles/{}/comments",
+    "GET /api/articles/{}/comments",
+    "DELETE /api/articles/{}/comments/{}",
+    "POST /api/articles/{}/favorite",
+    "DELETE /api/articles/{}/favorite",
+    "GET /api/tags"
+  ],
+  "django": [
+    "POST /api/users/login",
+    "POST /api/users",
+    "GET /api/user",
+    "PUT /api/user",
+    "GET /api/profiles/{}",
+    "POST /api/profiles/{}/follow",
+    "DELETE /api/profiles/{}/follow",
+    "GET /api/articles",
+    "GET /api/articles/feed",
+    "GET /api/articles/{}",
+    "POST /api/articles",
+    "PUT /api/articles/{}",
+    "POST /api/articles/{}/comments",
+    "GET /api/articles/{}/comments",
+    "DELETE /api/articles/{}/comments/{}",
+    "POST /api/articles/{}/favorite",
+    "DELETE /api/articles/{}/favorite",
+    "GET /api/tags",
+    "PATCH /api/user"
   ]
 }

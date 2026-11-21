@@ -1,0 +1,624 @@
+{
+ "framework": "fastapi",
+ "language": "python",
+ "endpoints": [
+  {
+   "method": "GET",
+   "path": "/api/v1/items/",
+   "handler": "read_items",
+   "file": "backend/app/api/routes/items.py",
+   "line": 13,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "count",
+     "entity": "Item",
+     "detail": "session.exec(count_statement)",
+     "file": "backend/app/api/routes/items.py",
+     "line": 23,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "Item",
+     "detail": "session.exec(select(Item).offset.limit)",
+     "file": "backend/app/api/routes/items.py",
+     "line": 27,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/v1/items/{id}",
+   "handler": "read_item",
+   "file": "backend/app/api/routes/items.py",
+   "line": 48,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "Item",
+     "detail": "session.get(Item, id)",
+     "file": "backend/app/api/routes/items.py",
+     "line": 53,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/items/",
+   "handler": "create_item",
+   "file": "backend/app/api/routes/items.py",
+   "line": 61,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "stage",
+     "entity": "Item",
+     "detail": "session.add(item)",
+     "file": "backend/app/api/routes/items.py",
+     "line": 69,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Item",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/items.py",
+     "line": 70,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/api/v1/items/{id}",
+   "handler": "update_item",
+   "file": "backend/app/api/routes/items.py",
+   "line": 75,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "Item",
+     "detail": "session.get(Item, id)",
+     "file": "backend/app/api/routes/items.py",
+     "line": 86,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Item",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/items.py",
+     "line": 94,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/v1/items/{id}",
+   "handler": "delete_item",
+   "file": "backend/app/api/routes/items.py",
+   "line": 99,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "Item",
+     "detail": "session.get(Item, id)",
+     "file": "backend/app/api/routes/items.py",
+     "line": 106,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "Item",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/items.py",
+     "line": 112,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/login/access-token",
+   "handler": "login_access_token",
+   "file": "backend/app/api/routes/login.py",
+   "line": 23,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.authenticate (por email + verify_password)",
+     "file": "backend/app/api/routes/login.py",
+     "line": 30,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/login/test-token",
+   "handler": "test_token",
+   "file": "backend/app/api/routes/login.py",
+   "line": 45,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": []
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/password-recovery/{email}",
+   "handler": "recover_password",
+   "file": "backend/app/api/routes/login.py",
+   "line": 53,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/login.py",
+     "line": 58,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "external",
+     "service": "SMTP",
+     "detail": "send_email",
+     "file": "backend/app/api/routes/login.py",
+     "line": 67,
+     "why": "envía el correo"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/reset-password/",
+   "handler": "reset_password",
+   "file": "backend/app/api/routes/login.py",
+   "line": 77,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/login.py",
+     "line": 85,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "crud.update_user",
+     "file": "backend/app/api/routes/login.py",
+     "line": 92,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/password-recovery-html-content/{email}",
+   "handler": "recover_password_html_content",
+   "file": "backend/app/api/routes/login.py",
+   "line": 100,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/login.py",
+     "line": 109,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/private/users/",
+   "handler": "create_user",
+   "file": "backend/app/api/routes/private.py",
+   "line": 23,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "cpu",
+     "shape": "password_hash",
+     "detail": "get_password_hash",
+     "file": "backend/app/api/routes/private.py",
+     "line": 32,
+     "why": "hash de contraseña"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/private.py",
+     "line": 36,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/v1/users/",
+   "handler": "read_users",
+   "file": "backend/app/api/routes/users.py",
+   "line": 32,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "count",
+     "entity": "User",
+     "detail": "session.exec(count_statement)",
+     "file": "backend/app/api/routes/users.py",
+     "line": 43,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "range",
+     "entity": "User",
+     "detail": "session.exec(select(User))",
+     "file": "backend/app/api/routes/users.py",
+     "line": 48,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/users/",
+   "handler": "create_user",
+   "file": "backend/app/api/routes/users.py",
+   "line": 54,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/users.py",
+     "line": 61,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "crud.create_user",
+     "file": "backend/app/api/routes/users.py",
+     "line": 68,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "external",
+     "service": "SMTP",
+     "detail": "send_email",
+     "file": "backend/app/api/routes/users.py",
+     "line": 73,
+     "why": "correo de cuenta nueva"
+    }
+   ]
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/v1/users/me",
+   "handler": "update_user_me",
+   "file": "backend/app/api/routes/users.py",
+   "line": 81,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/users.py",
+     "line": 90,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/users.py",
+     "line": 98,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/v1/users/me/password",
+   "handler": "update_password_me",
+   "file": "backend/app/api/routes/users.py",
+   "line": 103,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "cpu",
+     "shape": "password_hash",
+     "detail": "verify_password",
+     "file": "backend/app/api/routes/users.py",
+     "line": 110,
+     "why": "hash de contraseña"
+    },
+    {
+     "kind": "cpu",
+     "shape": "password_hash",
+     "detail": "get_password_hash",
+     "file": "backend/app/api/routes/users.py",
+     "line": 117,
+     "why": "hash de contraseña"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/users.py",
+     "line": 120,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/v1/users/me",
+   "handler": "read_user_me",
+   "file": "backend/app/api/routes/users.py",
+   "line": 124,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": []
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/v1/users/me",
+   "handler": "delete_user_me",
+   "file": "backend/app/api/routes/users.py",
+   "line": 132,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "session.delete + commit",
+     "file": "backend/app/api/routes/users.py",
+     "line": 142,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/users/signup",
+   "handler": "register_user",
+   "file": "backend/app/api/routes/users.py",
+   "line": 146,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/users.py",
+     "line": 151,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "crud.create_user",
+     "file": "backend/app/api/routes/users.py",
+     "line": 158,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/v1/users/{user_id}",
+   "handler": "read_user_by_id",
+   "file": "backend/app/api/routes/users.py",
+   "line": 162,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "User",
+     "detail": "session.get(User, user_id)",
+     "file": "backend/app/api/routes/users.py",
+     "line": 169,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/v1/users/{user_id}",
+   "handler": "update_user",
+   "file": "backend/app/api/routes/users.py",
+   "line": 182,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "User",
+     "detail": "session.get(User, user_id)",
+     "file": "backend/app/api/routes/users.py",
+     "line": 197,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "lookup",
+     "entity": "User",
+     "detail": "crud.get_user_by_email",
+     "file": "backend/app/api/routes/users.py",
+     "line": 204,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "crud.update_user",
+     "file": "backend/app/api/routes/users.py",
+     "line": 210,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/v1/users/{user_id}",
+   "handler": "delete_user",
+   "file": "backend/app/api/routes/users.py",
+   "line": 214,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "db",
+     "op": "read",
+     "shape": "pk",
+     "entity": "User",
+     "detail": "session.get(User, user_id)",
+     "file": "backend/app/api/routes/users.py",
+     "line": 221,
+     "why": "consulta del handler"
+    },
+    {
+     "kind": "db",
+     "op": "write",
+     "shape": "commit",
+     "entity": "User",
+     "detail": "session.commit()",
+     "file": "backend/app/api/routes/users.py",
+     "line": 231,
+     "why": "consulta del handler"
+    }
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/v1/utils/test-email/",
+   "handler": "test_email",
+   "file": "backend/app/api/routes/utils.py",
+   "line": 11,
+   "why": "ruta declarada aquí",
+   "is_async": false,
+   "effects": [
+    {
+     "kind": "external",
+     "service": "SMTP",
+     "detail": "send_email",
+     "file": "backend/app/api/routes/utils.py",
+     "line": 21,
+     "why": "correo de prueba"
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/v1/utils/health-check/",
+   "handler": "health_check",
+   "file": "backend/app/api/routes/utils.py",
+   "line": 29,
+   "why": "ruta declarada aquí",
+   "is_async": true,
+   "effects": []
+  }
+ ],
+ "components": [
+  {
+   "name": "db",
+   "role": "db",
+   "technology": "Postgres (SQLModel)",
+   "file": "compose.yml",
+   "line": 1,
+   "why": "servicio db del compose"
+  }
+ ]
+}
