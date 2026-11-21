@@ -133,6 +133,13 @@ const accounts = computed(() =>
         </template>
 
         <template v-else>
+          <Alert v-if="github.revoked.value">
+            <AlertDescription>
+              Se revocó el acceso de la GitHub App de Branchpoint. Tus proyectos
+              siguen disponibles, pero no puedes importar repos hasta
+              reconectarla.
+            </AlertDescription>
+          </Alert>
           <p class="text-sm text-muted-foreground">
             {{
               github.awaitingGithub.value
@@ -149,7 +156,9 @@ const accounts = computed(() =>
               {{
                 github.awaitingGithub.value
                   ? "Volver a abrir GitHub"
-                  : "Conectar con GitHub"
+                  : github.revoked.value
+                    ? "Reconectar GitHub"
+                    : "Conectar con GitHub"
               }}
             </Button>
             <Button

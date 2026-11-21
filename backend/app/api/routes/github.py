@@ -56,6 +56,12 @@ class RepoOut(BaseModel):
     installation_id: int
 
 
+class ConnectionOut(BaseModel):
+    repos: list[RepoOut]
+    installations: list[InstallationOut]
+    revoked: bool
+
+
 class StartIngestion(BaseModel):
     repo_full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$", examples=["acme/tienda"])
     branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
@@ -214,6 +220,27 @@ def repos(
     request: Request, github: GitHubApp = Depends(get_github), user: User | None = Depends(current_user)
 ) -> list[RepoOut]:
     return [RepoOut(**r.__dict__) for r in _repos(request, github, owner_of(user))]
+
+
+@router.get("/connection", response_model=ConnectionOut)
+def connection(
+    request: Request, github: GitHubApp = Depends(get_github), user: User | None = Depends(current_user)
+) -> ConnectionOut:
+    """Repos, instalaciones y si se perdió el acceso, en una sola consulta para el onboarding (JAJ-91).
+
+    ``revoked`` es verdadero cuando el usuario ya no tiene instalaciones vigentes y al menos una
+    fue revocada desde GitHub: así la UI explica por qué desaparecieron sus repos.
+    """
+    store = request.app.state.store
+    owner = owner_of(user)
+    available_repos = _repos(request, github, owner)
+    # Se consulta después de GitHub: _repos detecta y registra las revocaciones.
+    active = installations(request, user)
+    return ConnectionOut(
+        repos=[RepoOut(**repo.__dict__) for repo in available_repos],
+        installations=active,
+        revoked=not active and bool(store.list_installations(owner, revoked=True)),
+    )
 
 
 @router.get("/repos/{owner}/{repo}/branches", response_model=list[str])

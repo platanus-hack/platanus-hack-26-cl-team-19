@@ -402,12 +402,12 @@ class PostgresProjectStore:
                 (installation_id, owner, account_login),
             )
 
-    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
+    def list_installations(self, owner: str | None, *, revoked: bool = False) -> list[GitHubInstallation]:
         with self._conn() as conn:
             rows = conn.execute(
                 "select installation_id, account_login from github_installations"
-                " where owner_id is not distinct from %s::uuid and revoked_at is null order by created_at",
-                (owner,),
+                " where owner_id is not distinct from %s::uuid and (revoked_at is not null) = %s order by created_at",
+                (owner, revoked),
             ).fetchall()
         return [GitHubInstallation(r["installation_id"], r["account_login"]) for r in rows]
 
