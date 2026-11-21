@@ -241,7 +241,8 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
     db_funcs = {f for s in db for f in s["via"][1:]}
     dep_db = any(s["via"][0] != ep["handler"] for s in db)
     cpu_in_hold = [s for s in cpu if db and (dep_db or db_funcs & set(s["via"][1:]))]
-    base_cpu = from_catalog(CATALOG["api"]["cpu_ms"])
+    # La CPU propia de FastAPI depende de si el endpoint es async (event loop) o def (threadpool, JAJ-46)
+    base_cpu = from_catalog(CATALOG["api"]["cpu_ms" if ep.get("async") else "cpu_ms_sync"])
     parts_hold = [s["time"] for s in db + cpu_in_hold] + [s["repeat"] for s in db if "repeat" in s]
     hold = derived(round(sum(_ms(s) for s in db + cpu_in_hold), 4), "ms",
                    "Suma de las queries (y la CPU pesada que corre con la conexión tomada)", *parts_hold) if db \
@@ -278,6 +279,28 @@ def endpoint_weights(endpoints: list[dict], overrides: dict) -> None:
     for group, g_share in ((reads, r_share), (writes, 1 - r_share)):
         for ep in group:
             ep["weight"] = from_catalog(share, value=round(g_share / len(group), 4), unit="fracción")
+
+
+# ---------- de 1 núcleo del laptop a la nube (JAJ-46) ----------
+def core_factor(plan: dict, where: str) -> dict:
+    """Cuántas veces más lento es 1 vCPU del plan que el núcleo donde se calibraron los tiempos."""
+    proc = plan.get("processor", "local")
+    f = CATALOG["cpu_core_factor"][proc]
+    label = weakest(f["label"], plan.get("processor_label", f["label"]))
+    return num(f["value"], "×", label, f"{where}: procesador {proc}. {f['source']}. {CATALOG['cpu_core_factor']['_doc']}",
+               default=True, processor=proc)
+
+
+def cpu_credits(plan_name: str, vcpu: dict) -> dict | None:
+    """Instancias con créditos (db.t4g): con carga sostenida rinden la base, no los vCPU nominales."""
+    base = CATALOG["burstable_baseline_per_vcpu"].get(plan_name)
+    if base is None:
+        return None
+    per_vcpu = from_catalog(base)
+    sustained = derived(round(vcpu["value"] * per_vcpu["value"], 3), "vCPU",
+                        f"vCPU × base por vCPU: lo que rinde {plan_name} con carga sostenida. En modo unlimited "
+                        "rinde los vCPU nominales y cobra el exceso", vcpu, per_vcpu)
+    return {"baseline_per_vcpu": per_vcpu, "sustained_vcpu": sustained}
 
 
 # ---------- respuestas del usuario: tráfico, despliegue y negocio ----------
@@ -328,7 +351,11 @@ def deployment_model(ans: dict, workers: dict, pool: dict) -> dict:
         "usd_month": num(round(usd, 2), "US$/mes", "ESTIMADO",
                          f"{src}. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730 (JAJ-11)"),
         "pool_per_worker": pool,
+        "cpu_core_factor": core_factor(plan, f"Plan {dbp['provider']} {dbp['plan']}"),
     }
+    credits = cpu_credits(dbp["plan"], db["vcpu"])
+    if credits:
+        db["cpu_credits"] = credits
     if "pooler_connections" in plan:
         db["pooler_connections"] = num(plan["pooler_connections"], "conexiones", "ESTIMADO", src)
     a = d.get("api", {"provider": "local", "replicas": 1, "vcpu": 1, "memory_gb": 2})
@@ -342,6 +369,7 @@ def deployment_model(ans: dict, workers: dict, pool: dict) -> dict:
         "threads_per_worker": from_catalog(CATALOG["api"]["threads_per_worker"]),
         "latency_ms": from_catalog(CATALOG["api"]["latency_ms"]),
         "usd_month": num(round(api_usd, 2), "US$/mes", "ESTIMADO", CATALOG["app_plans"]["_source"]),
+        "cpu_core_factor": core_factor(price, f"API en {a['provider']}"),
     }
     return {"api": api, "db": db}
 
@@ -367,22 +395,31 @@ def checks(model: dict) -> dict:
                     "réplicas × workers × (pool_size + max_overflow): cada proceso tiene su propio pool",
                     api["replicas"], api["workers"], pool["pool_size"], pool["max_overflow"])
     usable = min(conns["value"], db["max_connections"]["value"])
-    hold = sum(e["weight"]["value"] * e["db_hold_ms"]["value"] for e in eps)
-    cpu = sum(e["weight"]["value"] * e["api_cpu_ms"]["value"] for e in eps)
-    db_ms = sum(e["weight"]["value"] * sum(_ms(s) for s in e["steps"] if s["resource"] == "db_connection") for e in eps)
+    # Los tiempos del catálogo son de 1 núcleo del laptop: en la nube la CPU de la API y las queries tardan
+    # cpu_core_factor veces más (JAJ-46). La conexión tomada suma queries (DB) y CPU pesada (API).
+    f_api, f_db = api["cpu_core_factor"], db["cpu_core_factor"]
+    db_ms_ep = {id(e): sum(_ms(s) for s in e["steps"] if s["resource"] == "db_connection") for e in eps}
+    hold = sum(e["weight"]["value"] * (db_ms_ep[id(e)] * f_db["value"]
+                                       + (e["db_hold_ms"]["value"] - db_ms_ep[id(e)]) * f_api["value"]) for e in eps)
+    cpu = sum(e["weight"]["value"] * e["api_cpu_ms"]["value"] for e in eps) * f_api["value"]
+    db_ms = sum(e["weight"]["value"] * db_ms_ep[id(e)] for e in eps) * f_db["value"]
     lab = [x for e in eps for x in (e["weight"], e["db_hold_ms"], e["api_cpu_ms"])]
-    mean_hold = derived(round(hold, 4), "ms", "promedio ponderado por el tráfico de db_hold_ms", *lab)
-    mean_cpu = derived(round(cpu, 4), "ms", "promedio ponderado por el tráfico de api_cpu_ms", *lab)
+    mean_hold = derived(round(hold, 4), "ms",
+                        "promedio ponderado por el tráfico de db_hold_ms, en la nube (× cpu_core_factor)", *lab, f_api, f_db)
+    mean_cpu = derived(round(cpu, 4), "ms",
+                       "promedio ponderado por el tráfico de api_cpu_ms, en la nube (× cpu_core_factor)", *lab, f_api)
     cores = min(api["workers"]["value"], api["vcpu"]["value"]) * api["replicas"]["value"]
+    db_vcpu = db["cpu_credits"]["sustained_vcpu"] if "cpu_credits" in db else db["vcpu"]
     caps = {
         "pool": derived(round(usable * 1000 / hold, 1) if hold else None, "req/s",
                         "conexiones usables / tiempo promedio con la conexión tomada (ley de Little)", conns, mean_hold,
                         db["max_connections"]),
-        "db_cpu": derived(round(db["vcpu"]["value"] * 1000 / db_ms, 1) if db_ms else None, "req/s",
-                          "vCPU de la DB / tiempo de queries por request (los tiempos de JAJ-8 son de 1 CPU)",
-                          db["vcpu"], mean_hold),
+        "db_cpu": derived(round(db_vcpu["value"] * 1000 / db_ms, 1) if db_ms else None, "req/s",
+                          "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la "
+                          "nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
+                          db_vcpu, mean_hold, f_db),
         "api_cpu": derived(round(cores * 1000 / cpu, 1), "req/s",
-                           "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request",
+                           "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request en la nube",
                            api["workers"], api["vcpu"], api["replicas"], mean_cpu),
     }
     t = model["traffic"]

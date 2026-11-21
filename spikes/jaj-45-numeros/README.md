@@ -14,11 +14,11 @@ Issue: [JAJ-45](https://linear.app/jajathom/issue/JAJ-45/definir-como-la-app-obt
 3. **Cada número del modelo trae `value`, `unit`, `label`, `source` y `date`.** Un número calculado hereda la etiqueta más débil de sus entradas. Los `SUPUESTO` quedan en una lista aparte para que la UI los resalte.
 4. **En el template de FastAPI el modelo ya encuentra algo:**
    * Corre con 4 workers de 15 conexiones cada uno: 60 conexiones, justo el límite de Supabase Micro.
-   * En CyberDay ×20 (262 req/s) la CPU de la API queda al 110 %, sobre todo por el hash de contraseñas.
-5. **Lo más débil son tres números sin calibrar:**
-   * El tiempo del hash de contraseñas.
+   * En CyberDay ×20 (262 req/s), con capacidad de nube, la CPU de la API queda al 493 %, sobre todo por el hash de contraseñas, y la de la DB al 175 % (JAJ-47).
+5. **Lo más débil son tres números:**
    * El tamaño de las tablas, que define el costo de los escaneos.
-   * La vCPU de los planes compartidos de Supabase.
+   * La vCPU de los planes compartidos de Supabase y su procesador (se asume Graviton2).
+   * El factor laptop → nube: `ESTIMADO` con ±30 %, por un solo resultado público de Graviton3 (JAJ-46).
 
    Están marcados como `SUPUESTO` y son los primeros que hay que calibrar o pedir.
 
@@ -66,12 +66,24 @@ Los otros efectos:
 
 | Efecto | Parámetro | Etiqueta |
 |---|---|---|
-| `cpu` (nuevo en el extractor): hash o verificación de contraseña con pwdlib, passlib, bcrypt o argon2 | 50 ms | `SUPUESTO`, falta calibrarlo |
+| `cpu` (nuevo en el extractor): hash o verificación de contraseña con pwdlib, passlib, bcrypt o argon2 | 110 ms (argon2id de pwdlib; bcrypt cost 12: 188 ms) | `CALIBRADO` (JAJ-46) |
 | `cache` (GET/SET de Redis) | 0,03 ms | `CALIBRADO` |
 | `background` (encolar en Redis) | 0,03 ms | `CALIBRADO` |
 | `http`, `sdk`, `plugin` (servicio externo) | sin valor por defecto: lo ingresa el usuario | `SUPUESTO` |
-| CPU base de FastAPI por request | 0,68 ms, medido a 200 req/s | `CALIBRADO` (JAJ-43) |
+| CPU base de FastAPI por request, endpoint `async` | 0,68 ms, medido a 200 req/s con asyncpg | `CALIBRADO` (JAJ-43) |
+| CPU base de FastAPI por request, endpoint `def` | 2,1 ms, SQLModel + psycopg sostenido con carga | `CALIBRADO` (JAJ-46) |
 | Latencia cliente ↔ API | 0,25 ms | `CALIBRADO` (JAJ-8) |
+
+**De 1 núcleo del laptop a la nube (JAJ-46, JAJ-47).** Todos los tiempos de CPU del catálogo son de 1 núcleo del laptop de calibración (i7-13620H). Cada plan trae su procesador, y `deployment.api` y `deployment.db` llevan su `cpu_core_factor`. `checks` multiplica por ese factor la CPU de la API, las queries y la conexión tomada. El motor todavía no lo aplica (JAJ-48).
+
+| Procesador | Planes | Factor | Etiqueta |
+|---|---|---|---|
+| Laptop de calibración | `local` | 1,0 | `CALIBRADO` |
+| Graviton2 | Fargate ARM, `db.t4g.*`, Supabase (se asume) | 1,95 | `ESTIMADO`; en Supabase, `SUPUESTO` |
+| Graviton3 | `db.m7g.*` | 1,55 | `ESTIMADO` (±30 %) |
+| Graviton4 | (m8g, r8g) | 1,25 | `ESTIMADO` |
+
+Las instancias con créditos (`db.t4g.micro` y `db.t4g.medium`) llevan `cpu_credits`. Con carga sostenida rinden su base de 10 % y 20 % por vCPU, o sea 0,2 y 0,4 vCPU, y `checks` usa esa base. En modo unlimited rinden los 2 vCPU y cobran el exceso.
 
 **Qué pasa con una query que el AST no clasifica:** queda como `unknown`, con un valor por defecto `SUPUESTO`. Si después se usa un LLM, solo puede proponer la forma (por ejemplo "esto es un escaneo"). El número siempre sale del catálogo: el LLM nunca inventa números.
 
@@ -137,9 +149,9 @@ Un número:
 | Conexiones que puede abrir la app | 60 (4 workers × (5 + 10)) | `OBSERVADO` + `ESTIMADO` |
 | Conexiones de Supabase Micro | 60: **al límite** | `ESTIMADO` |
 | Pico normal / CyberDay | 13 / 262 req/s | `SUPUESTO` |
-| Conexión tomada promedio por request | 4,8 ms | `SUPUESTO` (por el hash y el `COUNT(*)`) |
-| CPU de la API promedio por request | 4,2 ms | `SUPUESTO` (por el hash) |
-| Uso en CyberDay | CPU de la API 110 %, CPU de la DB 90 %, pool 2 % | `SUPUESTO` |
+| Conexión tomada promedio por request, en la nube | 16,5 ms | `SUPUESTO` (por el hash y el `COUNT(*)`, × factor 1,95) |
+| CPU de la API promedio por request, en la nube | 18,8 ms | `SUPUESTO` (por el hash de 110 ms, × factor 1,95) |
+| Uso en CyberDay | CPU de la API 493 %, CPU de la DB 175 %, pool 7 % | `SUPUESTO` |
 | Ventas en juego por hora en CyberDay | US$33.340 | `SUPUESTO` |
 | Costo mensual | DB US$25 + API US$28,84 | `ESTIMADO` |
 
@@ -157,7 +169,7 @@ Lectura:
 * **Funciones alcanzadas por varios caminos:** si una función se alcanza dos veces en la misma request, se cuenta una sola vez, porque el grafo de llamadas visita cada función una vez.
 * **Ramas en el sitio de la llamada:** las ramas sí se propagan a las funciones llamadas, pero una función alcanzada desde dos ramas toma la rama del primer camino.
 * **Orden de los pasos y tiempo con la conexión tomada:** son aproximados. No se modela la CPU entre queries, salvo la pesada.
-* **Tiempos de la DB:** están medidos con 1 CPU local y caché caliente. Pasarlos a un plan del cloud con otra CPU queda para JAJ-44.
+* **Tiempos de la DB:** están medidos con 1 CPU local y caché caliente. El paso a la nube es un factor por procesador (JAJ-46, `ESTIMADO`); el disco de la nube sigue sin medir.
 * **Reparto del tráfico:** por defecto es uniforme dentro de las lecturas y dentro de las escrituras. Para la demo conviene declararlo.
 
 ## Archivos
