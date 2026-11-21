@@ -221,12 +221,11 @@ def _provenance(model: dict[str, Any], run: Run) -> dict[str, Any]:
     }
 
 
-# De dónde sale "saturated": umbrales elegidos por el equipo, no medidos (JAJ-89, README del backend)
-SATURATION_PROVENANCE = {
-    "label": "SUPUESTO",
-    "source": "JAJ-89: saturado = al menos 5 % de las requests sin respuesta al terminar y una espera (Ley de "
-    "Little) que crece de la mitad al final: ×1,5 más 0,25 s. Umbrales elegidos por el equipo.",
-}
+def _saturation_provenance(run: Run) -> dict[str, Any]:
+    """De dónde sale "saturated" (JAJ-89): los umbrales los eligió el equipo. Viene en el propio Run, armado
+    desde las constantes del motor, así no se desactualiza."""
+    s = run.saturation
+    return {"label": s.label, "source": s.source} if s is not None else {}
 
 
 def _goal_check(
@@ -247,7 +246,8 @@ def _goal_check(
             "value": error_rate,
             "basis": "techo por saturación: error_rate más las requests sin respuesta al terminar (JAJ-89)",
             "error_rate": run.error_rate,
-            **SATURATION_PROVENANCE,
+            # anidado: si va suelto, el label y el source del piso del 1 % (sin meta) lo pisarían
+            "saturated_provenance": _saturation_provenance(run),
         }
         if saturated
         else {"value": error_rate, "basis": "error_rate"}
@@ -260,6 +260,7 @@ def _goal_check(
         }
         if saturated:
             out["p95"]["basis"] = "no cumple por saturación: el p95 solo mide las requests que terminaron (JAJ-89)"
+            out["p95"]["saturated_provenance"] = _saturation_provenance(run)
     if goals.slo_error_rate is not None:
         out["errors"] = {"goal": goals.slo_error_rate, "ok": error_rate <= goals.slo_error_rate, **basis}
     else:
@@ -301,7 +302,8 @@ def _run_summary(run: Run, model: dict[str, Any]) -> dict[str, Any]:
         "errors": run.errors,
         "throughput_rps": round(run.throughput_rps, 1),
         # JAJ-89: si quedaron requests sin respuesta, error_rate es un piso; el agente debe decirlo
-        "saturation": {**asdict(run.saturation), **SATURATION_PROVENANCE} if run.saturation is not None else None,
+        # (label y source del bloque son de "saturated"; los conteos salen del motor)
+        "saturation": asdict(run.saturation) if run.saturation is not None else None,
         "bottleneck": {
             "resource": b.resource,
             "utilization": round(b.utilization, 3),

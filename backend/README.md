@@ -194,16 +194,17 @@ Además:
 Por eso el `Run` trae `saturation`:
 - `saturated`: se cumplen dos condiciones.
   1. **Muchas requests sin respuesta:** al menos 5 % (`UNANSWERED_SATURATED`).
-  2. **Una espera que crece:** la espera que implica la fila (Ley de Little: fila / tasa de llegada) es al final al menos 1,5 veces la de la mitad, más 0,25 s (`WAIT_GROWTH` y `WAIT_GROWTH_MIN_S`).
+  2. **Una espera que crece o que llegó al timeout:** la espera que implica la fila (Ley de Little: fila / tasa de llegada) es al final al menos 1,5 veces la de la mitad, más 0,25 s (`WAIT_GROWTH` y `WAIT_GROWTH_MIN_S`). También cuenta si llegó al 80 % del timeout del cliente (`TIMEOUT_SHARE`). En simulaciones de más de ~2× el timeout, la espera deja de crecer porque las requests que vencen pasan a error, pero el sistema sigue colapsado.
 
   La primera condición sola no basta. Sin saturación, la fracción en curso es latencia / duración: un endpoint sano de 3 s (una llamada a un LLM) deja 10 % en curso en 30 s. Pero en un sistema sano la espera se estabiliza en la latencia, y en uno saturado crece sin parar. La tasa de llegada se mide en una ventana de 3 s, así que un perfil que sube no se confunde con una fila que crece. Con menos de 4 s simulados no se evalúa.
 - `wait_mid_s` y `wait_end_s`: la espera a la mitad y al final.
+- `label` (`SUPUESTO`) y `source`: la procedencia de `saturated`, armada desde las constantes del motor. El editor puede mostrarla junto al aviso. El agente la recibe anidada en `saturated_provenance`, para que no pise la procedencia de otros números.
 - `unanswered` y `unanswered_rate`: cuántas quedaron sin respuesta.
 - `error_rate_if_unanswered_fail`: la tasa de error si esas requests terminaran fallando. Es el techo de `error_rate`.
 - `offered_rps`: las req/s que llegaron (con perfil, el promedio).
 - `message`: el aviso en español. También va primero en `warnings`, y dice cuánto crece la espera y dónde estaba la fila.
 
-Los umbrales (5 %, ×1,5, 0,25 s) son **SUPUESTO**: los eligió el equipo, con el razonamiento de arriba, y no salen de una medición. Los tests cubren los dos lados: el colapso con 0 % de errores se marca, y un endpoint lento, una simulación corta o un perfil que sube no se marcan (`tests/engine/test_saturation.py`). Con branchpoint-shop-demo (60 s, semilla 7), a 400 req/s queda 39 % sin respuesta y la espera crece de 11 a 22 s. A 100 req/s no aparece el aviso.
+Los umbrales (5 %, ×1,5, 0,25 s y 80 % del timeout) y la forma de medir (ventana de 3 s, mínimo de 4 s) son **SUPUESTO**: los eligió el equipo, con el razonamiento de arriba, y no salen de una medición. Los tests cubren los dos lados: el colapso con 0 % de errores se marca, también en simulaciones de 60 y 120 s; un endpoint lento, una simulación corta o un perfil que sube no se marcan (`tests/engine/test_saturation.py`). Con branchpoint-shop-demo (60 s, semilla 7), a 400 req/s queda 39 % sin respuesta y la espera crece de 11 a 22 s. A 100 req/s no aparece el aviso.
 
 En `compare`, `summary` agrega "Ojo: v1 no alcanza a atender este tráfico (v1 deja 39 % de las requests sin respuesta al terminar): su tasa de error es un piso". Las metas del agente (`simulate` y `compare` de `app/agent/tools.py`) usan ese techo, así que una versión saturada nunca "cumple" por su 0 % de errores. El bloque `errors` dice con qué tasa juzgó (`basis`, `value` y el `error_rate` original), y el de `p95` dice por qué no cumple.
 
