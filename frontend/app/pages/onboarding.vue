@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
-import { ArrowLeft, ArrowRight, Check } from "@lucide/vue";
+import { ArrowRight, Check } from "@lucide/vue";
 import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -350,14 +350,8 @@ async function addDemoRepository() {
           editor sin CLI.
         </p>
         <div class="mt-2 flex flex-wrap items-center justify-end gap-4">
-          <Button variant="ghost" @click="step = 'github'">
-            <ArrowLeft data-icon="inline-start" aria-hidden="true" />
-            Volver
-          </Button>
-          <Button @click="completeOnboarding">
-            Ir a Mis proyectos
-            <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Button>
+          <Button variant="ghost" @click="step = 'github'"> Volver </Button>
+          <Button @click="completeOnboarding"> Ir a Mis proyectos </Button>
         </div>
       </div>
     </main>
