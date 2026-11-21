@@ -28,7 +28,8 @@ backend/
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
 │   ├── costs/               # costo mensual por componente (JAJ-72)
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
-│   │   └── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
+│   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
+│   │   └── failure.py       #   failure_cost(modelo, run): ventas en juego por hora (JAJ-74)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos persistente (JAJ-55): README.md y schema.sql
 │   └── cli.py               # correr una simulación desde la terminal
@@ -176,7 +177,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. |
 | `POST` | `/projects/{id}/versions/{n}/ops` | Aplica `{"ops": [...], "note"}` a la versión `n` y guarda el resultado como versión nueva (`origin: agente`, antecesora `n`). Devuelve la versión con `changes` (una línea por operación) y `warnings`. Ver "Operaciones" abajo. |
-| `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente). `region` opcional para los costos. |
+| `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente), `failure_a` y `failure_b` (ventas en juego por hora, JAJ-74) y `summary`, la comparación en una frase. `region` opcional para los costos. |
 | `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
@@ -294,6 +295,37 @@ curl -s localhost:8000/projects/$P/versions/1/costs
 curl -s -H "Content-Type: application/json" -d '{"ops": [{"op": "scale_api", "replicas": 3}]}' localhost:8000/projects/$P/versions/1/ops
 curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 10}' localhost:8000/projects/$P/compare | python -c 'import json,sys; print(json.load(sys.stdin)["cost_delta"])'
 ```
+
+### Costo de fallar (JAJ-74)
+
+`failure_cost(modelo, run)` (`app/costs/failure.py`) da las ventas en juego por hora según lo que simuló el motor. Es la fórmula de JAJ-11: sesiones por hora × fracción que falla × conversión × ticket. La conversión y el ticket salen del `business` del modelo, y las requests por sesión de `traffic`. La cota de `build_model.py` (`checks.sales_at_stake_per_hour`) suponía que todo falla; aquí la fracción sale de la tasa de error del `Run`.
+
+**Es un rango, no un número.** Una sesión hace varias requests (17 en el perfil medio), y no se sabe si con una request fallida se pierde la venta:
+
+| Cota | Fracción de sesiones que se pierden | Supone |
+| -- | -- | -- |
+| Piso | `e`, la tasa de error | solo se pierde la venta de la request que falló |
+| Techo | `1 − (1 − e)^k`, con `k` requests por sesión | se pierde si falla *cualquier* request de la sesión, con fallas independientes |
+
+**Qué trae:**
+- **Cada monto** con su procedencia. La etiqueta es la más débil de sus datos: con conversión y ticket `SUPUESTO`, el monto también es `SUPUESTO`.
+- **"Si fallara todo"** (`at_stake_per_hour`), que calza con la cota de `build_model.py`.
+- **`is_floor`:** algún recurso pasa el 90 %, así que el motor es optimista (JAJ-44) y el monto es "al menos".
+- **`too_short`:** el sistema está saturado, pero todavía no hay errores. El timeout del cliente es de 30 s, así que en una simulación de 30 s no alcanza a vencer ninguno (JAJ-71). En vez de decir que no hay ventas en juego, el mensaje pide simular más tiempo.
+
+**En `compare`,** `summary` lo junta con el costo de infraestructura. Con el template en CyberDay (120 s) y la v2 con API ×3 y pooler:
+
+> v2 cuesta +US$57,66/mes respecto de v1 y evita entre US$1 y US$9.598 por hora en ventas en juego (al menos).
+
+El rango es amplio porque las dos versiones fallan mucho: la v1 con 75 % de errores y la v2 con 46 %. Con esas tasas, el techo de las dos se acerca a "si fallara todo". La diferencia de los pisos es lo que la v2 evita con seguridad.
+
+Los tests están en `tests/costs/test_failure.py` y `tests/api/test_costs.py`:
+- la versión con más errores muestra más ventas en juego;
+- la fórmula sale del `Run`;
+- "si fallara todo" calza con `build_model` (±0,2 % con llegadas uniformes);
+- las etiquetas y el piso;
+- la simulación demasiado corta;
+- sin errores no hay pérdida.
 
 Desde Python:
 

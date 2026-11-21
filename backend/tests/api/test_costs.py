@@ -43,5 +43,24 @@ def test_version_costs_and_compare(client):
     assert cmp["cost_a"]["total"]["value"] == pytest.approx(v1["total"]["value"])
 
 
+def test_compare_shows_sales_at_stake(client):
+    """JAJ-74: en CyberDay (120 s), la v2 (API ×3 + pooler) cuesta más por mes y evita ventas perdidas."""
+    pid = client.post("/projects", json={"sample": "full-stack-fastapi-template"}).json()["id"]
+    ops = [{"op": "scale_api", "replicas": 3}, {"op": "add_pooler"}]
+    client.post(f"/projects/{pid}/versions/1/ops", json={"ops": ops})
+    cmp = client.post(f"/projects/{pid}/compare", json={"a": 1, "b": 2, "duration_s": 120, "seed": 1}).json()
+    fa, fb = cmp["failure_a"], cmp["failure_b"]
+    assert fa["lost_sales_per_hour"]["low"]["value"] > fb["lost_sales_per_hour"]["low"]["value"]
+    assert cmp["summary"].startswith("v2 cuesta +US$57")
+    assert "evita entre US$" in cmp["summary"] and "(al menos)" in cmp["summary"]
+
+
+def test_compare_too_short_says_so(client):
+    pid = client.post("/projects", json={"sample": "full-stack-fastapi-template"}).json()["id"]
+    client.post(f"/projects/{pid}/versions/1/ops", json={"ops": [{"op": "scale_api", "replicas": 3}]})
+    cmp = client.post(f"/projects/{pid}/compare", json={"a": 1, "b": 2, "duration_s": 20}).json()
+    assert "muy corta" in cmp["summary"]
+
+
 def test_version_costs_404(client):
     assert client.get("/projects/nope/versions/1/costs").status_code == 404
