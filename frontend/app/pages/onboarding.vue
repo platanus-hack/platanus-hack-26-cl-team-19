@@ -24,7 +24,10 @@ const route = useRoute();
 
 // El onboarding es solo para el primer ingreso. Después, las conexiones se cambian en
 // Configuración; si GitHub vuelve aquí tras instalar la app, se reenvía con su resultado.
-onMounted(async () => {
+// En el sitio estático (nuxt generate), Nuxt hidrata las páginas pre-renderizadas con la ruta
+// sin query y restaura la real recién en app:suspense:resolve, después de onMounted. Por eso el
+// query se lee en onNuxtReady, que corre después.
+onNuxtReady(async () => {
   if (!(await isOnboardingDone())) {
     if (!isMock) await github.loadRepos();
     return;
