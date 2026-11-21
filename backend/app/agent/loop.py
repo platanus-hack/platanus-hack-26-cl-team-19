@@ -121,19 +121,22 @@ def with_cache_breakpoint(messages: list[dict[str, Any]]) -> list[dict[str, Any]
     return [*messages[:-1], last]
 
 
+TOKEN_KINDS = ("input", "output", "cache_read", "cache_write")  # las claves de usage y de usd_per_million
+
+
 def cost_usd(model: str, usage: dict[str, int]) -> dict[str, Any] | None:
-    """Costo de los tokens con la tabla de precios del repo (``manual.json``), no un número inventado."""
+    """Costo de los tokens con la tabla de precios del repo (``manual.json``), no un número inventado.
+
+    Los cuatro precios salen de la tabla, incluida la escritura de caché (``cache_write``, la de 5
+    minutos: antes era un ×1,25 escrito aquí, JAJ-109). ``None`` si el modelo no está en la tabla o le
+    falta alguno: mejor sin costo que con uno que no tiene fuente."""
     try:
         table = manual()["llm_tokens"]
         p = table["usd_per_million"][model]
+        rates = {kind: p[kind] for kind in TOKEN_KINDS}
     except KeyError:
         return None
-    usd = (
-        usage.get("input", 0) * p["input"]
-        + usage.get("output", 0) * p["output"]
-        + usage.get("cache_read", 0) * p.get("cache_read", p["input"])
-        + usage.get("cache_write", 0) * p["input"] * 1.25  # escritura de caché de 5 min: 1,25 × entrada
-    ) / 1e6
+    usd = sum(usage.get(kind, 0) * rate for kind, rate in rates.items()) / 1e6
     return {"value": round(usd, 4), "unit": "US$", "label": "ESTIMADO", "source": table["source"]}
 
 

@@ -30,6 +30,7 @@ def _run(r: dict[str, Any]) -> str:
         f"# Reporte de simulación · {r['project']['name']} v{r['version']['number']}",
         "",
         f"**Escenario:** {sc['label']} · {sc['rps']:g} req/s · {sc['duration_s']:g} s · semilla {sc['seed']}  ",
+        *([f"**Ajustes del escenario:** {'; '.join(sc['adjustments'])}  "] if sc.get("adjustments") else []),
         f"**Fecha:** {r['created_at']} · **Reporte:** `{r['id'][:8]}` · **Motor:** `{r['engine_version']}`",
         "",
         f"> {r['conclusion']}",

@@ -78,9 +78,22 @@ export interface GraphNode {
   simulated?: boolean;
 }
 
+export interface ScenarioOverrides {
+  endpoint_weights?: Record<string, number>;
+  slowdowns?: Record<string, number>;
+  business?: { conversion?: number; ticket_usd?: number };
+}
+
+export interface GraphEndpoint {
+  id: string;
+  weight: number;
+}
+
 export interface Graph {
   nodes: GraphNode[];
   edges: { source: string; target: string; endpoints: string[] }[];
+  endpoints?: GraphEndpoint[];
+  slowdown_targets?: string[];
 }
 
 export interface RunResource {
@@ -91,6 +104,7 @@ export interface RunResource {
 }
 
 export interface Run {
+  overrides?: string[];
   resources: RunResource[];
   bottleneck: {
     resource: string | null;
@@ -116,6 +130,19 @@ export interface CostEstimate {
   lines: { id: string; label: string; usd_month: ModelNumber }[];
   unpriced: string[];
   warnings: string[];
+  missing: string[];
+}
+
+export interface FailureCost {
+  message: string;
+}
+
+export interface VersionResults {
+  run: Run;
+  cost: CostEstimate;
+  failure: FailureCost | null;
+  failure_missing: string[];
+  summary: string | null;
 }
 
 interface MetricDelta {
@@ -133,15 +160,25 @@ export interface Comparison {
   };
   cost_a: CostEstimate;
   cost_b: CostEstimate;
+  cost_delta: { a: number; b: number; missing: string[] };
+  failure_a: FailureCost | null;
+  failure_b: FailureCost | null;
+  failure_missing_a?: string[];
+  failure_missing_b?: string[];
   summary: string | null;
 }
 
-export function editorRunParams(scenario: string, seed = 0) {
+export function editorRunParams(
+  scenario: string,
+  overrides: ScenarioOverrides = {},
+  seed = 0,
+) {
   return {
     scenario,
     seed,
     duration_s: 60,
     traffic_profile: scenario === "cyberday" ? "pico" : null,
+    ...overrides,
   };
 }
 
@@ -221,16 +258,31 @@ export function createEditorApi(
         note,
         origin: "manual",
       }),
-    run: (id: string, version: number, scenario: string, seed = 0) =>
-      post<Run>(
-        `${versionPath(id, version)}/runs`,
-        editorRunParams(scenario, seed),
+    run: (id: string, version: number, scenario: string) =>
+      post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
+    // seed: la del reporte de la corrida (JAJ-127), así el Run sale del guardado y no se simula de nuevo
+    results: (
+      id: string,
+      version: number,
+      scenario: string,
+      overrides?: ScenarioOverrides,
+      seed = 0,
+    ) =>
+      post<VersionResults>(
+        `${versionPath(id, version)}/results`,
+        editorRunParams(scenario, overrides, seed),
       ),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),
-    compare: (id: string, base: number, target: number, scenario: string) =>
+    compare: (
+      id: string,
+      base: number,
+      target: number,
+      scenario: string,
+      overrides?: ScenarioOverrides,
+    ) =>
       post<Comparison>(`${projectPath(id)}/compare`, {
-        ...editorRunParams(scenario),
+        ...editorRunParams(scenario, overrides),
         a: base,
         b: target,
       }),

@@ -4,7 +4,8 @@ import type {
   Graph,
   ModelSummary,
   Project,
-  Run,
+  ScenarioOverrides,
+  VersionResults,
   VersionDetail,
 } from "@/services/editor-api";
 import { editorRunParams } from "@/services/editor-api";
@@ -49,7 +50,8 @@ export function useEditorProject() {
   const projectGroup = shallowRef<Project | null>(null);
   const version = shallowRef<VersionDetail | null>(null);
   const graph = shallowRef<Graph | null>(null);
-  const run = shallowRef<Run | null>(null);
+  const results = shallowRef<VersionResults | null>(null);
+  const run = computed(() => results.value?.run ?? null);
   const costs = shallowRef<CostEstimate | null>(null);
   const costsError = ref("");
   const comparison = shallowRef<Comparison | null>(null);
@@ -78,7 +80,7 @@ export function useEditorProject() {
   }
 
   function resetResults() {
-    run.value = null;
+    results.value = null;
     costs.value = null;
     costsError.value = "";
     comparison.value = null;
@@ -182,27 +184,40 @@ export function useEditorProject() {
     });
   }
 
-  async function simulate() {
+  async function simulate(overrides?: ScenarioOverrides) {
     const id = project.value?.id;
     const number = version.value?.number;
     if (!id || number === undefined || !scenario.value) return;
+    const selectedScenario = scenario.value;
     await request("Simulando…", async () => {
       if (!reportsApi) {
-        run.value = await api.run(id, number, scenario.value);
+        const result = await api.results(
+          id,
+          number,
+          selectedScenario,
+          overrides,
+        );
+        if (scenario.value === selectedScenario) results.value = result;
         return;
       }
-      // Cada corrida es una simulación nueva con su reporte guardado (JAJ-127). El backend elige la
-      // semilla; el Run de esa semilla ya quedó guardado, así que pedirlo no vuelve a simular.
-      const { seed: _, ...params } = editorRunParams(scenario.value);
+      // Cada corrida es una simulación nueva con su reporte guardado (JAJ-127), con los mismos ajustes
+      // del escenario. El backend elige la semilla; el Run de esa semilla ya quedó guardado, así que
+      // pedir los resultados no vuelve a simular.
+      const { seed: _, ...params } = editorRunParams(
+        selectedScenario,
+        overrides,
+      );
       const report = await reportsApi.create(id, number, params);
       lastReport.value = report;
       reportsVersion.value++;
-      run.value = await api.run(
+      const result = await api.results(
         id,
         number,
-        scenario.value,
+        selectedScenario,
+        overrides,
         report.scenario.seed,
       );
+      if (scenario.value === selectedScenario) results.value = result;
     });
   }
 
@@ -210,7 +225,11 @@ export function useEditorProject() {
     if (version.value) await fetchCosts(version.value);
   }
 
-  async function compare(base: string, target: string) {
+  async function compare(
+    base: string,
+    target: string,
+    overrides?: ScenarioOverrides,
+  ) {
     const id = project.value?.id;
     if (!id || !base || !target || base === target || !scenario.value) return;
     await request("Comparando versiones…", async () => {
@@ -219,6 +238,7 @@ export function useEditorProject() {
         Number(base),
         Number(target),
         scenario.value,
+        overrides,
       );
     });
   }
@@ -226,7 +246,7 @@ export function useEditorProject() {
   watch(
     scenario,
     () => {
-      run.value = null;
+      results.value = null;
       comparison.value = null;
     },
     { flush: "sync" },
@@ -240,6 +260,7 @@ export function useEditorProject() {
     version,
     graph,
     run,
+    results,
     costs,
     costsError,
     comparison,

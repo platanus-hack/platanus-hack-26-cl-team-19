@@ -13,6 +13,8 @@ from app.samples import load_sample
 SAMPLE = "full-stack-fastapi-template"
 RUN = {"seed": 1, "duration_s": 5}
 PEAK = 13.12  # traffic.peak_rps del template
+# los reemplazos de JAJ-131 vienen en null cuando el escenario no los trae
+NO_OVERRIDES = {"endpoint_weights": None, "slowdowns": None, "business": None}
 
 
 @pytest.fixture(params=["memoria", "postgres"])
@@ -42,8 +44,8 @@ def test_project_starts_with_the_model_scenarios(client, pid):
     r = client.get(f"/projects/{pid}/scenarios")
     assert r.status_code == 200
     assert r.json() == [
-        {"name": "cyberday", "multiplier": 20.0, "rps": None, "description": None},
-        {"name": "pico_normal", "multiplier": 1.0, "rps": None, "description": None},
+        {"name": "cyberday", "multiplier": 20.0, "rps": None, "description": None, **NO_OVERRIDES},
+        {"name": "pico_normal", "multiplier": 1.0, "rps": None, "description": None, **NO_OVERRIDES},
     ]
     assert client.get(f"/projects/{pid}/scenarios/cyberday").json()["multiplier"] == 20.0
 
@@ -104,6 +106,7 @@ def test_put_replaces_and_switches_rate_kind(client, pid):
         "multiplier": None,
         "rps": 300.0,
         "description": None,
+        **NO_OVERRIDES,
     }
     assert len(client.get(f"/projects/{pid}/scenarios").json()) == 2
 

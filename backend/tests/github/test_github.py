@@ -7,12 +7,15 @@ import json
 import tarfile
 import time
 import urllib.parse
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.agent.loop import Turn
+from app.api.auth import User, current_user
 from app.api.main import create_app
+from app.api.routes import credentials
 from app.api.store import InMemoryProjectStore
 from app.github.client import GitHubApp, GitHubAppConfig, GitHubError, Repo
 from app.github.ingestion import extract_tarball
@@ -306,6 +309,25 @@ def test_ingestion_creates_the_project_with_its_v1(client, github, store):
 
     source = store.sources[done["project_id"]]
     assert (source.repo_full_name, source.branch, source.commit_sha) == ("acme/tienda", "main", SHA)
+
+
+def test_ingestion_can_use_branchpoint_key_with_a_personal_key_configured(client, keys, monkeypatch):
+    user = User("alice")
+    client.app.dependency_overrides[current_user] = lambda: user
+    connect(client)
+    credential_store = Mock()
+    credential_store.personal_chat_key.return_value = "sk-personal"
+    credential_store.charge_team.return_value = True
+    monkeypatch.setattr(credentials, "_store", lambda request: credential_store)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-branchpoint")
+    monkeypatch.setenv("BRANCHPOINT_TEAM_EXTRACT_LIMIT", "5")
+
+    result = client.post("/github/ingestions", json={"repo_full_name": "acme/tienda", "use_branchpoint_key": True})
+
+    assert result.status_code == 202
+    assert keys == ["sk-branchpoint"]
+    credential_store.personal_chat_key.assert_not_called()
+    credential_store.charge_team.assert_called_once_with(user.id, "extract", 5, 1)
 
 
 def test_ingestion_of_another_branch_and_name(client, github):

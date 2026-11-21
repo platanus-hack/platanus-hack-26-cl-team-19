@@ -116,3 +116,15 @@ def test_chat_simulate_also_saves_a_report(store):
     assert "error" not in out, out
     saved = store.get_report(project.id, out["report_id"])
     assert saved["kind"] == "run" and saved["scenario"]["name"] == "pico_normal"
+
+
+def test_report_keeps_the_scenario_adjustments(client, project):
+    weights = {"POST /login/access-token": 5}
+    r = report(client, project, endpoint_weights=weights, slowdowns={"db": 2})
+    assert r["scenario"]["adjustments"]  # las frases de los ajustes (JAJ-131)
+    assert r["params"]["slowdowns"] == {"db": 2}
+    plain = report(client, project)
+    cmp = client.post(f"/projects/{project}/reports/compare", json={"a": plain["id"], "b": r["id"]}).json()
+    assert not cmp["same_scenario"]  # mismos req/s pero otros ajustes: no son comparables 1:1
+    md = client.get(f"/projects/{project}/reports/{r['id']}/markdown").text
+    assert "Ajustes del escenario" in md

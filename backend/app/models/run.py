@@ -215,6 +215,8 @@ class Run:
     traffic_profile: list[ProfileSegment] | None = None
     # JAJ-89: si quedaron requests sin respuesta al terminar (el motor siempre lo llena)
     saturation: Saturation | None = None
+    # JAJ-131: los reemplazos del escenario con que se simuló, una frase por cada uno; vacía sin ellos
+    overrides: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

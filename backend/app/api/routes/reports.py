@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
 from app.api.routes.projects import _project, _version, _with_scenario_rate, get_store
+from app.api.routes.runs import scenario_model
 from app.api.run_cache import ENGINE_VERSION, cached_run, run_to_json
 from app.api.schemas import RunParams
 from app.api.store import Project, ProjectStore, ReportSummary, Version
@@ -69,7 +70,8 @@ def simulate_and_report(
         params=params.model_dump(mode="json"),
         custom_rps=custom_rps,
         cost=estimate_cost(version.model),
-        failure=failure_cost(version.model, run),
+        # el costo de fallar con el negocio del escenario, como POST …/results (JAJ-131)
+        failure=failure_cost(scenario_model(version.model, params)[0], run),
         engine_version=ENGINE_VERSION,
     )
     store.save_report(project.id, report)

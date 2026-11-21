@@ -176,12 +176,14 @@ def llm_key(
     expected_source: ChatKeySource | None,
     purpose: Purpose = "chat",
     units: int = 1,
+    *,
+    use_branchpoint_key: bool = False,
 ) -> LlmKey:
     """Elige la key: header, key personal seleccionada o key de Branchpoint con cuota.
 
     Con la de Branchpoint descuenta ``units`` usos de la cuota de ``purpose`` (los descuenta todos o
     ninguno). Sin cuota: 429 ``team_chat_quota`` o ``team_extract_quota``."""
-    if override and override.strip():
+    if not use_branchpoint_key and override and override.strip():
         return LlmKey(override.strip(), "header")
     name = PROVIDER_NAMES[provider]
     header = "X-OpenAI-Api-Key" if provider == "openai" else "X-Anthropic-Api-Key"
@@ -193,8 +195,10 @@ def llm_key(
         )
     store = _store(request)
     try:
-        require_selected = provider not in _always_personal()
-        personal = store.personal_chat_key(user.id, provider, require_selected)
+        personal = None
+        if not use_branchpoint_key:
+            require_selected = provider not in _always_personal()
+            personal = store.personal_chat_key(user.id, provider, require_selected)
         source = "personal" if personal else "team"
         if expected_source and source != expected_source:
             raise ApiError(

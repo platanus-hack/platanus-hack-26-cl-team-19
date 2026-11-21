@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from app.models.architecture import value
+
 Origin = Literal["repo", "manual", "agente"]
 
 
@@ -76,13 +78,22 @@ class ProjectScenario:
     multiplier: float | None
     rps: float | None
     description: str | None = None
+    # JAJ-131: reemplazos que trae el escenario (mezcla de endpoints, dependencias más lentas, negocio)
+    endpoint_weights: dict[str, float] | None = None
+    slowdowns: dict[str, float] | None = None
+    business: dict[str, float] | None = None
+
+    def overrides(self) -> dict[str, Any]:
+        """Los reemplazos no vacíos, como se guardan en ``scenarios.overrides``."""
+        found = {"endpoint_weights": self.endpoint_weights, "slowdowns": self.slowdowns, "business": self.business}
+        return {k: v for k, v in found.items() if v}
 
     def rate_for(self, model: dict[str, Any]) -> float:
         """Las req/s del escenario para el modelo de una versión. ``ValueError`` si es un
         multiplicador y el modelo no trae ``traffic.peak_rps``."""
         if self.rps is not None:
             return self.rps
-        peak = ((model.get("traffic") or {}).get("peak_rps") or {}).get("value")
+        peak = value((model.get("traffic") or {}).get("peak_rps"))  # con procedencia o escalar (JAJ-101)
         if not peak or peak <= 0:
             raise ValueError(
                 f"El escenario '{self.name}' es ×{self.multiplier:g} el pico, pero el modelo no tiene "
@@ -153,8 +164,7 @@ def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
     """
     scenarios = []
     for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
-        multiplier = (sc.get("multiplier") or {}).get("value")
-        rps = (sc.get("rps") or {}).get("value")
+        multiplier, rps = value(sc.get("multiplier")), value(sc.get("rps"))  # con procedencia o escalar
         if multiplier is not None and multiplier > 0:
             scenarios.append(ProjectScenario(name, float(multiplier), None))
         elif rps is not None and rps > 0:

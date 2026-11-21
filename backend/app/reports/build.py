@@ -215,6 +215,8 @@ def build_report(
             "duration_s": run.duration_s,
             "arrivals": run.arrivals,
             "traffic_profile": run_dict.get("traffic_profile"),
+            # ajustes del escenario de esta corrida (mezcla de endpoints, dependencias lentas, negocio; JAJ-131)
+            "adjustments": list(run_dict.get("overrides") or []),
         },
         "engine_version": engine_version,
         "params": params,
@@ -307,6 +309,7 @@ def build_comparison(
         a["scenario"]["rps"] == b["scenario"]["rps"]
         and a["scenario"]["duration_s"] == b["scenario"]["duration_s"]
         and a["scenario"]["traffic_profile"] == b["scenario"]["traffic_profile"]
+        and a["scenario"].get("adjustments") == b["scenario"].get("adjustments")
     )
     warnings = []
     if not same:
