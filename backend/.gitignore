@@ -2,5 +2,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
-# salidas de app.cli --out
+*.egg-info/
+# salidas de app.cli --out y body de ejemplo para curl (README)
 run*.json
+req.json

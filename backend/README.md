@@ -1,13 +1,18 @@
 # Backend de Branchpoint
 
-Por ahora contiene el **motor de simulación** (JAJ-14). La API y la persistencia van a ir en las carpetas que ya están reservadas.
+Contiene el **motor de simulación** (JAJ-14) y la **API** que lo expone al editor (JAJ-49). La persistencia va a ir en `app/db`, que ya está reservada.
 
 ## Estructura
 
 ```
 backend/
-├── pyproject.toml           # dependencias (el motor solo usa la librería estándar) y pytest
+├── pyproject.toml           # dependencias (FastAPI y uvicorn para la API; el motor solo usa la librería estándar)
 ├── app/
+│   ├── api/                 # API HTTP (FastAPI)
+│   │   ├── main.py          #   arma la app: CORS, errores y rutas
+│   │   ├── schemas.py       #   lo que recibe POST /runs (RunRequest)
+│   │   ├── errors.py        #   formato de los errores ({"error": {"code", "message"}})
+│   │   └── routes/          #   una ruta por archivo: health.py, runs.py
 │   ├── models/              # estructuras de datos
 │   │   ├── architecture.py  #   entrada: el modelo branchpoint.model/v1 (JAJ-45) y load_model()
 │   │   └── run.py           #   salida: el Run (branchpoint.run/v1)
@@ -19,10 +24,11 @@ backend/
 │   └── cli.py               # correr una simulación desde la terminal
 └── tests/
     ├── fixtures/            # modelos de ejemplo (full-stack-fastapi-template, generado por JAJ-45)
-    └── engine/              # tests del kernel y del motor
+    ├── engine/              # tests del kernel y del motor
+    └── api/                 # tests de la API
 ```
 
-El flujo es: **modelo v1 (JSON)** → `load_model()` → `simulate()` → **Run**.
+El flujo es: **modelo v1 (JSON)** → `load_model()` → `simulate()` → **Run**. La API recibe el modelo en `POST /runs` y devuelve el `Run`.
 
 ## Cómo modela el sistema el motor
 
@@ -68,18 +74,67 @@ Son campos opcionales del modelo. `build_model.py` (JAJ-45) todavía no los gene
 
 ## Cómo usarlo
 
-No hace falta instalar Python: todo corre en Docker.
+Con Python 3.12 o más nuevo (en Linux, macOS o WSL), desde `backend/`:
 
 ```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
 # tests
-docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c "pip install -q pytest && python -m pytest -q"
+python -m pytest -q
 
 # simular CyberDay ×20 con el modelo de ejemplo (guarda el Run completo con --out)
-docker run --rm -v "$PWD:/w" -w /w python:3.14-slim \
-  python -m app.cli tests/fixtures/full-stack-fastapi-template.model.json --scenario cyberday --out run.json
+python -m app.cli tests/fixtures/full-stack-fastapi-template.model.json --scenario cyberday --out run.json
+
+# levantar la API en http://localhost:8000 (documentación interactiva en /docs)
+uvicorn app.api.main:app --reload
 ```
 
-En Windows con Git Bash, antepongan `MSYS_NO_PATHCONV=1` y usen `$(pwd -W)` en vez de `$PWD`.
+Sin instalar Python, con Docker (en Git Bash de Windows, antepongan `MSYS_NO_PATHCONV=1` y usen `$(pwd -W)` en vez de `$PWD`):
+
+```bash
+docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[dev]" && python -m pytest -q'
+```
+
+### API
+
+| Método | Ruta | Qué hace |
+| -- | -- | -- |
+| `GET` | `/health` | Revisa que la API está arriba. |
+| `POST` | `/runs` | Simula un modelo y devuelve el `Run` (`branchpoint.run/v1`). No guarda nada (eso es JAJ-17). |
+
+Body de `POST /runs`. Solo `model` es obligatorio:
+
+```jsonc
+{
+  "model": { "schema": "branchpoint.model/v1", ... },  // el modelo completo (salida de build_model.py)
+  "scenario": "cyberday",       // un escenario de traffic.scenarios
+  "rps": null,                  // reemplaza las req/s del escenario; con rps, el escenario es solo un nombre
+  "seed": 0,                    // misma semilla = mismo resultado
+  "duration_s": 60,             // segundos simulados (máximo 3600)
+  "arrivals": "poisson",        // o "uniform" (tasa constante, como k6)
+  "client_timeout_s": 30,       // null = sin timeout
+  "cache_hit_ratio": null       // reemplaza la tasa de aciertos de las cachés con on_miss
+}
+```
+
+```bash
+# ejemplo: armar el body con el modelo de ejemplo y simular CyberDay
+python -c 'import json; m = json.load(open("tests/fixtures/full-stack-fastapi-template.model.json")); print(json.dumps({"model": m, "scenario": "cyberday"}))' > req.json
+curl -s -H "Content-Type: application/json" --data @req.json localhost:8000/runs
+```
+
+Los errores responden 422 con `{"error": {"code", "message", ...}}`. El `message` está en español y está pensado para mostrarlo tal cual:
+
+| `code` | Cuándo |
+| -- | -- |
+| `invalid_model` | El modelo no es `branchpoint.model/v1` o le falta un campo. |
+| `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
+| `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
+| `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo). |
+
+- **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
+- **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.
 
 Desde Python:
 
