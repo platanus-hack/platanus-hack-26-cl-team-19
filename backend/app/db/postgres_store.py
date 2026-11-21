@@ -39,6 +39,10 @@ _PROJECT_WITH_REPO = (
 )
 
 
+_USAGE_COLUMNS = {"chat": "messages", "extract": "extractions"}  # nombres fijos: van en el SQL
+_NO_USAGE = {"messages": 0, "extractions": 0}
+
+
 def _iso(ts: datetime) -> str:
     return ts.astimezone(UTC).isoformat(timespec="seconds")
 
@@ -121,12 +125,14 @@ class PostgresProjectStore:
             ).fetchall()
         return [row["provider"] for row in rows]
 
-    def personal_chat_providers(self, owner: str) -> list[str]:
+    def personal_chat_providers(self, owner: str, always: tuple[str, ...] = ()) -> list[str]:
+        """Proveedores donde la key personal está seleccionada. Los de ``always`` cuentan con solo estar
+        guardados: es el caso de OpenAI cuando Branchpoint no tiene key propia de OpenAI."""
         with self._conn() as conn:
             rows = conn.execute(
                 """select provider from llm_credentials
-                   where owner_id = %s and (provider = 'openai' or use_personal) and revoked_at is null""",
-                (owner,),
+                   where owner_id = %s and (provider = any(%s) or use_personal) and revoked_at is null""",
+                (owner, list(always)),
             ).fetchall()
         return [row["provider"] for row in rows]
 
@@ -138,23 +144,32 @@ class PostgresProjectStore:
             )
             return cursor.rowcount > 0 or not personal
 
-    def team_chat_used(self, owner: str) -> int:
+    def team_used(self, owner: str) -> dict[str, int]:
+        """Usos de hoy (UTC) de la key de Branchpoint: mensajes de chat y repos analizados."""
         with self._conn() as conn:
             row = conn.execute(
-                "select messages from team_chat_usage where owner_id = %s and usage_date = (now() at time zone 'UTC')::date",
+                """select messages, extractions from team_chat_usage
+                   where owner_id = %s and usage_date = (now() at time zone 'UTC')::date""",
                 (owner,),
             ).fetchone()
-        return row["messages"] if row else 0
+        return {"messages": row["messages"], "extractions": row["extractions"]} if row else _NO_USAGE.copy()
 
-    def charge_team_chat(self, owner: str, limit: int) -> bool:
+    def charge_team(self, owner: str, purpose: str, limit: int, n: int = 1) -> bool:
+        """Suma ``n`` usos de hoy a ``purpose`` (``chat`` o ``extract``) si no pasan de ``limit``.
+
+        Descuenta los ``n`` o nada, en una sola sentencia: dos requests a la vez no pasan el límite."""
+        column = _USAGE_COLUMNS[purpose]
+        if n < 1:
+            raise ValueError("n tiene que ser al menos 1")
         with self._conn() as conn:
             row = conn.execute(
-                """insert into team_chat_usage (owner_id, usage_date, messages)
-                   values (%s, (now() at time zone 'UTC')::date, 1)
-                   on conflict (owner_id, usage_date) do update
-                   set messages = team_chat_usage.messages + 1 where team_chat_usage.messages < %s
-                   returning messages""",
-                (owner, limit),
+                f"""insert into team_chat_usage (owner_id, usage_date, {column})
+                    select %s, (now() at time zone 'UTC')::date, %s where %s <= %s
+                    on conflict (owner_id, usage_date) do update
+                    set {column} = team_chat_usage.{column} + excluded.{column}
+                    where team_chat_usage.{column} + excluded.{column} <= %s
+                    returning {column}""",
+                (owner, n, n, limit, limit),
             ).fetchone()
         return row is not None
 
@@ -162,24 +177,28 @@ class PostgresProjectStore:
         with self._conn() as conn:
             secret = conn.execute("select vault.create_secret(%s) as id", (key,)).fetchone()
             conn.execute(
-                """insert into llm_credentials (owner_id, provider, secret_id)
-                   values (%s, %s, %s)
+                """insert into llm_credentials (owner_id, provider, secret_id, use_personal)
+                   values (%s, %s, %s, %s)
                    on conflict (owner_id, provider) do update
-                   set secret_id = excluded.secret_id, revoked_at = null, key_hint = null""",
-                (owner, provider, secret["id"]),
+                   set secret_id = excluded.secret_id, revoked_at = null, key_hint = null,
+                       use_personal = llm_credentials.use_personal or excluded.use_personal""",
+                # OpenAI: la key personal queda seleccionada al guardarla (el editor la usa enseguida)
+                (owner, provider, secret["id"], provider == "openai"),
             )
 
     def delete_credential(self, owner: str, provider: str) -> None:
         with self._conn() as conn:
             conn.execute("delete from llm_credentials where owner_id = %s and provider = %s", (owner, provider))
 
-    def personal_chat_key(self, owner: str, provider: str) -> str | None:
+    def personal_chat_key(self, owner: str, provider: str, require_selected: bool = True) -> str | None:
+        """La key personal guardada. Con ``require_selected``, solo si el usuario la eligió en Configuración."""
         with self._conn() as conn:
             row = conn.execute(
                 """select s.decrypted_secret from llm_credentials c
                    join vault.decrypted_secrets s on s.id = c.secret_id
-                   where c.owner_id = %s and c.provider = %s and (c.provider = 'openai' or c.use_personal) and c.revoked_at is null""",
-                (owner, provider),
+                   where c.owner_id = %s and c.provider = %s and (not %s or c.use_personal)
+                     and c.revoked_at is null""",
+                (owner, provider, require_selected),
             ).fetchone()
         return row["decrypted_secret"] if row else None
 
