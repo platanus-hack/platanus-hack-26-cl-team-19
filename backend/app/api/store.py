@@ -37,6 +37,10 @@ class Project:
     created_at: str
     versions: list[Version] = field(default_factory=list)
     owner: str | None = None  # auth.users.id de quien lo creó; None sin login (JAJ-78)
+    # el repo del que salió la v1 (JAJ-92): "owner/nombre" y la rama analizada. None si salió de un
+    # ejemplo o de un modelo subido a mano
+    repo_full_name: str | None = None
+    branch: str | None = None
 
     def version(self, number: int) -> Version | None:
         return self.versions[number - 1] if 1 <= number <= len(self.versions) else None
@@ -256,7 +260,15 @@ class InMemoryProjectStore:
         owner: str | None = None,
         source: RepoSource | None = None,
     ) -> Project:
-        project = Project(id=uuid.uuid4().hex[:12], name=name, sample=sample, created_at=_now(), owner=owner)
+        project = Project(
+            id=uuid.uuid4().hex[:12],
+            name=name,
+            sample=sample,
+            created_at=_now(),
+            owner=owner,
+            repo_full_name=source.repo_full_name if source else None,
+            branch=source.branch if source else None,
+        )
         note = source.note if source else "Extraída del repo"
         project.versions.append(Version(1, "repo", None, note, project.created_at, copy.deepcopy(model)))
         if source:

@@ -30,6 +30,13 @@ from app.api.store import (
 
 _SUMMARY = "number, origin::text as origin, parent_number, note, created_at"
 _PROJECT = "id, name, sample_id, created_at, owner_id"
+# el proyecto con su repo (JAJ-92): repo_connections tiene el nombre, projects la rama analizada.
+# left join: los proyectos de un ejemplo no tienen repo. La conexión es del mismo dueño (la crea la
+# ingesta con el owner del proyecto), así que el filtro por p.owner_id basta para aislar.
+_PROJECT_WITH_REPO = (
+    "p.id, p.name, p.sample_id, p.created_at, p.owner_id, rc.repo_full_name, p.branch"
+    " from projects p left join repo_connections rc on rc.id = p.repo_connection_id"
+)
 
 
 def _iso(ts: datetime) -> str:
@@ -63,6 +70,8 @@ def _project(row: dict[str, Any], versions: list[Version]) -> Project:
         created_at=_iso(row["created_at"]),
         versions=versions,
         owner=str(row["owner_id"]) if row["owner_id"] is not None else None,
+        repo_full_name=row.get("repo_full_name"),
+        branch=row.get("branch"),
     )
 
 
@@ -144,7 +153,9 @@ class PostgresProjectStore:
                     "insert into scenarios (project_id, name, multiplier, rps) values (%s, %s, %s, %s)",
                     [(row["id"], s.name, s.multiplier, s.rps) for s in scenarios_from_model(model)],
                 )
-        return _project(row, [_version(v1)])
+        # el returning no trae el repo (está en repo_connections): sale del source, igual que get y list
+        repo = {"repo_full_name": source.repo_full_name, "branch": source.branch} if source else {}
+        return _project({**row, **repo}, [_version(v1)])
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
         pid = _uuid(project_id)
@@ -153,7 +164,7 @@ class PostgresProjectStore:
         with self._conn() as conn:
             # el proyecto de otro usuario no existe para este (la ruta responde 404, no 403)
             row = conn.execute(
-                f"select {_PROJECT} from projects where id = %s and owner_id is not distinct from %s::uuid",
+                f"select {_PROJECT_WITH_REPO} where p.id = %s and p.owner_id is not distinct from %s::uuid",
                 (pid, owner),
             ).fetchone()
             if row is None:
@@ -173,8 +184,8 @@ class PostgresProjectStore:
     def list(self, owner: str | None = None) -> list[Project]:
         with self._conn() as conn:
             rows = conn.execute(
-                f"select {_PROJECT} from projects where owner_id is not distinct from %s::uuid"
-                " order by created_at desc",
+                f"select {_PROJECT_WITH_REPO} where p.owner_id is not distinct from %s::uuid"
+                " order by p.created_at desc",
                 (owner,),
             ).fetchall()
             versions = self._summaries(conn, [r["id"] for r in rows])
