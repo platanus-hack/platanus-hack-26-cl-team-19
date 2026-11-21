@@ -1,7 +1,9 @@
 // Estado de las CLIs que el usuario elige conectar al MCP de Branchpoint (JAJ-81). Por ahora es
 // un adaptador simulado: el token y la verificación son falsos hasta que el backend exponga el
 // endpoint MCP y el emparejamiento por token (JAJ-67). Cuando exista, generate() pide el token y
-// check() consulta si ya llegó el primer tools/list.
+// check() consulta si ya llegó el primer tools/list. Lo elegido y lo conectado se guarda en el
+// navegador por usuario, para que el onboarding, Configuración y el editor vean lo mismo; el token
+// no se guarda porque solo se muestra una vez.
 import {
   cliProviders,
   type CliConnectionState,
@@ -21,6 +23,16 @@ function fakeToken() {
   return `bp_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
+type SavedEntry = { selected: boolean; state: CliConnectionState };
+
+function readSaved(key: string): Partial<PerProvider<SavedEntry>> {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
 export function useCliConnections() {
   const endpoint = `${useRuntimeConfig().public.apiBase.trim() || "https://api.branchpoint.dev"}/mcp`;
   // parte sin ninguna elegida para que la elección sea explícita
@@ -28,6 +40,38 @@ export function useCliConnections() {
   const states = reactive(perProvider<CliConnectionState>("missing"));
   const tokens = reactive(perProvider(""));
   const checking = reactive(perProvider(false));
+  const connected = computed(() =>
+    cliProviders.filter(
+      (provider) => selected[provider.id] && states[provider.id] === "verified",
+    ),
+  );
+
+  const auth = useSupabaseAuth();
+  let storageKey = "";
+  onMounted(async () => {
+    const user = await auth.getSessionUser();
+    storageKey = `branchpoint:cli:${user?.id ?? "demo"}`;
+    const saved = readSaved(storageKey);
+    for (const provider of cliProviders) {
+      const entry = saved[provider.id];
+      if (!entry) continue;
+      selected[provider.id] = entry.selected;
+      // sin el token, un emparejamiento a medias vuelve a empezar
+      states[provider.id] = entry.state === "verified" ? "verified" : "missing";
+    }
+    watch([selected, states], save, { deep: true });
+  });
+
+  function save() {
+    if (!storageKey) return;
+    const entries = Object.fromEntries(
+      cliProviders.map((provider) => [
+        provider.id,
+        { selected: selected[provider.id], state: states[provider.id] },
+      ]),
+    );
+    localStorage.setItem(storageKey, JSON.stringify(entries));
+  }
 
   function setState(id: CliProviderId, state: CliConnectionState) {
     if (state === "missing") tokens[id] = "";
@@ -57,6 +101,7 @@ export function useCliConnections() {
     states,
     tokens,
     checking,
+    connected,
     setState,
     generate,
     check,

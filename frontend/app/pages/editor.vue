@@ -2,6 +2,7 @@
 import { Loader2, Play } from "@lucide/vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
+import EditorCliPanel from "@/components/editor/EditorCliPanel.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
@@ -12,7 +13,7 @@ import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
-import type { EditorSection } from "@/components/editor/types";
+import type { ChatMessage, EditorSection } from "@/components/editor/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -184,6 +185,69 @@ async function createExample(sample: string) {
 function changeView(value: unknown) {
   if (value === "compare") showCompare();
   else if (value === "editor") view.value = "editor";
+}
+
+// Agente en la CLI del usuario (JAJ-81). «Probar conexión» corre una simulación real como la
+// pediría la CLI, para ver la actividad en el panel; el MCP del backend aún no existe (JAJ-67).
+const cli = useCliConnections();
+const activity = ref<ChatMessage[]>([]);
+const testing = ref(false);
+const agentPrompt = computed(() => {
+  const label =
+    scenarios.value.find((entry) => entry.id === scenario.value)?.label ??
+    scenarios.value[0]?.label ??
+    "el escenario principal";
+  return `Usa branchpoint para simular ${label} en ${project.value?.name ?? "este proyecto"} y propón un cambio.`;
+});
+
+function updateTool(
+  id: string,
+  patch: Partial<Extract<ChatMessage, { role: "tool" }>>,
+) {
+  activity.value = activity.value.map((message) =>
+    message.id === id && message.role === "tool"
+      ? { ...message, ...patch }
+      : message,
+  );
+}
+
+async function testConnection() {
+  const provider = cli.connected.value[0];
+  if (!provider || testing.value) return;
+  testing.value = true;
+  if (!scenario.value) scenario.value = scenarios.value[0]?.id ?? "";
+  const stamp = Date.now();
+  activity.value = [
+    ...activity.value,
+    {
+      id: `${stamp}-simulate`,
+      role: "tool",
+      name: "simulate",
+      input: `scenario="${scenario.value}"`,
+      status: "running",
+    },
+  ];
+  await simulate();
+  const result = run.value;
+  const p95 = result?.series.at(-1)?.latency.p95_ms;
+  updateTool(`${stamp}-simulate`, {
+    status: "done",
+    output: result
+      ? `p95 ${p95 === null || p95 === undefined ? "sin dato" : `${Math.round(p95)} ms`}`
+      : "La simulación falló.",
+    detail: result ? toBottleneck(result)?.description : undefined,
+  });
+  activity.value = [
+    ...activity.value,
+    {
+      id: `${stamp}-reply`,
+      role: "agent",
+      text: result
+        ? `Prueba de ${provider.name}: la corrida llegó al editor. Cuando tu CLI llame a Branchpoint, sus simulaciones y propuestas aparecen aquí igual.`
+        : `La prueba de ${provider.name} no pudo simular. Revisa el error arriba y vuelve a intentarlo.`,
+    },
+  ];
+  testing.value = false;
 }
 
 async function saveVersion() {
@@ -422,6 +486,17 @@ async function saveVersion() {
         @click="openVersion(version?.number ?? 1)"
         >Volver a cargar diagrama</Button
       >
+    </template>
+
+    <template v-if="project" #agent>
+      <EditorCliPanel
+        :connections="cli"
+        :activity="activity"
+        :prompt="agentPrompt"
+        :testing="testing"
+        @test="testConnection"
+        @clear="activity = []"
+      />
     </template>
 
     <template #metrics>
