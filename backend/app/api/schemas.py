@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.costs import CostDelta, CostEstimate
 from app.models.compare import RunDelta
 from app.models.run import Run
 
@@ -127,9 +128,13 @@ class ProjectDetail(BaseModel):
     versions: list[VersionSummary]
 
 
+Region = Literal["us-east-1", "sa-east-1"]  # regiones con precios de AWS en el snapshot de JAJ-11
+
+
 class CompareRequest(RunParams):
     a: int = Field(ge=1, description="Versión base (ej. 1).")
     b: int = Field(ge=1, description="Versión a comparar contra la base.")
+    region: Region = Field("us-east-1", description="Región de AWS para los costos (JAJ-72).")
 
 
 class CompareResponse(BaseModel):
@@ -138,3 +143,14 @@ class CompareResponse(BaseModel):
     run_a: Run
     run_b: Run
     delta: RunDelta
+    # JAJ-72: costo mensual de cada versión y la diferencia, por componente
+    cost_a: CostEstimate
+    cost_b: CostEstimate
+    cost_delta: CostDelta
+
+
+class CostRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: dict[str, Any] = Field(description="Modelo branchpoint.model/v1 completo.")
+    region: Region = Field("us-east-1", description="Región de AWS donde corre la infraestructura.")

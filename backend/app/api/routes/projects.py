@@ -16,11 +16,13 @@ from app.api.schemas import (
     CreateVersionRequest,
     OpsVersionDetail,
     ProjectDetail,
+    Region,
     RunParams,
     VersionDetail,
     VersionSummary,
 )
 from app.api.store import Project, ProjectStore, Version
+from app.costs import CostEstimate, cost_delta, estimate_cost
 from app.models.compare import run_delta
 from app.models.run import Run
 
@@ -138,8 +140,27 @@ def run_version(project_id: str, number: int, req: RunParams, store: ProjectStor
 def compare(project_id: str, req: CompareRequest, store: ProjectStore = Depends(get_store)) -> CompareResponse:
     project = _project(store, project_id)
     va, vb = _version(project, req.a), _version(project, req.b)
-    params = RunParams(**req.model_dump(exclude={"a", "b"}))
+    params = RunParams(**req.model_dump(exclude={"a", "b", "region"}))
     run_a, run_b = run_model(va.model, params), run_model(vb.model, params)
+    cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
     return CompareResponse(
-        a=_summary(va), b=_summary(vb), run_a=run_a, run_b=run_b, delta=run_delta(run_a, run_b, va.model, vb.model)
+        a=_summary(va),
+        b=_summary(vb),
+        run_a=run_a,
+        run_b=run_b,
+        delta=run_delta(run_a, run_b, va.model, vb.model),
+        cost_a=cost_a,
+        cost_b=cost_b,
+        cost_delta=cost_delta(cost_a, cost_b),
     )
+
+
+@router.get(
+    "/{project_id}/versions/{number}/costs",
+    response_model=CostEstimate,
+    summary="Costo mensual de una versión, por componente",
+)
+def version_costs(
+    project_id: str, number: int, region: Region = "us-east-1", store: ProjectStore = Depends(get_store)
+) -> CostEstimate:
+    return estimate_cost(_version(_project(store, project_id), number).model, region)
