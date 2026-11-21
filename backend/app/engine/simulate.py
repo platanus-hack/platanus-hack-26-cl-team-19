@@ -20,6 +20,13 @@ Cada request sigue los pasos de su endpoint en orden. Toma una conexión en la p
 la retiene hasta el final (una sesión por request, como el template de FastAPI). Con vCPU
 fraccionarios (ej. 0,5 en Supabase Micro) se simula 1 núcleo más lento.
 
+De laptop a nube (JAJ-48): los tiempos del modelo son de 1 núcleo del laptop de calibración
+(JAJ-46). En la nube, la CPU de la API y cada consulta de la DB tardan ``cpu_core_factor`` veces
+más (ej. ×1,95 en Graviton2), así que la conexión también se retiene más tiempo. Una DB con
+créditos de CPU (``db.t4g.*``) se simula con sus vCPU sostenidos (``cpu_credits="sustained"``, la
+base de créditos con carga sostenida) o con todos sus vCPU (``"burst"``: solo mientras duren los
+créditos o pagando el exceso). Los trabajos de las colas usan sus tiempos tal cual.
+
 Validado en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Cerca o sobre la capacidad el modelo es optimista
 (JAJ-44), así que en esos casos el Run lo advierte.
 """
@@ -49,6 +56,7 @@ from app.models.architecture import (
 from app.models.run import (
     Bottleneck,
     CacheStats,
+    CpuAdjustment,
     EndpointStats,
     QueueStats,
     ResourceStats,
@@ -65,6 +73,7 @@ RESOURCE_LABELS = {
 SATURATION_WARNING = 0.9  # JAJ-44: sobre esto, latencia y errores se muestran como piso
 BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
+CPU_CREDITS = ("sustained", "burst")
 QUEUE_PREFIX = "queue:"
 
 
@@ -96,15 +105,19 @@ def simulate(
     arrivals: str = "poisson",
     client_timeout_s: float | None = 30.0,
     cache_hit_ratio: float | None = None,
+    cpu_credits: str = "sustained",
 ) -> Run:
     """Simula ``duration_s`` segundos de tráfico y devuelve el ``Run``.
 
     ``rps`` reemplaza la tasa del escenario. ``arrivals``: ``poisson`` (usuarios reales) o
     ``uniform`` (como k6 con tasa constante, útil para comparar con mediciones).
     ``cache_hit_ratio`` reemplaza la tasa de aciertos de todas las cachés con ``on_miss``.
+    ``cpu_credits``: en una DB con créditos de CPU, ``sustained`` (vCPU sostenidos) o ``burst``.
     """
     if arrivals not in ARRIVALS:
         raise ValueError(f"arrivals debe ser uno de {ARRIVALS}")
+    if cpu_credits not in CPU_CREDITS:
+        raise ValueError(f"cpu_credits debe ser uno de {CPU_CREDITS}")
     if cache_hit_ratio is not None and not 0.0 <= cache_hit_ratio <= 1.0:
         raise ValueError("cache_hit_ratio debe estar entre 0 y 1")
     rate = rps if rps is not None else model.scenario(scenario).rps
@@ -114,8 +127,11 @@ def simulate(
     sim = Sim(seed)
     warnings = list(model.warnings)
 
+    cpu = _cpu_adjustment(model, cpu_credits, warnings)
     api_cpu, api_scale = _cores(sim, "api_cpu", model.api.cores)
-    db_cpu, db_scale = _cores(sim, "db_cpu", model.db.vcpu)
+    db_cpu, db_scale = _cores(sim, "db_cpu", cpu.db_vcpu_effective)
+    api_scale *= cpu.api_core_factor
+    db_scale *= cpu.db_core_factor
     threads = Resource(sim, "api_threads", model.api.threads)
     pool_capacity = model.app_connections
     if model.db.max_connections and pool_capacity > model.db.max_connections:
@@ -274,6 +290,51 @@ def simulate(
         wall_start,
         cache_stats,
         queue_stats,
+        cpu,
+    )
+
+
+def _cpu_adjustment(model: ArchitectureModel, cpu_credits: str, warnings: list[str]) -> CpuAdjustment:
+    """Factor laptop → nube de la API y la DB, y vCPU con que se simula la DB (JAJ-48).
+
+    Deja en ``warnings`` qué se ajustó, para que el usuario sepa que la capacidad es la de la nube.
+    """
+    api, db = model.api, model.db
+    adjusted = [
+        f"{name} ×{factor:g}" + (f" ({processor})" if processor else "")
+        for name, factor, processor in (("API", api.core_factor, api.processor), ("DB", db.core_factor, db.processor))
+        if factor != 1.0
+    ]
+    if adjusted:
+        warnings.append(
+            "Capacidad de la nube: los tiempos de CPU del modelo son de 1 núcleo del laptop de calibración "
+            f"y se multiplican por el factor de cada procesador: {', '.join(adjusted)} (JAJ-46)."
+        )
+
+    db_vcpu, credits = db.vcpu, None
+    if db.sustained_vcpu is not None:
+        credits = cpu_credits
+        plan = f"La DB ({db.plan})" if db.plan else "La DB"
+        if cpu_credits == "sustained":
+            db_vcpu = db.sustained_vcpu
+            warnings.append(
+                f"{plan} tiene créditos de CPU: se simula con {db.sustained_vcpu:g} vCPU sostenidos de {db.vcpu:g} "
+                f"(la base de créditos con carga sostenida). Con cpu_credits=burst se simulan los {db.vcpu:g} vCPU, "
+                "que solo se mantienen mientras duren los créditos o pagando el exceso."
+            )
+        else:
+            warnings.append(
+                f"{plan} tiene créditos de CPU: se simula con sus {db.vcpu:g} vCPU completos (burst). Con carga "
+                f"sostenida eso solo dura mientras haya créditos o pagando el exceso; la base es {db.sustained_vcpu:g} vCPU."
+            )
+    return CpuAdjustment(
+        api_core_factor=api.core_factor,
+        api_processor=api.processor,
+        db_core_factor=db.core_factor,
+        db_processor=db.processor,
+        db_vcpu=db.vcpu,
+        db_vcpu_effective=db_vcpu,
+        cpu_credits=credits,
     )
 
 
@@ -299,6 +360,7 @@ def _build_run(
     wall_start: float,
     cache: CacheStats,
     queues: list[QueueStats],
+    cpu: CpuAdjustment,
 ) -> Run:
     resource_stats = [
         ResourceStats(
@@ -352,6 +414,7 @@ def _build_run(
         ],
         cache=cache,
         queues=queues,
+        cpu=cpu,
         bottleneck=_bottleneck(resource_stats),
         warnings=warnings,
         series=[

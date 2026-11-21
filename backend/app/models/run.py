@@ -81,6 +81,24 @@ class QueueStats:
 
 
 @dataclass
+class CpuAdjustment:
+    """Cómo se pasaron los tiempos del laptop de calibración a la nube (JAJ-48).
+
+    Los tiempos de CPU del modelo son de 1 núcleo del laptop (JAJ-46). En la nube, la CPU de la API
+    y cada consulta tardan ``*_core_factor`` veces más. ``db_vcpu_effective`` son los vCPU con que
+    se simuló la DB: los sostenidos si tiene créditos de CPU y ``cpu_credits`` es ``sustained``.
+    """
+
+    api_core_factor: float
+    api_processor: str | None
+    db_core_factor: float
+    db_processor: str | None
+    db_vcpu: float  # vCPU del plan
+    db_vcpu_effective: float  # vCPU simulados
+    cpu_credits: str | None  # sustained | burst; None si la DB no tiene créditos de CPU
+
+
+@dataclass
 class Bottleneck:
     resource: str | None
     utilization: float
@@ -106,6 +124,7 @@ class Run:
     endpoints: list[EndpointStats]
     cache: CacheStats
     queues: list[QueueStats]
+    cpu: CpuAdjustment
     bottleneck: Bottleneck
     warnings: list[str]
     series: list[SecondSample]

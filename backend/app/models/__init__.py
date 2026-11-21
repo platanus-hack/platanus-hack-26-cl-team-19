@@ -13,6 +13,7 @@ from app.models.architecture import (
 from app.models.run import (
     Bottleneck,
     CacheStats,
+    CpuAdjustment,
     EndpointStats,
     LatencyStats,
     QueueStats,
@@ -26,6 +27,7 @@ __all__ = [
     "ArchitectureModel",
     "Bottleneck",
     "CacheStats",
+    "CpuAdjustment",
     "DbDeployment",
     "Endpoint",
     "EndpointStats",

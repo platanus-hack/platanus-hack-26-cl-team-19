@@ -72,6 +72,17 @@ def test_rps_override_and_options(client, raw):
     assert body["bottleneck"]["resource"] is None
 
 
+def test_cpu_credits_reaches_the_engine(client):
+    """realworld usa db.t4g.medium: con burst se simula con sus 2 vCPU y no con los 0,4 sostenidos (JAJ-48)."""
+    from app.samples import load_sample
+
+    model = load_sample("fastapi-realworld-example-app")
+    sustained = client.post("/runs", json={"model": model, "duration_s": 5}).json()
+    burst = client.post("/runs", json={"model": model, "duration_s": 5, "cpu_credits": "burst"}).json()
+    assert sustained["cpu"]["db_vcpu_effective"] == 0.4 and sustained["cpu"]["cpu_credits"] == "sustained"
+    assert burst["cpu"]["db_vcpu_effective"] == 2 and burst["cpu"]["cpu_credits"] == "burst"
+
+
 def test_unknown_scenario(client, raw):
     r = client.post("/runs", json={"model": raw, "scenario": "black_friday"})
     assert r.status_code == 422
@@ -111,6 +122,7 @@ def test_missing_field(client, raw):
         ({"rps": -1}, "rps"),
         ({"cache_hit_ratio": 1.5}, "cache_hit_ratio"),
         ({"arrivals": "burst"}, "arrivals"),
+        ({"cpu_credits": "unlimited"}, "cpu_credits"),
         ({"otro": 1}, "otro"),
     ],
 )

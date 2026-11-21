@@ -27,7 +27,7 @@ backend/
 │   ├── db/                  # modelo de datos persistente (JAJ-55): README.md y schema.sql
 │   └── cli.py               # correr una simulación desde la terminal
 └── tests/
-    ├── fixtures/            # modelos de ejemplo (full-stack-fastapi-template, generado por JAJ-45)
+    ├── fixtures/            # versión fija del modelo del template (anterior a JAJ-47) para los tests del motor
     ├── engine/              # tests del kernel y del motor
     └── api/                 # tests de la API
 ```
@@ -74,6 +74,28 @@ Son campos opcionales del modelo. `build_model.py` (JAJ-45) todavía no los gene
 - Si la cola está en su `max_length`, encolar falla y la request termina con error `queue_full`. Sin `max_length`, la cola crece sin límite.
 - El `Run` trae `cache` (aciertos y fallos) y `queues` (encolados, procesados, rechazados, cola al final y latencia de los trabajos).
 
+### De laptop a nube (JAJ-48)
+
+Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) se midieron en 1 núcleo del laptop de calibración (JAJ-46). Un vCPU de la nube es más lento, así que el motor los ajusta con dos campos del modelo, que genera `build_model.py` desde JAJ-47:
+
+| Campo del modelo | Qué hace el motor | Ejemplo |
+| -- | -- | -- |
+| `deployment.api.cpu_core_factor` | Multiplica la CPU base y los pasos de CPU de cada request | Fargate ARM (Graviton2): ×1,95 |
+| `deployment.db.cpu_core_factor` | Multiplica el tiempo de cada consulta. La conexión también se retiene ese tiempo extra | Supabase y `db.t4g.*` (Graviton2): ×1,95 |
+| `deployment.db.cpu_credits.sustained_vcpu` | En instancias con créditos de CPU, simula la DB con esos vCPU | `db.t4g.medium`: 2 vCPU, base de 20 % → 0,4 vCPU |
+
+- **La capacidad baja en el factor:** con factor 1,55, el sistema satura a 1/1,55 de las req/s que aguantaba en el laptop.
+- **Créditos de CPU:** con `cpu_credits` (`--cpu-credits` en el CLI, o el campo del body de `POST /runs`) se elige el caso.
+  - `sustained`, el valor por defecto, usa la base de créditos. Es lo que aguanta la instancia con carga sostenida, como un CyberDay de horas.
+  - `burst` usa todos los vCPU. Solo se mantiene mientras duren los créditos, o pagando el exceso.
+- **Sin estos campos,** los tiempos se usan tal cual (factor 1), como antes de JAJ-48.
+- **Los trabajos de las colas** usan sus tiempos sin ajustar. El modelo todavía no dice en qué procesador corren.
+- **El `Run` lo informa:** trae `cpu` (factores, procesadores, vCPU de la DB del plan y los simulados, y el modo de créditos), y una advertencia en `warnings` que dice qué se ajustó.
+
+**Validación del ajuste** (`tests/engine/test_cloud_factor.py`):
+- **Cuentas a mano:** el uso de CPU sube exactamente en el factor, y el punto de saturación baja en el factor.
+- **Contra los `checks` de `build_model.py`, que ya aplican el factor y la base de créditos:** en los dos modelos de ejemplo, el motor da el mismo uso de CPU (±5 %) en los escenarios bajo saturación, y el mismo cuello de botella en CyberDay.
+
 **Validación:** el modelo se validó contra un sistema real en JAJ-9, JAJ-43, JAJ-42 y JAJ-44. Acierta la saturación con 0–11 % de error. Cerca o sobre la capacidad es optimista, así que el `Run` lo advierte cuando un recurso pasa el 90 %. La caché reproduce la prueba de JAJ-44: con 50 % de aciertos, el p95 queda entre −8 % y +6 % de lo medido hasta el 89 % de uso del pool. Al 99 % el motor da el doble (es pesimista ahí) (`tests/engine/test_cache_queue.py`).
 
 ## Cómo usarlo
@@ -88,7 +110,10 @@ pip install -e ".[dev]"
 python -m pytest -q
 
 # simular CyberDay ×20 con el modelo de ejemplo (guarda el Run completo con --out)
-python -m app.cli tests/fixtures/full-stack-fastapi-template.model.json --scenario cyberday --out run.json
+python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario cyberday --out run.json
+
+# la DB de realworld es un db.t4g.medium: comparar con sus vCPU sostenidos (por defecto) y en burst
+python -m app.cli app/samples/fastapi-realworld-example-app.model.json --scenario pico_normal --cpu-credits burst
 
 # levantar la API en http://localhost:8000 (documentación interactiva en /docs)
 uvicorn app.api.main:app --reload
@@ -137,7 +162,8 @@ Body de `POST /runs`. Solo `model` es obligatorio:
   "duration_s": 60,             // segundos simulados (máximo 3600)
   "arrivals": "poisson",        // o "uniform" (tasa constante, como k6)
   "client_timeout_s": 30,       // null = sin timeout
-  "cache_hit_ratio": null       // reemplaza la tasa de aciertos de las cachés con on_miss
+  "cache_hit_ratio": null,      // reemplaza la tasa de aciertos de las cachés con on_miss
+  "cpu_credits": "sustained"    // DB con créditos de CPU (db.t4g.*): "sustained" (vCPU sostenidos) o "burst" (todos)
 }
 ```
 
