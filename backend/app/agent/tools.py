@@ -335,7 +335,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "compare": "Simula dos versiones con el mismo escenario y semilla. Devuelve el delta de p95, errores y costo "
     "mensual (sin los componentes de delta.usd_month_missing, que no tienen precio en alguna versión), las ventas "
     "en juego y si cada una cumple las metas (meets_all puede ser null: no evaluable).",
-    "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada.",
+    "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada. Si missing no "
+    "está vacío, la API o la DB no tienen precio (en local o sin precios) y el total no las incluye: dilo, "
+    "citando el primer aviso de warnings, y no presentes el total como el costo completo.",
     "ops_schema": "JSON Schema de las operaciones que acepta propose_version.",
     "propose_version": "Aplica operaciones de arquitectura (ops_schema) a una versión y guarda el resultado como "
     "versión nueva con origen agente. No simula: después usa compare.",

@@ -64,9 +64,12 @@ def test_local_replicas_do_not_change_cost_and_summary_says_why(template):
 
 def test_fargate_replicas_cost_more(template):
     """Criterio 2: con provider fargate, 5 réplicas cuestan más que 1."""
-    delta = cost_delta(estimate_cost(with_api(template, replicas=1)), estimate_cost(with_api(template, replicas=5)))
+    one, five = estimate_cost(with_api(template, replicas=1)), estimate_cost(with_api(template, replicas=5))
+    delta = cost_delta(one, five)
     assert delta.diff > 0 and delta.by_line["api"] > 0 and delta.missing == []
     assert "sin contar" not in compare_summary(1, 2, delta, None, None)
+    # sin componentes que falten, a y b son los totales, como antes de JAJ-88 (sin diferencias de centavos)
+    assert delta.a == one.total["value"] and delta.b == five.total["value"]
 
 
 def test_agent_budget_is_not_judged_without_prices(template):
@@ -101,9 +104,26 @@ def test_only_one_version_priced_is_not_counted_as_difference(template):
     assert delta.b - delta.a == pytest.approx(delta.diff, abs=0.01)
     assert value_of(b) > value_of(a)  # los totales completos siguen en cada CostEstimate
     text = compare_summary(1, 2, delta, None, None)
-    assert "sin contar la API, que tiene precio solo en v2" in text
+    assert "sin contar la API (con precio solo en v2)" in text
     reverse = compare_summary(1, 2, cost_delta(b, a), None, None)
-    assert "sin contar la API, que tiene precio solo en v1" in reverse
+    assert "sin contar la API (con precio solo en v1)" in reverse
+
+
+def test_mixed_missing_reads_well(template):
+    """La DB sin precio en las dos y la API con precio solo en v2: una frase que se entiende."""
+    v1, v2 = with_api(template, "local"), copy.deepcopy(template)
+    for raw in (v1, v2):
+        raw["deployment"]["db"]["provider"] = "local"
+    text = compare_summary(1, 2, cost_delta(estimate_cost(v1), estimate_cost(v2)), None, None)
+    assert (
+        "sin contar la DB, que no tiene precio (despliegue local o proveedor sin precios), "
+        "ni la API (con precio solo en v2)"
+    ) in text
+    # cada componente con precio en una sola versión distinta
+    db_only_v1 = copy.deepcopy(v2)
+    db_only_v1["deployment"]["db"]["provider"] = "supabase"
+    cross = compare_summary(1, 2, cost_delta(estimate_cost(db_only_v1), estimate_cost(v1)), None, None)
+    assert "sin contar la API (con precio solo en v1) ni la DB (con precio solo en v1)" in cross
 
 
 def value_of(est):

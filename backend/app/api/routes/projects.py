@@ -313,17 +313,22 @@ def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: 
 
 
 def _missing_clause(a: int, b: int, cost: CostDelta) -> str:
-    """'la API ni la DB, que no tienen precio (…)' o 'la API, que tiene precio solo en v2' (JAJ-88).
+    """Qué no cuenta la diferencia y por qué (JAJ-88). Ejemplos:
 
-    La diferencia no cuenta esos componentes (``cost_delta``), así que el texto dice cuáles y por qué.
+    * 'la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)'
+    * 'la API (con precio solo en v2)'
+    * 'la DB, que no tiene precio (…), ni la API (con precio solo en v2)'
     """
     both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
-    clauses = [f"{describe_missing(both)} (despliegue local o proveedor sin precios)"] if both else []
-    for c in cost.missing:
-        if c not in both:
-            priced_in = b if c in cost.missing_a else a
-            clauses.append(f"{COMPONENT_NAMES[c]}, que tiene precio solo en v{priced_in}")
-    return " ni ".join(clauses)
+    only = [
+        f"{COMPONENT_NAMES[c]} (con precio solo en v{b if c in cost.missing_a else a})"
+        for c in cost.missing
+        if c not in both
+    ]
+    if not both:
+        return " ni ".join(only)
+    head = f"{describe_missing(both)} (despliegue local o proveedor sin precios)"
+    return head + (", ni " + " ni ".join(only) if only else "")
 
 
 def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -> str:
