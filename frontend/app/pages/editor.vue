@@ -490,16 +490,6 @@ async function saveVersion() {
             :disabled="busy"
             hide-label
           />
-          <ScenarioOverrideControls
-            v-if="!isMock && graph"
-            v-model="overrideDraft"
-            :endpoints="graph.endpoints ?? []"
-            :dependencies="dependencies"
-            :disabled="busy"
-          />
-          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
-            {{ overrideError }}
-          </p>
           <Button
             :disabled="busy || !scenario || !graph || !runOverrides"
             @click="
@@ -516,6 +506,16 @@ async function saveVersion() {
             <Play v-else data-icon="inline-start" aria-hidden="true" />
             {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
           </Button>
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
         </template>
         <ComponentList
           v-else-if="section === 'components'"
