@@ -1,8 +1,9 @@
 name: PR review bot
 
 # Revisa cada PR hacia dev o main con la API de Claude y deja un solo comentario que se actualiza en
-# cada push (JAJ-63). Nunca bloquea la PR: sin el secret ANTHROPIC_API_KEY, o si la API falla, avisa
-# y termina en verde. El script está en .github/scripts/pr_review.py.
+# cada push (JAJ-63). Hoy el bot corre en una laptop del equipo (.github/scripts/review-bot.sh, ver
+# docs/bot-reviewer.md), porque crear el secret ANTHROPIC_API_KEY requiere admin del repo. Este
+# workflow queda listo para cuando exista: mientras tanto avisa y termina en verde, sin bloquear la PR.
 
 on:
   pull_request:
@@ -47,6 +48,4 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python .github/scripts/pr_review.py
