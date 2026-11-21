@@ -75,6 +75,15 @@ class TrafficProfile:
             start += s.duration_s
         return 0.0
 
+    def slope_at(self, t: float) -> float:
+        """Cuánto cambia el multiplicador por segundo en el tramo de ``t`` (0 después del final)."""
+        start = 0.0
+        for s in self.segments:
+            if t < start + s.duration_s:
+                return (s.to_multiplier - s.from_multiplier) / s.duration_s
+            start += s.duration_s
+        return 0.0
+
     def next_change(self, t: float) -> float:
         """El próximo borde de tramo después de ``t`` (o el final del perfil)."""
         start = 0.0

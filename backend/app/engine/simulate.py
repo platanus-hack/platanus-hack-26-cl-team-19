@@ -339,10 +339,15 @@ def simulate(
 
         Poisson: se generan candidatas a la tasa del pico y se acepta cada una con probabilidad
         ``perfil(t) / pico`` (thinning, el método estándar para un Poisson con tasa variable).
-        Uniforme: la siguiente llega ``1 / tasa(t)`` segundos después; si eso cruza el borde del tramo,
-        se salta al borde y se vuelve a calcular con la tasa nueva.
+        Uniforme: la siguiente llega cuando la integral de la tasa desde la anterior suma 1 (JAJ-104).
+        Lo acumulado se conserva al cruzar el borde de un tramo, así que un perfil plano en 1× da las
+        mismas llegadas que la tasa constante, con tramos de cualquier largo. Dentro de un tramo la tasa
+        es lineal y el instante sale de una cuadrática. Antes se reiniciaba la cuenta en cada borde y
+        se usaba la tasa del instante para todo el intervalo: se perdían llegadas en cada borde y, si
+        ``1 / tasa`` era más largo que el tramo, no llegaba nadie.
         """
         peak = profile.peak
+        need = 1.0  # integral de tasa × tiempo que falta para la próxima llegada
         while sim.now < duration_s:
             if arrivals == "poisson":
                 yield sim.rng.expovariate(rate * peak)
@@ -351,12 +356,19 @@ def simulate(
                 if sim.rng.random() * peak < profile.multiplier_at(sim.now):
                     arrive()
                 continue
-            lam = rate * profile.multiplier_at(sim.now)
+            m, k = profile.multiplier_at(sim.now), profile.slope_at(sim.now)
             boundary = profile.next_change(sim.now)
-            if lam <= 0 or sim.now + 1.0 / lam > boundary:
-                yield boundary - sim.now
+            if boundary <= sim.now:  # después del final del perfil: no llega nadie más
+                return
+            window = boundary - sim.now
+            target = need / rate  # en multiplicador × segundos
+            if m * window + k * window * window / 2 < target:
+                need -= rate * (m * window + k * window * window / 2)
+                yield window
                 continue
-            yield 1.0 / lam
+            # m·dt + k·dt²/2 = target, en la forma estable (sin restar números parecidos)
+            yield 2 * target / (m + math.sqrt(max(m * m + 2 * k * target, 0.0)))
+            need = 1.0
             if sim.now >= duration_s:
                 return
             arrive()

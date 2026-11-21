@@ -163,7 +163,7 @@ Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`
 **Qué cambia en el motor:**
 - **Duración:** con una lista de tramos, la duración es la suma de los tramos y `duration_s` no se usa. Con `"pico"`, la forma se escala a `duration_s`.
 - **Llegadas `poisson`:** se generan a la tasa del pico y cada una se acepta con probabilidad `perfil(t) / pico` (*thinning*, el método estándar para un Poisson con tasa variable).
-- **Llegadas `uniform`:** la siguiente llega `1 / tasa(t)` segundos después.
+- **Llegadas `uniform`:** la siguiente llega cuando la integral de la tasa desde la anterior suma 1 (JAJ-104). Lo acumulado se conserva al cruzar el borde de un tramo, y dentro de una rampa se usa la tasa que va cambiando, no la del instante. Antes, la cuenta se reiniciaba en cada borde: con tramos cortos se perdían llegadas (100 en vez de 131 con 10,5 req/s y tramos de 0,25 s), y si `1 / tasa` era más largo que el tramo no llegaba nadie.
 
 **Qué agrega al `Run`:**
 - **`series[].target_rps`:** las req/s que pide el perfil en cada segundo, para dibujar la curva pedida contra lo que se atiende (`ok`). Sin perfil es la tasa constante.
@@ -182,7 +182,8 @@ Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`
 | 30 req/s | 60 s | se vacía |
 
 Además:
-- **Un perfil plano en 1×** da exactamente el mismo `Run` que la tasa constante.
+- **Un perfil plano en 1×** da exactamente el mismo `Run` que la tasa constante, también partido en muchos tramos cortos (±1 request).
+- **Con llegadas uniformes y rampas,** el total es tasa × duración × multiplicador medio (±1 %).
 - **Con Poisson,** el total de llegadas es tasa × duración × multiplicador medio (±5 %).
 
 **Por qué importa la duración:** el timeout del cliente es de 30 s, así que una simulación de 30 s no alcanza a mostrar los errores por timeout de un evento largo. Con el template en CyberDay y `"pico"` en 300 s:
