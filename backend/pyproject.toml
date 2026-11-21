@@ -12,7 +12,6 @@ dependencies = [
     "pyjwt[crypto]>=2.10",  # validar los tokens de sesión de Supabase Auth (app/api/auth.py, JAJ-78)
     "pyyaml>=6.0",  # app/ingest/iac.py: Docker Compose, Kubernetes y render.yaml
     "mcp>=2,<3",  # app/agent/mcp.py: el servidor MCP del agente (API de mcp 2.x, MCPServer)
-    "openai>=2,<3",  # chat del editor con Responses API
     "anthropic>=2.12,<3",  # app/agent/loop.py: el chat del editor con la key del usuario o la de demo
 ]
 

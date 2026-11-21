@@ -33,11 +33,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.mcp import build_mcp, mcp_asgi_app
-from app.agent.openai_llm import OpenAILLM
 from app.agent.tools import Limiter
 from app.api.auth import SupabaseAuth, auth_from_env
 from app.api.errors import install_error_handlers
-from app.api.routes import chat, costs, credentials, github, health, models, projects, runs
+from app.api.routes import chat, costs, github, health, models, projects, runs
 from app.api.run_cache import RUN_CACHE_HEADER
 from app.api.store import InMemoryProjectStore, ProjectStore
 from app.github import GitHubApp, GitHubAppConfig
@@ -97,9 +96,9 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],  # PUT: escenarios del proyecto (JAJ-76)
+        allow_methods=["GET", "POST", "PUT"],  # PUT: escenarios del proyecto (JAJ-76)
         # Authorization: el token de sesión (JAJ-78); X-Anthropic-Api-Key: la key del usuario para el chat (JAJ-67)
-        allow_headers=["Content-Type", "Authorization", "X-Anthropic-Api-Key", "X-OpenAI-Api-Key"],
+        allow_headers=["Content-Type", "Authorization", "X-Anthropic-Api-Key"],
         expose_headers=[RUN_CACHE_HEADER],  # para que el editor sepa si el run venía guardado (JAJ-75)
     )
     install_error_handlers(app)
@@ -108,7 +107,6 @@ def create_app(
     app.state.github = github_app
     app.state.ingestions = IngestionJobs()  # ingestas en curso (JAJ-57)
     app.state.limiter = limiter
-    app.state.openai_llm_factory = OpenAILLM
     app.state.llm_factory = chat.default_llm_factory  # los tests lo reemplazan por un LLM falso
     app.include_router(health.router)
     app.include_router(runs.router)
@@ -117,8 +115,6 @@ def create_app(
     app.include_router(costs.router)
     app.include_router(github.router)
     app.include_router(chat.router)
-    app.include_router(credentials.router)
-
     app.mount("/", mcp_app)  # /mcp: el servidor MCP del agente (al final: las rutas de arriba tienen prioridad)
     return app
 
