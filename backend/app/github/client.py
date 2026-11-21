@@ -27,7 +27,9 @@ from typing import Any
 import jwt
 
 API = "https://api.github.com"
-MAX_TARBALL_BYTES = 200 * 1024 * 1024  # GitHub no documenta un tope: este evita llenar el disco
+# GitHub no documenta un tope. El tarball se lee entero en memoria y Render free tiene 512 MB (JAJ-84),
+# así que el tope por defecto es 80 MB comprimido. BRANCHPOINT_MAX_TARBALL_MB lo cambia.
+MAX_TARBALL_BYTES = int(float(os.environ.get("BRANCHPOINT_MAX_TARBALL_MB", "80")) * 1024 * 1024)
 
 
 class GitHubError(Exception):
@@ -84,12 +86,15 @@ class GitHubApp:
             {"state": state}
         )
 
-    def authorize_url(self, state: str) -> str:
-        """OAuth de la app sin instalar: para quien ya la tenía instalada (GitHub no redirige al cambiar
-        una instalación existente). Vuelve a la misma Callback URL con ``code`` y sin ``installation_id``."""
-        return "https://github.com/login/oauth/authorize?" + urllib.parse.urlencode(
-            {"client_id": self.config.client_id, "state": state}
-        )
+    def authorize_url(self, state: str, redirect_uri: str | None = None) -> str:
+        """OAuth web de la app: después de instalarla (en otra pestaña) o si ya estaba instalada. Vuelve
+        con ``code`` y sin ``installation_id``. ``redirect_uri`` elige a cuál de las Callback URL vuelve
+        (tiene que coincidir exacto con una): así producción y local usan la misma app (JAJ-84). Sin él,
+        GitHub usa la primera de la lista."""
+        params = {"client_id": self.config.client_id, "state": state}
+        if redirect_uri:
+            params["redirect_uri"] = redirect_uri
+        return "https://github.com/login/oauth/authorize?" + urllib.parse.urlencode(params)
 
     def _app_jwt(self) -> str:
         now = int(time.time())
@@ -108,13 +113,19 @@ class GitHubApp:
         )
         return data["token"]
 
-    def user_installations(self, code: str) -> dict[int, str]:
+    def user_installations(self, code: str, redirect_uri: str | None = None) -> dict[int, str]:
         """Canjea el ``code`` del callback y devuelve las instalaciones de esta app que ve ese usuario de
         GitHub (id → cuenta donde está instalada). ``GitHubError`` si el code no sirve."""
         req = urllib.request.Request(
             "https://github.com/login/oauth/access_token",
             data=urllib.parse.urlencode(
-                {"client_id": self.config.client_id, "client_secret": self.config.client_secret, "code": code}
+                {
+                    "client_id": self.config.client_id,
+                    "client_secret": self.config.client_secret,
+                    "code": code,
+                    # el mismo redirect_uri del authorize; si no coincide, GitHub responde redirect_uri_mismatch
+                    **({"redirect_uri": redirect_uri} if redirect_uri else {}),
+                }
             ).encode(),
             headers={"Accept": "application/json", "User-Agent": "branchpoint"},
         )
@@ -199,7 +210,8 @@ class GitHubApp:
                 if what == "tarball":
                     data = resp.read(MAX_TARBALL_BYTES + 1)
                     if len(data) > MAX_TARBALL_BYTES:
-                        raise GitHubError(413, "El repo pesa más de 200 MB comprimido y no se puede analizar.")
+                        mb = MAX_TARBALL_BYTES // (1024 * 1024)
+                        raise GitHubError(413, f"El repo pesa más de {mb} MB comprimido y no se puede analizar.")
                     return data
                 raw = resp.read()
         except urllib.error.HTTPError as e:

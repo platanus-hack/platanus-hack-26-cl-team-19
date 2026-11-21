@@ -142,22 +142,37 @@ async function addDemoRepository() {
           </div>
         </template>
 
+        <template
+          v-else-if="!github.repos.value.length && github.awaitingGithub.value"
+        >
+          <p class="text-sm text-muted-foreground">
+            Instala la app en la pestaña de GitHub que se abrió, elige los repos
+            y vuelve aquí para ligarla a tu cuenta.
+          </p>
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              :disabled="github.connecting.value"
+              @click="github.connect(true)"
+            >
+              <Spinner
+                v-if="github.connecting.value"
+                data-icon="inline-start"
+              />
+              Listo, ya la instalé
+            </Button>
+            <Button variant="ghost" @click="github.connect()">
+              Volver a abrir GitHub
+            </Button>
+          </div>
+        </template>
+
         <template v-else-if="!github.repos.value.length">
           <p class="text-sm text-muted-foreground">
             Instala la GitHub App de Branchpoint y elige los repos que quieres
             analizar. Solo pide permiso de lectura.
           </p>
           <div class="flex flex-wrap items-center gap-2">
-            <Button
-              :disabled="github.connecting.value"
-              @click="github.connect()"
-            >
-              <Spinner
-                v-if="github.connecting.value"
-                data-icon="inline-start"
-              />
-              Conectar con GitHub
-            </Button>
+            <Button @click="github.connect()">Conectar con GitHub</Button>
             <Button variant="ghost" @click="step = 'cli'"
               >Omitir por ahora</Button
             >

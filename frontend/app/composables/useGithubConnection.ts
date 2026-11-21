@@ -1,7 +1,9 @@
 // Conectar la GitHub App, elegir repo y rama, y analizarlo como v1 (JAJ-57).
-// GitHub vuelve a /onboarding con ?github=ok|error&message=... solo al instalar la app por
-// primera vez (si el onboarding ya se hizo, /onboarding lo reenvía a /settings): al cambiar los repos de una instalación existente no redirige, así que eso se abre
-// en otra pestaña y la lista se refresca al volver.
+// Instalar la app se hace en otra pestaña: GitHub solo vuelve a la primera Callback URL de la app al
+// instalar, y no se puede elegir otra (JAJ-84). Después, «Listo, ya la instalé» lanza el OAuth web
+// con el redirect_uri de este backend, y GitHub vuelve a /onboarding con ?github=ok|error&message=...
+// (si el onboarding ya se hizo, /onboarding lo reenvía a /settings). Al volver a esta pestaña, la
+// lista de repos se refresca sola.
 import { useEventListener } from "@vueuse/core";
 import {
   STAGE_LABELS,
@@ -91,19 +93,41 @@ export function useGithubConnection({ immediate = true } = {}) {
     }
   }
 
-  async function connect(alreadyInstalled = false) {
+  /** Abre la instalación de la app en otra pestaña. La pestaña se abre antes del await para que el
+   * navegador no la bloquee como popup. */
+  async function install() {
+    if (!api) return;
+    error.value = "";
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const { url } = await api.installUrl();
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = url;
+      } else window.location.href = url; // popup bloqueado: en esta misma pestaña
+      awaitingGithub.value = true;
+    } catch (cause) {
+      tab?.close();
+      error.value = githubErrorMessage(cause);
+    }
+  }
+
+  /** Liga a la cuenta las instalaciones que ve el usuario en GitHub (OAuth web, en esta pestaña). */
+  async function authorize() {
     if (!api) return;
     connecting.value = true;
     error.value = "";
     try {
-      const { url } = alreadyInstalled
-        ? await api.authorizeUrl()
-        : await api.installUrl();
-      window.location.href = url;
+      window.location.href = (await api.authorizeUrl()).url;
     } catch (cause) {
       error.value = githubErrorMessage(cause);
       connecting.value = false;
     }
+  }
+
+  /** `connect()` instala la app en otra pestaña; `connect(true)` la liga a la cuenta. */
+  function connect(alreadyInstalled = false) {
+    return alreadyInstalled ? authorize() : install();
   }
 
   useEventListener(
