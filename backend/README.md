@@ -111,7 +111,7 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
   - `sustained`, el valor por defecto, usa la base de créditos. Es lo que aguanta la instancia con carga sostenida, como un CyberDay de horas.
   - `burst` usa todos los vCPU. Solo se mantiene mientras duren los créditos, o pagando el exceso.
 - **Sin estos campos,** los tiempos se usan tal cual (factor 1), como antes de JAJ-48.
-- **Los trabajos de las colas** usan sus tiempos sin ajustar. El modelo todavía no dice en qué procesador corren.
+- **En los trabajos de las colas,** la CPU del worker va sin ajustar, porque el modelo todavía no dice en qué procesador corren los workers. Sus consultas sí usan el factor de la DB, porque corren en la DB (JAJ-110; antes este README decía que todo el trabajo iba sin ajustar).
 - **El `Run` lo informa:** trae `cpu` (factores, procesadores, vCPU de la DB del plan y los simulados, y el modo de créditos), y una advertencia en `warnings` que dice qué se ajustó.
 
 **Validación del ajuste** (`tests/engine/test_cloud_factor.py`):
@@ -235,6 +235,9 @@ python -m app.cli app/samples/fastapi-realworld-example-app.model.json --scenari
 
 # CyberDay con subida, meseta y bajada en 5 minutos (la serie por segundo trae target_rps)
 python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario cyberday --profile pico --duration 300 --out run.json
+
+# un escenario que no existe, un archivo que no es un modelo o un parámetro fuera de rango:
+# "error: …" en stderr y código 2, sin traceback (JAJ-110)
 
 # levantar la API en http://localhost:8000 (documentación interactiva en /docs)
 uvicorn app.api.main:app --reload

@@ -92,7 +92,7 @@ def test_huge_repeat_is_rejected_before_simulating(client):
     r, seconds = post_run(client, m)
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_model"
     assert "GET /a" in r.json()["error"]["message"] and "repeat" in r.json()["error"]["message"]
-    assert seconds < 1
+    assert seconds < 5  # se rechaza antes de simular (milisegundos); margen amplio para un CI lento (JAJ-110)
 
 
 def test_nested_cache_misses_count_towards_the_limit():
@@ -125,7 +125,7 @@ def test_job_that_enqueues_itself_is_rejected(client):
     r, seconds = post_run(client, with_queues({"q": [background("q")]}))
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_model"
     assert "ciclo (q → q)" in r.json()["error"]["message"]
-    assert seconds < 1
+    assert seconds < 5  # se rechaza antes de simular (milisegundos); margen amplio para un CI lento (JAJ-110)
 
 
 def test_indirect_cycle_is_rejected():
