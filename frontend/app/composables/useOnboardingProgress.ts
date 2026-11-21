@@ -6,9 +6,12 @@ export function useOnboardingProgress() {
     return `branchpoint:onboarding:${user?.id ?? "demo"}`;
   }
 
+  async function isOnboardingDone() {
+    return localStorage.getItem(await storageKey()) === "done";
+  }
+
   async function nextAfterLogin() {
-    const key = await storageKey();
-    return localStorage.getItem(key) === "done" ? "/projects" : "/onboarding";
+    return (await isOnboardingDone()) ? "/projects" : "/onboarding";
   }
 
   async function completeOnboarding() {
@@ -16,5 +19,5 @@ export function useOnboardingProgress() {
     return navigateTo("/projects", { replace: true });
   }
 
-  return { nextAfterLogin, completeOnboarding };
+  return { isOnboardingDone, nextAfterLogin, completeOnboarding };
 }

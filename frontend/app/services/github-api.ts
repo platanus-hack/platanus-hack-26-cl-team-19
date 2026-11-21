@@ -28,8 +28,22 @@ export interface Ingestion {
   error_message: string | null;
 }
 
-export function createGithubApi(baseURL: string) {
-  const fetchApi = $fetch.create({ baseURL, retry: 0, timeout: 30_000 });
+export function createGithubApi(
+  baseURL: string,
+  getAccessToken?: () => Promise<string | undefined>,
+) {
+  const fetchApi = $fetch.create({
+    baseURL,
+    retry: 0,
+    timeout: 30_000,
+    // Con sesión, las instalaciones y las ingestas quedan a nombre del usuario (JAJ-78).
+    async onRequest({ options }) {
+      if (!getAccessToken) return;
+      const token = await getAccessToken();
+      if (!token) throw new Error("Tu sesión expiró. Vuelve a iniciar sesión.");
+      options.headers.set("Authorization", `Bearer ${token}`);
+    },
+  });
 
   return {
     installUrl: () => fetchApi<{ url: string }>("/github/install-url"),

@@ -8,7 +8,7 @@ Flujo (el diseño está en ``spikes/jaj-53-acceso-github/README.md``):
 2. El usuario instala la app en GitHub y elige los repos. GitHub vuelve a ``GET /github/callback``
    con ``code``, ``installation_id`` y ``state``. La API valida el state, confirma con el ``code`` que
    la instalación es de ese usuario de GitHub, la guarda y redirige al frontend
-   (``BRANCHPOINT_FRONTEND_URL/conectar?github=ok`` o ``?github=error&message=...``).
+   (``BRANCHPOINT_FRONTEND_URL/onboarding?github=ok`` o ``?github=error&message=...``).
 3. ``GET /github/repos`` y ``GET /github/repos/{owner}/{repo}/branches``: qué puede elegir.
 4. ``POST /github/ingestions``: analiza ese repo y rama en segundo plano. ``GET /github/ingestions/{id}``
    da el progreso y, al terminar, el ``project_id`` con su v1.
@@ -100,7 +100,7 @@ def _github_error(e: GitHubError) -> ApiError:
 
 def _frontend(path_query: dict[str, str]) -> str:
     base = os.environ.get("BRANCHPOINT_FRONTEND_URL", DEFAULT_FRONTEND_URL).rstrip("/")
-    return f"{base}/conectar?{urllib.parse.urlencode(path_query)}"
+    return f"{base}/onboarding?{urllib.parse.urlencode(path_query)}"
 
 
 # ---------- instalar ----------

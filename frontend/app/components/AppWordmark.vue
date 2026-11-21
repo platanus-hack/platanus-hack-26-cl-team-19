@@ -4,7 +4,7 @@ defineProps<{ compact?: boolean }>();
 
 <template>
   <span class="wordmark whitespace-nowrap text-2xl leading-none">{{
-    compact ? "b." : "branchpoint"
+    compact ? "b." : "branchpoint."
   }}</span>
 </template>
 

@@ -46,7 +46,7 @@ onMounted(async () => {
         >
       </Alert>
       <Button class="self-start" as-child>
-        <NuxtLink to="/login">Volver a intentar</NuxtLink>
+        <NuxtLink to="/">Volver a intentar</NuxtLink>
       </Button>
     </template>
   </main>

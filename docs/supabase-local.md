@@ -36,12 +36,12 @@ Y completa las keys con las que imprime:
 npx supabase status -o env
 ```
 
-| Variable del backend | Valor de `supabase status` |
-| -- | -- |
-| `DATABASE_URL` | `DB_URL` (ya viene en el ejemplo) |
-| `SUPABASE_URL` | `API_URL` (ya viene en el ejemplo) |
-| `SUPABASE_PUBLISHABLE_KEY` | `PUBLISHABLE_KEY` |
-| `SUPABASE_SECRET_KEY` | `SECRET_KEY` |
+| Variable del backend       | Valor de `supabase status`         |
+| -------------------------- | ---------------------------------- |
+| `DATABASE_URL`             | `DB_URL` (ya viene en el ejemplo)  |
+| `SUPABASE_URL`             | `API_URL` (ya viene en el ejemplo) |
+| `SUPABASE_PUBLISHABLE_KEY` | `PUBLISHABLE_KEY`                  |
+| `SUPABASE_SECRET_KEY`      | `SECRET_KEY`                       |
 
 Las keys locales son de desarrollo y son iguales en todas las máquinas, pero igual `backend/.env` no se commitea.
 
@@ -81,7 +81,7 @@ Esos tests vacían las tablas, así que solo aceptan una base local. Sin `TEST_D
    `npx supabase status`. El secreto de GitHub solo va en la configuración de
    Supabase.
 4. Desde `frontend/`, ejecuta `pnpm dev` y abre
-   `http://localhost:3000/login`. Usa **Continuar con GitHub**. Tras autorizar,
+   `http://localhost:3000`. Usa **Continuar con GitHub** en la home. Tras autorizar,
    Nuxt recibe el código en `/auth/callback` y abre `/onboarding` la primera vez en ese navegador. Después del onboarding,
    el acceso lleva a `/projects`.
 
@@ -92,11 +92,11 @@ a las redirecciones autorizadas de Supabase. [Guía de GitHub Auth](https://supa
 
 ## Día a día
 
-| Para | Comando |
-| -- | -- |
-| Levantar el stack | `npx supabase start` |
-| Ver URLs y keys | `npx supabase status` |
-| Apagarlo (los datos se mantienen) | `npx supabase stop` |
+| Para                                                      | Comando                 |
+| --------------------------------------------------------- | ----------------------- |
+| Levantar el stack                                         | `npx supabase start`    |
+| Ver URLs y keys                                           | `npx supabase status`   |
+| Apagarlo (los datos se mantienen)                         | `npx supabase stop`     |
 | Borrar los datos y volver a aplicar todas las migraciones | `npx supabase db reset` |
 
 Con el stack arriba:

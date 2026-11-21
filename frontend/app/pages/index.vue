@@ -1,9 +1,32 @@
 <script setup lang="ts">
 import AppWordmark from "@/components/AppWordmark.vue";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 
 useSeoMeta({ title: "Branchpoint" });
-const { enabled } = useSupabaseAuth();
+
+// La home es también el login: quien entra sin sesión a una ruta protegida vuelve aquí.
+const { enabled, hasSession, signInWithGitHub } = useSupabaseAuth();
+const { nextAfterLogin } = useOnboardingProgress();
+const pending = ref(false);
+const error = ref(false);
+
+onMounted(async () => {
+  if (enabled && (await hasSession()))
+    await navigateTo(await nextAfterLogin(), { replace: true });
+});
+
+async function continueWithGitHub() {
+  pending.value = true;
+  error.value = false;
+  try {
+    await signInWithGitHub();
+  } catch {
+    error.value = true;
+    pending.value = false;
+  }
+}
 </script>
 
 <template>
@@ -13,10 +36,22 @@ const { enabled } = useSupabaseAuth();
       Simula cómo responde una arquitectura al tráfico y compara el impacto de
       tus cambios.
     </p>
-    <Button class="self-start" as-child>
-      <NuxtLink :to="enabled ? '/login' : '/projects'">
-        {{ enabled ? "Ingresar" : "Ver proyectos" }}
-      </NuxtLink>
+    <Alert v-if="error" class="max-w-md" variant="destructive">
+      <AlertDescription
+        >No pudimos abrir GitHub. Inténtalo de nuevo.</AlertDescription
+      >
+    </Alert>
+    <div v-if="enabled" class="flex flex-col items-start gap-2">
+      <Button :disabled="pending" @click="continueWithGitHub">
+        <Spinner v-if="pending" data-icon="inline-start" />
+        {{ pending ? "Abriendo GitHub…" : "Continuar con GitHub" }}
+      </Button>
+      <p class="text-xs text-muted-foreground">
+        Crea tu cuenta o inicia sesión con GitHub.
+      </p>
+    </div>
+    <Button v-else class="self-start" as-child>
+      <NuxtLink to="/projects">Ver proyectos</NuxtLink>
     </Button>
   </main>
 </template>
