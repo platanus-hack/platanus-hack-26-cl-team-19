@@ -406,8 +406,16 @@ def upsert_comment(repo: str, number: int, body: str, existing: dict | None) -> 
 def explain(e: Exception) -> str:
     """El error, con el paso que falta cuando es de credenciales."""
     msg = f"{type(e).__name__}: {e}"
-    if type(e).__name__ in ("AuthenticationError", "CredentialsError") or "authentication method" in str(e):
-        msg += ". En tu laptop: `ant auth login` (ver docs/bot-reviewer.md)"
+    if type(e).__name__ in ("AuthenticationError", "CredentialsError", "WorkloadIdentityError") or (
+        "authentication method" in str(e)
+    ):
+        if IN_ACTIONS:
+            msg += (
+                ". Revisa la regla de federación en la Claude Console y el motivo del rechazo en la pestaña History"
+                " de Workload identity (ver docs/bot-reviewer.md)"
+            )
+        else:
+            msg += ". En tu laptop: `ant auth login` (ver docs/bot-reviewer.md)"
     return msg
 
 
@@ -417,7 +425,7 @@ ATTEMPTED: set[tuple[int, str]] = set()  # (PR, commit) ya enviados a Claude en 
 def review_pr(repo: str, number: int, *, dry_run: bool = False, force: bool = False) -> None:
     """Revisa una PR. Si ya hay una revisión del mismo commit, no hace nada (salvo --force)."""
     pr = get_pr(repo, number)
-    if not force and (pr["state"] != "open" or pr["draft"]):
+    if not force and not dry_run and (pr["state"] != "open" or pr["draft"]):
         log(f"#{number}: está {'cerrada' if pr['state'] != 'open' else 'en borrador'}; no se revisa (usa --force)")
         return
     existing = None if dry_run else bot_comment(repo, number)

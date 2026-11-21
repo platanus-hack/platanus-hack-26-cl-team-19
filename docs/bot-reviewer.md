@@ -14,11 +14,21 @@ Claude recibe como contexto:
 - **Las reglas del repo, tal como están en la rama base:** `AGENTS.md`, `README.md` y los ADR de `docs/adr/`.
 - **Linear (opcional):** la issue enlazada (`JAJ-NN` en la rama, el título o la descripción) y el overview del proyecto.
 
-**Costo.** Una PR mediana manda unos 15.000 a 30.000 tokens a `claude-opus-5-5`, del orden de US$0,10 a 0,30 por push revisado. Se cobra a la organización de Anthropic de quien configura el bot. Cada comentario dice cuánto costó, calculado con `backend/app/costs/prices/manual.json`. Conviene ponerle un límite de gasto mensual a esa organización en la Claude Console.
+**Costo.** Las revisiones de la #37 midieron entre 22.000 y 24.000 tokens de entrada, entre 4.800 y 6.900 de salida y entre US$0,17 y 0,23 cada una con `claude-opus-5-5` (`OBSERVADO`, en el pie de cada comentario, calculado con `backend/app/costs/prices/manual.json`). Se cobra a la organización de Anthropic de quien configuró la federación. Conviene ponerle un límite de gasto mensual en la Claude Console.
 
 **Nunca bloquea una PR.** Si faltan las credenciales, o si falla la API de Claude, la de Linear o la de GitHub, avisa y termina en verde.
 
 Hay dos formas de correrlo, sin guardar ninguna API key en GitHub.
+
+## Cuándo revisa
+
+Con el workflow en `dev`, GitHub lo corre en **toda PR hacia `dev` o `main`**:
+
+- **Cuándo:** al abrirla, en cada push, al reabrirla y al pasar de borrador a lista.
+- **Borradores:** no se revisan.
+- **Pushes seguidos:** si llegan varios juntos, solo se revisa el último.
+- **PRs que ya estaban abiertas:** se revisan en su próximo push.
+- **PRs desde un fork:** no se revisan, porque GitHub no les entrega el token. El job termina en verde con un aviso.
 
 ## A. En GitHub Actions, sin secrets (recomendado)
 
