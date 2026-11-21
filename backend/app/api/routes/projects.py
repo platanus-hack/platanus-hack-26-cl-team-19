@@ -1,11 +1,17 @@
-"""Proyectos y versiones: abrir el editor con v1, guardar versiones, simularlas y compararlas."""
+"""Proyectos y versiones: abrir el editor con v1, guardar versiones, simularlas y compararlas.
+
+Los escenarios son del proyecto (JAJ-76): se cargan de ``traffic.scenarios`` de la v1 al crearlo, se
+editan con ``PUT /projects/{id}/scenarios/{name}`` y sirven para simular cualquier versión.
+"""
 
 from __future__ import annotations
+
+import re
 
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
-from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, ApiError
+from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422
 from app.api.run_cache import RUN_CACHE_HEADER, cached_run
@@ -19,15 +25,19 @@ from app.api.schemas import (
     ProjectDetail,
     Region,
     RunParams,
+    ScenarioIn,
+    ScenarioOut,
     VersionDetail,
     VersionSummary,
 )
-from app.api.store import Project, ProjectStore, Version
+from app.api.store import Project, ProjectScenario, ProjectStore, Version
 from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
 from app.models.compare import run_delta
 from app.models.run import Run
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+SCENARIO_NAME = re.compile(r"[a-z0-9_-]{1,60}")
 
 
 def get_store(request: Request) -> ProjectStore:
@@ -143,9 +153,82 @@ def run_version(
     project_id: str, number: int, req: RunParams, response: Response, store: ProjectStore = Depends(get_store)
 ) -> Run:
     version = _version(store, _project(store, project_id), number)
-    run, hit = cached_run(store, project_id, number, version.model, req)
+    params = _with_scenario_rate(store, project_id, version.model, req)
+    run, hit = cached_run(store, project_id, number, version.model, params, _label(req))
     _cache_header(response, hit)
     return run
+
+
+def _label(req: RunParams) -> str | None:
+    """Con la tasa sacada de la tabla, el ``Run`` se llama como el escenario ("cyberday") y no como
+    una tasa a mano ("cyberday (262.4 req/s)", lo que pone el motor cuando recibe ``rps``)."""
+    return req.scenario if req.rps is None else None
+
+
+def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, params: RunParams) -> RunParams:
+    """Los ``RunParams`` con las req/s del escenario del proyecto para el modelo de esta versión (JAJ-76).
+
+    El escenario sale de la tabla del proyecto, no de ``traffic.scenarios`` del modelo: así sirve para
+    cualquier versión, y ``cyberday`` ×20 da más req/s en una versión con más pico. Las req/s quedan
+    en ``rps``, que entra en la ``cache_key`` (JAJ-75): si alguien edita el escenario, la clave cambia
+    y no se devuelve un run con la tasa vieja. Con ``rps`` en la request, el escenario es solo un nombre.
+    """
+    if params.rps is not None:
+        return params
+    scenarios = {s.name: s for s in store.list_scenarios(project_id)}
+    scenario = scenarios.get(params.scenario)
+    if scenario is None:
+        available = sorted(scenarios)
+        raise ApiError(
+            422,
+            UNKNOWN_SCENARIO,
+            f"El proyecto no tiene el escenario '{params.scenario}'. "
+            + (f"Hay: {', '.join(available)}." if available else "No tiene ninguno: créalo o manda rps."),
+            available=available,
+        )
+    try:
+        rate = scenario.rate_for(model)
+    except ValueError as e:
+        raise ApiError(422, INVALID_PARAMETERS, str(e)) from None
+    return params.model_copy(update={"rps": rate})
+
+
+def _scenario_out(s: ProjectScenario) -> ScenarioOut:
+    return ScenarioOut(name=s.name, multiplier=s.multiplier, rps=s.rps, description=s.description)
+
+
+@router.get("/{project_id}/scenarios", response_model=list[ScenarioOut], summary="Los escenarios del proyecto (JAJ-76)")
+def list_scenarios(project_id: str, store: ProjectStore = Depends(get_store)) -> list[ScenarioOut]:
+    _project(store, project_id)
+    return [_scenario_out(s) for s in store.list_scenarios(project_id)]
+
+
+@router.get("/{project_id}/scenarios/{name}", response_model=ScenarioOut, summary="Un escenario del proyecto")
+def get_scenario(project_id: str, name: str, store: ProjectStore = Depends(get_store)) -> ScenarioOut:
+    _project(store, project_id)
+    for s in store.list_scenarios(project_id):
+        if s.name == name:
+            return _scenario_out(s)
+    raise ApiError(404, NOT_FOUND, f"El proyecto no tiene el escenario '{name}'.", resource="scenario")
+
+
+@router.put(
+    "/{project_id}/scenarios/{name}",
+    response_model=ScenarioOut,
+    summary="Crear o reemplazar un escenario del proyecto (sirve para todas sus versiones)",
+)
+def put_scenario(project_id: str, name: str, req: ScenarioIn, store: ProjectStore = Depends(get_store)) -> ScenarioOut:
+    _project(store, project_id)
+    if not SCENARIO_NAME.fullmatch(name):
+        raise ApiError(
+            422,
+            INVALID_PARAMETERS,
+            f"El nombre '{name}' no sirve: usa de 1 a 60 letras minúsculas, números, _ o - (ej. black_friday).",
+        )
+    if (req.multiplier is None) == (req.rps is None):
+        raise ApiError(422, INVALID_PARAMETERS, "Manda multiplier (× el pico) o rps (req/s fijas), uno de los dos.")
+    saved = store.upsert_scenario(project_id, ProjectScenario(name, req.multiplier, req.rps, req.description))
+    return _scenario_out(saved)
 
 
 @router.post(
@@ -159,9 +242,12 @@ def compare(
     project = _project(store, project_id)
     va, vb = _version(store, project, req.a), _version(store, project, req.b)
     params = RunParams(**req.model_dump(exclude={"a", "b", "region"}))
+    # el mismo escenario, con las req/s del pico de cada versión (JAJ-76)
+    params_a = _with_scenario_rate(store, project_id, va.model, params)
+    params_b = _with_scenario_rate(store, project_id, vb.model, params)
     # la comparación no se guarda: es la diferencia entre dos runs, que sí se guardan (JAJ-75)
-    run_a, hit_a = cached_run(store, project_id, va.number, va.model, params)
-    run_b, hit_b = cached_run(store, project_id, vb.number, vb.model, params)
+    run_a, hit_a = cached_run(store, project_id, va.number, va.model, params_a, _label(params))
+    run_b, hit_b = cached_run(store, project_id, vb.number, vb.model, params_b, _label(params))
     _cache_header(response, hit_a, hit_b)
     cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
     delta = cost_delta(cost_a, cost_b)

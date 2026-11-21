@@ -41,6 +41,51 @@ class Project:
         return self.versions[number - 1] if 1 <= number <= len(self.versions) else None
 
 
+@dataclass(frozen=True)
+class ProjectScenario:
+    """Un escenario del proyecto (JAJ-76). Es del proyecto y no de una versión: así cualquier par de
+    versiones se compara con el mismo escenario.
+
+    Trae una de dos tasas: ``multiplier`` (× el pico del modelo de cada versión, ``traffic.peak_rps``)
+    o ``rps`` (req/s fijas, iguales en todas las versiones).
+    """
+
+    name: str
+    multiplier: float | None
+    rps: float | None
+    description: str | None = None
+
+    def rate_for(self, model: dict[str, Any]) -> float:
+        """Las req/s del escenario para el modelo de una versión. ``ValueError`` si es un
+        multiplicador y el modelo no trae ``traffic.peak_rps``."""
+        if self.rps is not None:
+            return self.rps
+        peak = ((model.get("traffic") or {}).get("peak_rps") or {}).get("value")
+        if not peak or peak <= 0:
+            raise ValueError(
+                f"El escenario '{self.name}' es ×{self.multiplier:g} el pico, pero el modelo no tiene "
+                "traffic.peak_rps. Agrega el pico al modelo o define el escenario con rps."
+            )
+        return float(peak) * self.multiplier
+
+
+def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
+    """Los escenarios de ``traffic.scenarios`` del modelo, para cargarlos al crear un proyecto.
+
+    Se guarda el multiplicador cuando lo hay: así la tasa se recalcula con el pico de cada versión
+    (decisión 4 del README de ``app/db``). Si no, las req/s.
+    """
+    scenarios = []
+    for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
+        multiplier = (sc.get("multiplier") or {}).get("value")
+        rps = (sc.get("rps") or {}).get("value")
+        if multiplier is not None and multiplier > 0:
+            scenarios.append(ProjectScenario(name, float(multiplier), None))
+        elif rps is not None and rps > 0:
+            scenarios.append(ProjectScenario(name, None, float(rps)))
+    return scenarios
+
+
 class ProjectStore(Protocol):
     def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project: ...
 
@@ -57,6 +102,14 @@ class ProjectStore(Protocol):
     def add_version(
         self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
     ) -> Version: ...
+
+    def list_scenarios(self, project_id: str) -> list[ProjectScenario]:
+        """Los escenarios del proyecto, por nombre (JAJ-76)."""
+        ...
+
+    def upsert_scenario(self, project_id: str, scenario: ProjectScenario) -> ProjectScenario:
+        """Crea el escenario o reemplaza el que tiene ese nombre (JAJ-76)."""
+        ...
 
     def find_run(self, cache_key: str) -> dict[str, Any] | None:
         """El ``Run`` guardado con esa clave (como dict ``branchpoint.run/v1``), o ``None`` (JAJ-75)."""
@@ -85,6 +138,7 @@ class InMemoryProjectStore:
     def __init__(self) -> None:
         self._projects: dict[str, Project] = {}
         self._runs: dict[str, dict[str, Any]] = {}  # cache_key → Run como dict (JAJ-75)
+        self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
 
     def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project:
@@ -92,6 +146,7 @@ class InMemoryProjectStore:
         project.versions.append(Version(1, "repo", None, "Extraída del repo", project.created_at, copy.deepcopy(model)))
         with self._lock:
             self._projects[project.id] = project
+            self._scenarios[project.id] = {s.name: s for s in scenarios_from_model(model)}
         return project
 
     def get(self, project_id: str) -> Project | None:
@@ -112,6 +167,16 @@ class InMemoryProjectStore:
             version = Version(len(project.versions) + 1, origin, parent, note, _now(), copy.deepcopy(model))
             project.versions.append(version)
         return version
+
+    def list_scenarios(self, project_id: str) -> list[ProjectScenario]:
+        return sorted(self._scenarios.get(project_id, {}).values(), key=lambda s: s.name)
+
+    def upsert_scenario(self, project_id: str, scenario: ProjectScenario) -> ProjectScenario:
+        with self._lock:
+            if project_id not in self._projects:
+                raise KeyError(project_id)
+            self._scenarios[project_id][scenario.name] = scenario
+        return scenario
 
     def find_run(self, cache_key: str) -> dict[str, Any] | None:
         run = self._runs.get(cache_key)
