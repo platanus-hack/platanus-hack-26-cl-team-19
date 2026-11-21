@@ -2,6 +2,7 @@
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowRight, Check } from "@lucide/vue";
+import CliConnectionList from "@/components/onboarding/CliConnectionList.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -38,7 +39,9 @@ onNuxtReady(async () => {
     { replace: true },
   );
 });
+const step = ref<"github" | "cli">("github");
 const repositoryState = ref<"idle" | "choose" | "added">("idle");
+const cli = useCliConnections();
 const busy = ref(false);
 const error = ref(false);
 const demoRepo = "fastapi/full-stack-fastapi-template";
@@ -64,17 +67,46 @@ async function addDemoRepository() {
     <AppHeader minimal />
 
     <main
-      class="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      class="mx-auto flex w-full flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      :class="step === 'cli' ? 'max-w-3xl' : 'max-w-md'"
     >
+      <ol
+        aria-label="Configuración"
+        class="mb-7 flex items-center gap-3 text-xs"
+      >
+        <li
+          :aria-current="step === 'github' ? 'step' : undefined"
+          :class="step === 'github' ? 'font-semibold' : 'text-muted-foreground'"
+        >
+          GitHub
+        </li>
+        <li aria-hidden="true" class="h-px w-4 bg-border"></li>
+        <li
+          :aria-current="step === 'cli' ? 'step' : undefined"
+          :class="step === 'cli' ? 'font-semibold' : 'text-muted-foreground'"
+        >
+          CLI local
+        </li>
+      </ol>
+
       <div class="mb-6">
         <h1 class="text-3xl font-semibold tracking-tight">
-          Conecta un repositorio
+          {{
+            step === "github"
+              ? "Conecta un repositorio"
+              : "Vincula tu CLI local"
+          }}
         </h1>
         <p class="mt-2 text-sm text-muted-foreground">
-          Trae el código de una rama para analizar su arquitectura.
+          {{
+            step === "github"
+              ? "Trae el código de una rama para analizar su arquitectura."
+              : "El agente corre en tu propia CLI, con tu suscripción. Elige una o ambas."
+          }}
         </p>
       </div>
-      <div v-if="!isMock" class="flex flex-col gap-4">
+
+      <div v-if="step === 'github' && !isMock" class="flex flex-col gap-4">
         <Alert v-if="github.returnError.value" variant="destructive">
           <AlertDescription>{{ github.returnError.value }}</AlertDescription>
         </Alert>
@@ -109,7 +141,7 @@ async function addDemoRepository() {
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <Button @click="completeOnboarding">
+            <Button @click="step = 'cli'">
               Continuar
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Button>
@@ -150,7 +182,7 @@ async function addDemoRepository() {
               <BrandIcon brand="github" data-icon="inline-start" />
               Conectar con GitHub
             </Button>
-            <Button variant="ghost" @click="completeOnboarding"
+            <Button variant="ghost" @click="step = 'cli'"
               >Omitir por ahora</Button
             >
           </div>
@@ -238,7 +270,7 @@ async function addDemoRepository() {
             <Button
               v-if="!github.running.value"
               variant="ghost"
-              @click="completeOnboarding"
+              @click="step = 'cli'"
               >Omitir por ahora</Button
             >
           </div>
@@ -264,7 +296,7 @@ async function addDemoRepository() {
         </template>
       </div>
 
-      <div v-else class="flex flex-col gap-3">
+      <div v-else-if="step === 'github'" class="flex flex-col gap-3">
         <div
           v-if="repositoryState === 'choose'"
           class="rounded-md border border-border p-3"
@@ -304,20 +336,25 @@ async function addDemoRepository() {
           >
             Usar este repo
           </Button>
-          <Button
-            v-if="repositoryState === 'added'"
-            @click="completeOnboarding"
-          >
+          <Button v-if="repositoryState === 'added'" @click="step = 'cli'">
             Continuar
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Button>
-          <Button
-            v-else
-            variant="ghost"
-            :disabled="busy"
-            @click="completeOnboarding"
+          <Button v-else variant="ghost" :disabled="busy" @click="step = 'cli'"
             >Omitir por ahora</Button
           >
+        </div>
+      </div>
+
+      <div v-else class="flex flex-col gap-4">
+        <CliConnectionList :connections="cli" />
+        <p v-if="!isMock" class="text-xs text-muted-foreground">
+          Vista previa: el comando todavía no funciona. Puedes seguir y usar el
+          editor sin CLI.
+        </p>
+        <div class="mt-2 flex flex-wrap items-center justify-end gap-4">
+          <Button variant="ghost" @click="step = 'github'"> Volver </Button>
+          <Button @click="completeOnboarding"> Ir a Mis proyectos </Button>
         </div>
       </div>
     </main>

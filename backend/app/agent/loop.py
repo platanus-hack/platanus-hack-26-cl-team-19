@@ -1,10 +1,12 @@
 """El loop del agente para el chat del editor (JAJ-67, modo secundario según JAJ-54).
 
 El modo principal es MCP: el loop corre en la CLI del usuario. Este loop es para quien no tiene una CLI
-o para la demo: mensaje del usuario → modelo → tool calls (``AgentTools``) → resultados → modelo, con un
+o para la demo: mensaje del usuario → Claude → tool calls (``AgentTools``) → resultados → Claude, con un
 máximo de iteraciones, y cada paso se transmite al editor como un evento.
 
-La credencial la selecciona el backend antes de iniciar el loop. Claude y OpenAI comparten las tools.
+La credencial es la API key del usuario (viaja en cada request y no se guarda) o, en modo demo, la del
+equipo (``BRANCHPOINT_CHAT_DEMO=on``: el SDK la resuelve del entorno, una key o Workload Identity
+Federation). Branchpoint nunca usa el login de claude.ai de un usuario.
 
 ``LLM`` es la interfaz que usa el loop; ``AnthropicLLM`` la implementa con el SDK y los tests usan uno
 falso que devuelve tool calls fijas.
@@ -13,13 +15,9 @@ falso que devuelve tool calls fijas.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-
-import anthropic
-import openai
 
 from app.agent.mcp import INSTRUCTIONS
 from app.agent.tools import AgentTools
@@ -46,9 +44,11 @@ class LLM(Protocol):
 
 
 class AnthropicLLM:
-    """Claude por la API, con la API key seleccionada para el turno."""
+    """Claude por la API, con la key del usuario o, sin ella, la credencial que resuelva el SDK (demo)."""
 
     def __init__(self, api_key: str | None = None, model: str = MODEL) -> None:
+        import anthropic
+
         self.model = model
         self._client = (
             anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=180.0)
@@ -104,41 +104,6 @@ def system_prompt(project_id: str) -> str:
     )
 
 
-_BILLING_ERRORS = {
-    "billing_error": "reportó un problema de facturación o pago",
-    "credit_balance_exhausted": "reportó que se agotaron los créditos de API de la organización",
-    "insufficient_quota": "reportó cuota de API insuficiente para esta credencial",
-    "project_spend_limit_exceeded": "reportó que el proyecto alcanzó su tope de gasto",
-    "organization_spend_limit_exceeded": "reportó que la organización alcanzó su tope de gasto",
-    "organization_usage_limit_exceeded": "reportó que la organización alcanzó su límite de uso",
-}
-
-_HTTP_ERRORS = {
-    400: "rechazó los parámetros de la solicitud",
-    401: "rechazó la autenticación de la API key",
-    402: "reportó un problema de facturación o pago",
-    403: "denegó el acceso con esta API key",
-    404: "no encontró el modelo solicitado o la API key no tiene acceso",
-    429: "rechazó temporalmente la solicitud por un límite de API",
-    503: "está temporalmente no disponible",
-    529: "está temporalmente sobrecargado",
-}
-
-
-def _provider_error(error: anthropic.APIError | openai.APIError, model: str) -> str:
-    provider = "OpenAI" if isinstance(error, openai.APIError) else "Anthropic"
-    if not isinstance(error, (anthropic.APIStatusError, openai.APIStatusError)):
-        return f"No se pudo completar la conexión con {provider}."
-    code = (error.code if isinstance(error, openai.APIStatusError) else error.error_code) or error.type
-    reason = _BILLING_ERRORS.get(code or "") or _HTTP_ERRORS.get(error.status_code, "no pudo completar la solicitud")
-    details = [f"HTTP {error.status_code}", f"modelo {model}"]
-    if isinstance(code, str) and re.fullmatch(r"[a-z][a-z_0-9]{0,79}", code):
-        details.append(code)
-    if error.request_id and re.fullmatch(r"req(?:uest)?_[A-Za-z0-9]{1,100}", error.request_id):
-        details.append(f"ID {error.request_id}")
-    return f"{provider} {reason}. ({' · '.join(details)})"
-
-
 def run_agent(
     tools: AgentTools,
     llm: LLM,
@@ -148,7 +113,7 @@ def run_agent(
 ) -> Iterator[dict[str, Any]]:
     """Corre el loop y emite eventos para el editor:
 
-    * ``{"type": "text", "text"}``: lo que escribe el modelo.
+    * ``{"type": "text", "text"}``: lo que escribe Claude.
     * ``{"type": "tool_call", "id", "name", "input"}`` y ``{"type": "tool_result", "id", "name", "result"}``.
     * ``{"type": "done", "stop_reason", "iterations", "usage", "cost"}`` al final.
     * ``{"type": "error", "message"}`` si el LLM falla.
@@ -159,9 +124,6 @@ def run_agent(
     for iteration in range(1, max_iterations + 1):
         try:
             turn = llm.complete(system_prompt(project_id), history, schemas)
-        except (anthropic.APIError, openai.APIError) as error:
-            yield {"type": "error", "message": _provider_error(error, llm.model)}
-            return
         except Exception as e:  # noqa: BLE001 - el editor muestra el error; nada se rompe
             yield {"type": "error", "message": f"El LLM falló ({type(e).__name__}): {e}"}
             return

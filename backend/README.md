@@ -350,11 +350,10 @@ El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las 
    - **Con login:** el token es el mismo que usa el editor (JAJ-78), y cada usuario ve solo sus proyectos. Sin token, `/mcp` responde 401. El token de larga duración para emparejar la CLI llega con JAJ-81.
    - **Sin login** (`BRANCHPOINT_AUTH=off`): no hace falta el header.
 
-2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`) u OpenAI Responses (`gpt-4.1-mini`), con un máximo de 8 vueltas por mensaje. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage` y `cost` de la tabla de precios) y `error`.
-   - **Credencial guardada:** el onboarding y Configuración usan `GET /credentials` para listar proveedores configurados y `PUT /credentials/{provider}` o `DELETE /credentials/{provider}` para guardar o quitar la clave. Requiere sesión de Supabase, `DATABASE_URL` y las migraciones aplicadas en Supabase con Vault. La lectura devuelve solo los nombres de proveedor. Cuando no llega un header, OpenAI usa la clave guardada y Claude usa la opción elegida en Configuración.
-   - **Credencial por solicitud:** envía `provider: "anthropic"` (predeterminado) con `X-Anthropic-Api-Key` o `provider: "openai"` con `X-OpenAI-Api-Key`. Se usa en esa request y no se guarda.
-   - **Cuota de Branchpoint:** configura `ANTHROPIC_API_KEY` en el backend. Esta es la opción inicial para Claude y requiere sesión. La cuota es de 30 mensajes por usuario por día UTC, con contador atómico en Postgres. La opción personal no consume esta cuota. OpenAI usa siempre una API key del usuario.
-   - **Sin credencial aplicable:** responde 422.
+2. **Chat del editor: `POST /projects/{id}/chat` (modo secundario).** El loop corre en el backend con Claude (`claude-opus-5-5`), con un máximo de 8 vueltas por mensaje. Transmite NDJSON, una línea por evento: `text`, `tool_call`, `tool_result`, `done` (con `usage` y `cost` de la tabla de precios) y `error`.
+   - **Credencial del usuario:** su API key en el header `X-Anthropic-Api-Key`. Se usa en esa request y no se guarda.
+   - **Modo demo:** con `BRANCHPOINT_CHAT_DEMO=on` y sin header, se usa la credencial del equipo (el SDK la resuelve del entorno), con 30 mensajes por usuario y por día.
+   - **Sin ninguna de las dos:** responde 422.
 
 | Tool | Qué hace |
 | -- | -- |

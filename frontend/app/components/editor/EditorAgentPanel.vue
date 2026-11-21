@@ -117,10 +117,8 @@ watch(
 
       <div v-else class="mt-auto flex flex-col gap-3">
         <p class="text-sm text-muted-foreground">
-          <slot name="intro">
-            Pide un cambio en lenguaje natural. El agente lee el código, simula
-            el escenario y te propone el cambio antes de aplicarlo.
-          </slot>
+          Pide un cambio en lenguaje natural. El agente lee el código, simula el
+          escenario y te propone el cambio antes de aplicarlo.
         </p>
         <ul
           v-if="suggestions.length"
@@ -150,7 +148,6 @@ watch(
           :id="inputId"
           v-model="draft"
           rows="2"
-          maxlength="20000"
           placeholder="Pide un cambio o haz una pregunta…"
           :disabled="disabled"
           class="max-h-40 min-h-14 text-sm"
