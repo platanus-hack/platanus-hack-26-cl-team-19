@@ -178,6 +178,32 @@ spec:
     assert (api.vcpu["value"], api.memory_gb["value"], api.workers["value"]) == (0.5, 1.0, 2)
 
 
+@pytest.mark.parametrize(("queues", "dedicated"), [("refresh", "refresh"), ("refresh,default", None)])
+def test_kubernetes_celery_worker_detects_dedicated_queue(tmp_path, queues, dedicated):
+    write(
+        tmp_path,
+        {
+            "k8s/worker.yaml": f"""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: worker
+          command: ["celery", "-A", "main.celery"]
+          args: ["worker", "-Q", "{queues}", "--concurrency", "3"]
+"""
+        },
+    )
+    worker = services(scan_deployment(tmp_path))["celery-worker"]
+    assert worker.role == "worker"
+    assert worker.queue == dedicated
+    assert (worker.workers["value"], worker.replicas["value"]) == (3, 2)
+
+
 def test_fly_toml(tmp_path):
     write(
         tmp_path,

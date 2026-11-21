@@ -59,6 +59,7 @@ class Step:
     on_miss: tuple[Step, ...] | None = None
     # solo background: cola donde se encola el trabajo (None = no se simula el worker)
     queue: str | None = None
+    infer_queue: bool = True  # compatibilidad con modelos que omiten el nombre cuando solo hay una cola
 
 
 def walk_steps(steps: tuple[Step, ...]) -> Iterator[Step]:
@@ -257,6 +258,7 @@ def _load_step(s: dict[str, Any], where: str, warnings: list[str]) -> Step:
         hit_ratio=hit_ratio,
         on_miss=on_miss,
         queue=s.get("queue"),
+        infer_queue=s.get("infer_queue", True),
     )
 
 
@@ -267,7 +269,7 @@ def _resolve_queue(step: Step, queues: dict[str, QueueDeployment], where: str, w
     if step.resource != RESOURCE_BACKGROUND:
         return step
     name = step.queue
-    if name is None and len(queues) == 1:
+    if name is None and step.infer_queue and len(queues) == 1:
         name = next(iter(queues))
     if name is None or name not in queues:
         warnings.append(

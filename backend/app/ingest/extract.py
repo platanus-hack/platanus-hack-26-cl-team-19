@@ -112,6 +112,9 @@ class Effect:
     awaited: bool = True
     shape: str = ""  # db: pk | lookup | range | count | count_all | scan | stage | commit | unknown
     branch: tuple = ()  # ramas if/else que contienen la llamada: (("archivo:línea_del_if", "body"|"else"), ...)
+    cache_miss: tuple[str, int] | None = None  # guardia y línea del SET correspondiente al GET
+    task: str | None = None
+    queue: str | None = None
 
 
 @dataclass
@@ -354,6 +357,68 @@ def _kw(call: ast.Call, name: str) -> ast.AST | None:
     return None
 
 
+def _call(expr: ast.AST | None) -> ast.Call | None:
+    if isinstance(expr, ast.Await):
+        expr = expr.value
+    return expr if isinstance(expr, ast.Call) else None
+
+
+def _cache_key(call: ast.Call | None, methods: set[str]) -> tuple[str, str] | None:
+    if not call or not isinstance(call.func, ast.Attribute) or call.func.attr not in methods or not call.args:
+        return None
+    if any(isinstance(node, (ast.Call, ast.Subscript)) for node in ast.walk(call.func.value)):
+        return None
+    receiver = _name(call.func.value)
+    if not any(hint in receiver.lower() for hint in CACHE_HINTS):
+        return None
+    key = call.args[0]
+    if all(
+        isinstance(node, (ast.Name, ast.Load, ast.Constant, ast.JoinedStr, ast.FormattedValue))
+        for node in ast.walk(key)
+    ):
+        return receiver, ast.dump(key)
+    return None
+
+
+def _cache_guard(assign: ast.stmt, guard: ast.stmt) -> tuple[ast.Call, bool] | None:
+    if not isinstance(assign, ast.Assign) or len(assign.targets) != 1 or not isinstance(guard, ast.If) or guard.orelse:
+        return None
+    target, test = assign.targets[0], guard.test
+    if not isinstance(target, ast.Name) or not isinstance(test, ast.Compare) or len(test.ops) != 1:
+        return None
+    other = test.comparators[0]
+    if not isinstance(test.left, ast.Name) or test.left.id != target.id or not isinstance(other, ast.Constant):
+        return None
+    lookup = _call(assign.value)
+    if other.value is not None or not isinstance(test.ops[0], (ast.Is, ast.IsNot)) or not _cache_key(lookup, {"get"}):
+        return None
+    assert lookup is not None
+    return lookup, isinstance(test.ops[0], ast.IsNot)
+
+
+def _imported(mod: Module, expr: ast.AST) -> str:
+    root, dot, rest = _name(expr).partition(".")
+    return f"{mod.imports.get(root, '')}{dot}{rest}"
+
+
+def _celery_task(proj: Project, task: FuncInfo) -> ast.AST | None:
+    """Reconoce funciones decoradas con una instancia Celery o con shared_task."""
+    for decorator in task.node.decorator_list:
+        fn = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if _imported(task.module, fn) == "celery.shared_task":
+            return decorator
+        if not isinstance(fn, ast.Attribute) or fn.attr != "task":
+            continue
+        resolved = proj.resolve_expr(task.module, fn.value)
+        if resolved and resolved[0] == "assign":
+            module, _, symbol = resolved[1].partition(":")
+            mod = proj.modules[module]
+            instance = _call(mod.assigns[symbol])
+            if instance and _imported(mod, instance.func) == "celery.Celery":
+                return decorator
+    return None
+
+
 def _shape_from(filtered: bool, one_row: bool, limited: bool, counted: bool) -> str:
     if counted:
         return "count" if filtered else "count_all"
@@ -384,15 +449,66 @@ class BodyVisitor(ast.NodeVisitor):
         self.entity_vars: dict[str, str] = {}  # statement = select(Item) -> "Item"
         self.stmt_vars: dict[str, ast.AST] = {}  # statement = select(Item).where(...) -> la expresión
         self.branch: list[tuple[str, str]] = []
+        self.cache_lookups: dict[ast.Call, tuple[str, int]] = {}
+        self.cache_guards: set[ast.If] = set()
         self.parents: dict[int, ast.AST] = {}
         for parent in ast.walk(fi.node):
             for child in ast.iter_child_nodes(parent):
                 self.parents[id(child)] = parent
 
+    def visit_function_body(self) -> None:
+        """Marca el camino de miss cuando el GET y el SET usan la misma clave."""
+        body = self.fi.node.body
+        after_guard = None
+        for i, guard in enumerate(body[1:], start=1):
+            match = _cache_guard(body[i - 1], guard)
+            if not match:
+                continue
+            assert isinstance(guard, ast.If)
+            lookup, early_return = match
+            miss = guard.body
+            if early_return:
+                ret = guard.body[0]
+                final = body[-1]
+                if len(guard.body) != 1 or not isinstance(ret, ast.Return) or not isinstance(ret.value, ast.Name):
+                    continue
+                if ret.value.id != guard.test.left.id or not isinstance(final, ast.Return):
+                    continue
+                if not isinstance(final.value, (ast.Name, ast.Constant)):
+                    continue
+                miss = body[i + 1 : -1]
+            last = miss[-1] if miss else None
+            fill = _call(last.value) if isinstance(last, ast.Expr) else None
+            if fill is None or _cache_key(fill, {"set", "setex"}) != _cache_key(lookup, {"get"}):
+                continue
+            key_names = {n.id for n in ast.walk(lookup) if isinstance(n, ast.Name)}
+            if any(
+                isinstance(n, (ast.Return, ast.Raise, ast.Yield, ast.YieldFrom, ast.Break, ast.Continue))
+                or (isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id in key_names)
+                for stmt in miss
+                for n in ast.walk(stmt)
+            ):
+                continue
+            key = f"{self.mod.rel}:{guard.lineno}"
+            self.cache_lookups[lookup] = (key, fill.lineno)
+            if early_return:
+                after_guard = (i, key)
+                break
+            self.cache_guards.add(guard)
+
+        for i, stmt in enumerate(body):
+            after_hit_return = after_guard is not None and i > after_guard[0]
+            if after_hit_return:
+                self.branch.append((after_guard[1], "cache_miss"))
+            self.visit(stmt)
+            if after_hit_return:
+                self.branch.pop()
+
     def visit_If(self, node):
         self.visit(node.test)
         key = f"{self.mod.rel}:{node.lineno}"
-        for side, stmts in (("body", node.body), ("else", node.orelse)):
+        side_on_true = "cache_miss" if node in self.cache_guards else "body"
+        for side, stmts in ((side_on_true, node.body), ("else", node.orelse)):
             self.branch.append((key, side))
             for st in stmts:
                 self.visit(st)
@@ -521,7 +637,7 @@ class BodyVisitor(ast.NodeVisitor):
             return self.self_attrs.get(recv.attr, (None, None))
         return None, None
 
-    def _effect(self, kind, op, detail, node, shape=""):
+    def _effect(self, kind, op, detail, node, shape="", *, task=None, queue=None):
         self.fi.effects.append(
             Effect(
                 kind,
@@ -533,6 +649,9 @@ class BodyVisitor(ast.NodeVisitor):
                 id(node) in self.awaited,
                 shape,
                 tuple(self.branch),
+                cache_miss=self.cache_lookups.get(node),
+                task=task,
+                queue=queue,
             )
         )
 
@@ -607,7 +726,16 @@ class BodyVisitor(ast.NodeVisitor):
         if meth in ("delay", "apply_async", "send_task") or (
             meth == "add_task" and "background" in recv_txt + str(rtype).lower()
         ):
-            self._effect("background", meth, fname, node)
+            queue = _kw(node, "queue") if meth in ("apply_async", "send_task") else None
+            task = None
+            if meth in ("delay", "apply_async"):
+                ref = self.p.resolve_expr(self.mod, recv)
+                if ref and ref[0] == "func" and (decorator := _celery_task(self.p, self.p.funcs[ref[1]])):
+                    task = ref[1]
+                    if queue is None and isinstance(decorator, ast.Call):
+                        queue = _kw(decorator, "queue")
+            queue_name = queue.value if isinstance(queue, ast.Constant) and isinstance(queue.value, str) else None
+            self._effect("background", meth, fname, node, task=task, queue=queue_name)
             return
         # caché
         if any(h in recv_txt for h in CACHE_HINTS) and meth in CACHE_METHODS:
@@ -747,8 +875,7 @@ def analyze_function(proj: Project, fi: FuncInfo) -> list[str]:
                 if m:
                     dep_fids.append(m[1])
     v = BodyVisitor(proj, fi, var_types)
-    for st in fi.node.body:
-        v.visit(st)
+    v.visit_function_body()
     return dep_fids
 
 
@@ -891,14 +1018,17 @@ def find_endpoints(proj: Project, routers, prefixes):
 def reachable(proj: Project, start: list[str], max_depth: int = 8):
     """BFS por el grafo de llamadas; devuelve efectos con la cadena de llamadas y patrones de riesgo."""
     effects, risks, visited = [], [], set()
+    visited_cache_paths: set[tuple[str, tuple]] = set()
     n1_sites: set[tuple[str, int]] = set()
     frontier = [(f, [f], None, ()) for f in start]
     depth = 0
     while frontier and depth <= max_depth:
         nxt = []
         for fid, chain, in_loop_ctx, branch_ctx in frontier:
-            if fid in visited or fid not in proj.funcs:
+            cache_path = tuple(branch for branch in branch_ctx if branch[1] == "cache_miss")
+            if (fid, cache_path) in visited_cache_paths or fid not in proj.funcs:
                 continue
+            visited_cache_paths.add((fid, cache_path))
             visited.add(fid)
             fi = proj.funcs[fid]
             is_async = isinstance(fi.node, ast.AsyncFunctionDef)
@@ -963,6 +1093,12 @@ def reachable(proj: Project, start: list[str], max_depth: int = 8):
     return effects, risks, visited
 
 
+def _model_effect(e: dict) -> dict:
+    core = ("kind", "op", "detail", "shape", "file", "line", "in_loop", "branch", "via")
+    optional = ("cache_miss", "task", "queue")
+    return {**{k: e[k] for k in core}, **{k: e[k] for k in optional if e[k] is not None}}
+
+
 def run(root: Path) -> dict:
     t0 = time.perf_counter()
     proj = Project(root)
@@ -1008,16 +1144,15 @@ def run(root: Path) -> dict:
                     {e["detail"].split("(")[1].rstrip(")") for e in effects if e["kind"] == "db" and "(" in e["detail"]}
                 ),
                 "functions_reached": len(visited),
-                "effects": [
-                    {k: e[k] for k in ("kind", "op", "detail", "shape", "file", "line", "in_loop", "branch", "via")}
-                    for e in effects
-                ],
+                "effects": [_model_effect(e) for e in effects],
                 "risks": risks,
             }
         )
-    t_end = time.perf_counter()
     n = len(out_eps)
     with_db = sum(1 for e in out_eps if "db" in e["touches"])
+    task_ids = {e["task"] for ep in out_eps for e in ep["effects"] if "task" in e and "queue" in e}
+    jobs = {task: [_model_effect(e) for e in reachable(proj, [task])[0]] for task in sorted(task_ids)}
+    t_end = time.perf_counter()
     return {
         "repo": root.name,
         "stats": {
@@ -1040,6 +1175,7 @@ def run(root: Path) -> dict:
             "seconds_total": round(t_end - t0, 3),
         },
         "endpoints": out_eps,
+        **({"jobs": jobs} if jobs else {}),
     }
 
 

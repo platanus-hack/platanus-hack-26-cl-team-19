@@ -232,6 +232,11 @@ def step_for(e: dict, ctx: dict) -> dict:
         step = {**base, "resource": "api_cpu", "time": from_catalog(CATALOG["cpu_steps"][e["shape"]])}
     elif e["kind"] in ("cache", "background"):
         step = {**base, "resource": e["kind"], "time": from_catalog(CATALOG["other_steps"][e["kind"]])}
+        if e["kind"] == "background":
+            if e.get("queue") in ctx["queues"] and e.get("task"):
+                step["queue"] = e["queue"]
+            else:
+                step["infer_queue"] = False
     else:  # http, sdk, plugin: servicio externo
         declared_ms = ctx["external_ms"].get(e["detail"])
         t = (
@@ -255,6 +260,8 @@ def step_for(e: dict, ctx: dict) -> dict:
 
 def _ms(step: dict) -> float:
     v = step["time"]["value"] or 0.0
+    if "on_miss" in step:
+        v += (1 - (step["hit_ratio"]["value"] or 0)) * (v + sum(_ms(query) for query in step["on_miss"]))
     return v * (step["repeat"]["value"] if "repeat" in step else 1)
 
 
@@ -279,13 +286,76 @@ def pick_branches(steps: list[dict], depth: int = 0) -> tuple[list[dict], list[d
     return kept, dropped
 
 
+def effect_steps(effects: list[dict], ctx: dict) -> list[dict]:
+    steps = [{**step_for(e, ctx), "branch": e["branch"]} for e in effects]
+    moved: set[int] = set()
+    for lookup, step in zip(effects, steps, strict=True):
+        if "cache_miss" not in lookup:
+            continue
+        guard, fill_line = lookup["cache_miss"]
+        miss_branch = [*lookup["branch"], [guard, "cache_miss"]]
+        region = [i for i, e in enumerate(effects) if e["branch"][: len(miss_branch)] == miss_branch]
+        fills = [
+            i
+            for i in region
+            if effects[i]["kind"] == "cache"
+            and effects[i]["line"] == fill_line
+            and effects[i]["file"] == lookup["file"]
+        ]
+        if len(fills) != 1 or moved.intersection(region):
+            continue
+        queries = [i for i in region if i != fills[0]]
+        if not queries or not all(effects[i]["kind"] == "db" and effects[i]["op"] == "read" for i in queries):
+            continue
+        # El motor ya simula el SET después de on_miss, incluso si el AST lo detectó aparte.
+        on_miss = [{**steps[i], "branch": steps[i]["branch"][len(miss_branch) :]} for i in queries]
+        selected, _ = pick_branches(on_miss)
+        order = {id(query): i for i, query in enumerate(on_miss)}
+        selected.sort(key=lambda query: order[id(query)])
+        for query in selected:
+            query.pop("branch")
+        at = step["at"]
+        ratio = ctx["cache_hit_ratio"].get(at)
+        what = f"tasa de aciertos de la caché en {at}"
+        if ratio is None:
+            step["hit_ratio"] = num(None, "fracción", "SUPUESTO", f"Falta la {what}", default=True)
+        else:
+            if type(ratio) not in (int, float) or not 0 <= ratio <= 1:
+                raise ValueError(f"La {what} debe estar entre 0 y 1")
+            step["hit_ratio"] = declared(ratio, "fracción", what)
+        step["on_miss"] = selected
+        moved.update(region)
+    return [step for i, step in enumerate(steps) if i not in moved]
+
+
+def _add_cache_questions(steps: list[dict], questions: dict[str, str]) -> None:
+    """Pregunta por las cachés que quedaron en los pasos de la simulación."""
+    for step in steps:
+        if step.get("hit_ratio", {}).get("needs_review"):
+            at = step["at"]
+            questions[f"overrides.cache_hit_ratio.{at}"] = (
+                f"¿Cuál es la tasa de aciertos de la caché en {at}, como fracción entre 0 y 1?"
+            )
+
+
+def _mean_cache_reads(steps: list[dict]) -> list[dict]:
+    reads = []
+    for cache in steps:
+        if "on_miss" not in cache:
+            continue
+        ratio = cache["hit_ratio"]
+        for query in cache["on_miss"]:
+            time = query["time"]
+            mean_ms = (time["value"] or 0) * (1 - (ratio["value"] or 0))
+            mean = derived(mean_ms, "ms", "Tiempo de la consulta × fracción de fallos de caché", time, ratio)
+            reads.append({**query, "time": mean})
+    return reads
+
+
 def build_endpoint(ep: dict, ctx: dict) -> dict:
-    steps = []
-    for e in ep["effects"]:
-        s = step_for(e, ctx)
-        s["branch"] = e.get("branch", [])
-        steps.append(s)
+    steps = effect_steps(ep["effects"], ctx)
     kept, dropped = pick_branches(steps)
+    _add_cache_questions(kept, ctx["questions"])
     order = {id(s): i for i, s in enumerate(steps)}
     kept.sort(key=lambda s: order[id(s)])
     db = [s for s in kept if s["resource"] == "db_connection"]
@@ -295,6 +365,7 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
     db_funcs = {f for s in db for f in s["via"][1:]}
     dep_db = any(s["via"][0] != ep["handler"] for s in db)
     cpu_in_hold = [s for s in cpu if db and (dep_db or db_funcs & set(s["via"][1:]))]
+    db += _mean_cache_reads(kept)
     # La CPU propia de FastAPI depende de si el endpoint es async (event loop) o def (threadpool, JAJ-46)
     base_cpu = from_catalog(CATALOG["api"]["cpu_ms" if ep.get("async") else "cpu_ms_sync"])
     parts_hold = [s["time"] for s in db + cpu_in_hold] + [s["repeat"] for s in db if "repeat" in s]
@@ -334,6 +405,63 @@ def build_endpoint(ep: dict, ctx: dict) -> dict:
         else None,
         "risks": ep["risks"],
     }
+
+
+def build_queues(graph: dict, iac: dict, answers: dict, ctx: dict) -> dict:
+    tasks_by_queue: dict[str, set[str | None]] = {}
+    for ep in graph["endpoints"]:
+        for effect in ep["effects"]:
+            if name := effect.get("queue"):
+                tasks_by_queue.setdefault(name, set()).add(effect.get("task"))
+
+    queues = {}
+    for name, tasks in sorted(tasks_by_queue.items()):
+        # El motor ejecuta un solo perfil de trabajo por cola. Si se mezclan tareas no lo adivinamos.
+        if len(tasks) != 1 or None in tasks:
+            continue
+        task = next(iter(tasks))
+        effects = graph.get("jobs", {}).get(task, [])
+        if not effects or any(e["kind"] == "background" for e in effects):
+            continue
+        candidates = effect_steps(effects, ctx)
+        steps, _ = pick_branches(candidates)
+        _add_cache_questions(steps, ctx["questions"])
+        order = {id(step): i for i, step in enumerate(candidates)}
+        steps.sort(key=lambda step: order[id(step)])
+        for step in steps:
+            step.pop("branch")
+        config = answers.get(name, {})
+        services = [s for s in iac["services"] if s.get("queue") == name]
+        observed_workers = None
+        if len(services) == 1 and "workers" in services[0]:
+            service = services[0]
+            observed_workers = service["workers"]
+            if replicas := service.get("replicas"):
+                observed_workers = derived(
+                    observed_workers["value"] * replicas["value"],
+                    "workers",
+                    f"{observed_workers['source']} × {replicas['source']}",
+                    observed_workers,
+                    replicas,
+                )
+        params = {}
+        for field, unit, default, question in (
+            ("workers", "workers", 1, f"¿Cuántos trabajos procesa en paralelo la cola {name}?"),
+            ("max_length", "trabajos", None, f"¿Cuántos trabajos pueden esperar en la cola {name}?"),
+        ):
+            if field in config:
+                value = config[field]
+                if (value is not None or field != "max_length") and (type(value) is not int or value < 1):
+                    raise ValueError(f"deployment.queues.{name}.{field} debe ser un entero positivo")
+                params[field] = declared(value, unit, f"{field} de la cola {name}")
+            elif field == "workers" and observed_workers and observed_workers["value"] >= 1:
+                params[field] = observed_workers
+            else:
+                source = f"El repo no declara {field} para la cola {name}"
+                params[field] = num(default, unit, "SUPUESTO", source, default=True)
+                ctx["questions"][f"deployment.queues.{name}.{field}"] = question
+        queues[name] = {**params, "job_steps": steps}
+    return queues
 
 
 def endpoint_weights(endpoints: list[dict], overrides: dict) -> None:
@@ -701,9 +829,20 @@ def build(repo: Path, answers: dict) -> dict:
         if "n_plus_one_list" in ov
         else from_catalog(CATALOG["n_plus_one_list_default"]),
         "external_ms": ov.get("external_ms", {}),
+        "cache_hit_ratio": ov.get("cache_hit_ratio", {}),
+        "questions": {},
+        "queues": {},
     }
+    queues = build_queues(graph, iac, answers.get("deployment", {}).get("queues", {}), ctx)
+    ctx["queues"] = queues
     endpoints = [build_endpoint(ep, ctx) for ep in graph["endpoints"]]
     endpoint_weights(endpoints, ov.get("endpoint_weights", {}))
+    deployment = deployment_model(answers, workers, pool, iac)
+    if queues:
+        deployment["queues"] = queues
+    deployment["iac"]["missing"].extend(
+        {"field": field, "question": question} for field, question in ctx["questions"].items()
+    )
     model = {
         "schema": "branchpoint.model/v1",
         "repo": {
@@ -711,7 +850,7 @@ def build(repo: Path, answers: dict) -> dict:
             "extracted_at": TODAY,
             "stats": {k: v for k, v in graph["stats"].items() if not k.startswith("seconds")},
         },
-        "deployment": deployment_model(answers, workers, pool, iac),
+        "deployment": deployment,
         "traffic": traffic_model(answers),
         "business": business_model(answers),
         "endpoints": endpoints,
