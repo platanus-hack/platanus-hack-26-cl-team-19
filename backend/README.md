@@ -120,7 +120,7 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
 
 ### Quién causa el cuello de botella (JAJ-69)
 
-Cada vez que una request suelta un recurso, el motor anota cuánto tiempo lo tuvo, a nombre de su endpoint y de la línea de código del paso que lo ocupó (el `at` del paso):
+Cada vez que una request suelta un recurso, el motor anota cuánto tiempo lo tuvo, a nombre de su endpoint y de la línea de código del paso que lo ocupó (el `at` del paso). **Lo que sigue tomado al terminar la simulación también cuenta (JAJ-100):** se anota desde que se tomó hasta el final. Sin eso, en saturación, las requests que tienen el recurso y siguen en curso no le contaban a nadie, y el banner culpaba a quien menos lo ocupaba. Así, el tiempo repartido entre endpoints es todo el tiempo ocupado: calza con `utilization × capacidad × duración`.
 
 | Recurso | Línea a la que se anota |
 | -- | -- |
@@ -144,6 +144,8 @@ Los tests están en `tests/engine/test_attribution.py`:
 - **Pool:** se anota a la primera consulta de la request.
 - **Hilos y colas:** se anotan a la request completa y a la cola.
 - **Template:** en CyberDay, el cuello de botella apunta a una línea de hash de contraseña con más del 50 % de la CPU.
+- **Recursos tomados al terminar (JAJ-100):** `GET /lento` toma la conexión y espera 120 s con ella, y ninguna de sus requests termina en 60 s. Igual queda con más del 90 % del pool y el banner apunta a `lento.py:1`.
+- **Todo el tiempo se reparte:** lo anotado de cada recurso calza con `utilization × capacidad × duración`, también con requests y trabajos en curso.
 
 ### Tráfico que cambia en el tiempo (JAJ-71)
 
