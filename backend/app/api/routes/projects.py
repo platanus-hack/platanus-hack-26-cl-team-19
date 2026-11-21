@@ -2,6 +2,8 @@
 
 Los escenarios son del proyecto (JAJ-76): se cargan de ``traffic.scenarios`` de la v1 al crearlo, se
 editan con ``PUT /projects/{id}/scenarios/{name}`` y sirven para simular cualquier versión.
+
+Todas las rutas piden sesión cuando la API tiene login (JAJ-78, ``get_store``).
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import re
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
+from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422
@@ -30,7 +33,7 @@ from app.api.schemas import (
     VersionDetail,
     VersionSummary,
 )
-from app.api.store import Project, ProjectScenario, ProjectStore, Version
+from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
 from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
 from app.models.compare import run_delta
 from app.models.run import Run
@@ -40,8 +43,11 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 SCENARIO_NAME = re.compile(r"[a-z0-9_-]{1,60}")
 
 
-def get_store(request: Request) -> ProjectStore:
-    return request.app.state.store
+def get_store(request: Request, user: User | None = Depends(current_user)) -> ProjectStore:
+    """El store de quien llama (JAJ-78). Todas las rutas de proyectos dependen de esta función, así que
+    todas piden sesión (401 sin token válido) y solo ven los proyectos de ese usuario: el de otro da
+    404, como si no existiera."""
+    return OwnedStore(request.app.state.store, owner_of(user))
 
 
 def _summary(v: Version) -> VersionSummary:

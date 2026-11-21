@@ -1,8 +1,9 @@
 """``ProjectStore`` sobre Postgres (JAJ-56): proyectos, versiones y escenarios en las tablas de
 ``supabase/migrations/``. El mapeo de cada método a SQL está en ``app/db/README.md``.
 
-El backend se conecta con ``DATABASE_URL`` como el rol ``postgres``, que no pasa por RLS. Mientras
-no haya login (JAJ-57), los proyectos no tienen dueño: ``list()`` muestra los de ``owner_id`` nulo.
+El backend se conecta con ``DATABASE_URL`` como el rol ``postgres``, que no pasa por RLS, así que el
+aislamiento entre usuarios lo hace este store (JAJ-78): ``create`` guarda el ``owner_id`` y ``get`` y
+``list`` filtran por él. Sin login, ``owner`` es ``None`` y se ven los proyectos sin dueño.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from psycopg_pool import ConnectionPool
 from app.api.store import Origin, Project, ProjectScenario, Version, scenarios_from_model
 
 _SUMMARY = "number, origin::text as origin, parent_number, note, created_at"
+_PROJECT = "id, name, sample_id, created_at, owner_id"
 
 
 def _iso(ts: datetime) -> str:
@@ -51,6 +53,7 @@ def _project(row: dict[str, Any], versions: list[Version]) -> Project:
         sample=row["sample_id"],
         created_at=_iso(row["created_at"]),
         versions=versions,
+        owner=str(row["owner_id"]) if row["owner_id"] is not None else None,
     )
 
 
@@ -86,12 +89,13 @@ class PostgresProjectStore:
     def _conn(self) -> Any:
         return self._pool.connection()  # transacción: commit al salir del with, rollback si hay error
 
-    def create(self, name: str, model: dict[str, Any], sample: str | None) -> Project:
+    def create(self, name: str, model: dict[str, Any], sample: str | None, owner: str | None = None) -> Project:
         with self._conn() as conn:
+            # owner_id referencia auth.users: un usuario que no existe ahí no puede crear proyectos
             row = conn.execute(
-                "insert into projects (name, sample_id, version_count) values (%s, %s, 1)"
-                " returning id, name, sample_id, created_at",
-                (name, sample),
+                "insert into projects (name, sample_id, version_count, owner_id) values (%s, %s, 1, %s::uuid)"
+                " returning id, name, sample_id, created_at, owner_id",
+                (name, sample, owner),
             ).fetchone()
             v1 = conn.execute(
                 "insert into model_versions (project_id, number, origin, note, model)"
@@ -105,12 +109,16 @@ class PostgresProjectStore:
                 )
         return _project(row, [_version(v1)])
 
-    def get(self, project_id: str) -> Project | None:
+    def get(self, project_id: str, owner: str | None = None) -> Project | None:
         pid = _uuid(project_id)
         if pid is None:
             return None
         with self._conn() as conn:
-            row = conn.execute("select id, name, sample_id, created_at from projects where id = %s", (pid,)).fetchone()
+            # el proyecto de otro usuario no existe para este (la ruta responde 404, no 403)
+            row = conn.execute(
+                f"select {_PROJECT} from projects where id = %s and owner_id is not distinct from %s::uuid",
+                (pid, owner),
+            ).fetchone()
             if row is None:
                 return None
             return _project(row, self._summaries(conn, [pid])[pid])
@@ -125,10 +133,12 @@ class PostgresProjectStore:
             ).fetchone()
         return _version(row) if row is not None else None
 
-    def list(self) -> list[Project]:
+    def list(self, owner: str | None = None) -> list[Project]:
         with self._conn() as conn:
             rows = conn.execute(
-                "select id, name, sample_id, created_at from projects where owner_id is null order by created_at desc"
+                f"select {_PROJECT} from projects where owner_id is not distinct from %s::uuid"
+                " order by created_at desc",
+                (owner,),
             ).fetchall()
             versions = self._summaries(conn, [r["id"] for r in rows])
         return [_project(r, versions[r["id"]]) for r in rows]
