@@ -4,6 +4,7 @@ import type {
   Graph,
   ModelSummary,
   Project,
+  ScenarioOverrides,
   VersionResults,
   VersionDetail,
 } from "@/services/editor-api";
@@ -177,13 +178,13 @@ export function useEditorProject() {
     });
   }
 
-  async function simulate() {
+  async function simulate(overrides?: ScenarioOverrides) {
     const id = project.value?.id;
     const number = version.value?.number;
     if (!id || number === undefined || !scenario.value) return;
     const selectedScenario = scenario.value;
     await request("Simulando…", async () => {
-      const result = await api.results(id, number, selectedScenario);
+      const result = await api.results(id, number, selectedScenario, overrides);
       if (scenario.value === selectedScenario) results.value = result;
     });
   }
@@ -192,7 +193,11 @@ export function useEditorProject() {
     if (version.value) await fetchCosts(version.value);
   }
 
-  async function compare(base: string, target: string) {
+  async function compare(
+    base: string,
+    target: string,
+    overrides?: ScenarioOverrides,
+  ) {
     const id = project.value?.id;
     if (!id || !base || !target || base === target || !scenario.value) return;
     await request("Comparando versiones…", async () => {
@@ -201,6 +206,7 @@ export function useEditorProject() {
         Number(base),
         Number(target),
         scenario.value,
+        overrides,
       );
     });
   }

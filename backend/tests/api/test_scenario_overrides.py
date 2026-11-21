@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 from app.api.main import create_app
 from app.api.run_cache import RUN_CACHE_HEADER
 from app.api.store import InMemoryProjectStore
-from app.models.overrides import OverrideError, apply_overrides, slowdown_targets
+from app.models import load_model
+from app.models.graph import build_graph
+from app.models.overrides import OverrideError, apply_overrides
 from app.samples import load_sample
 
 SAMPLE = "full-stack-fastapi-template"
@@ -214,8 +216,8 @@ def test_apply_overrides_does_not_touch_the_original():
 
 def test_slowdown_targets_follow_the_graph_ids():
     m = with_payments()
-    assert slowdown_targets(m) == ["db", "external:pagos"]
+    assert build_graph(load_model(m), m).slowdown_targets == ["db", "external:pagos"]
     m["deployment"]["services"] = [{"name": "Pagos", "role": "service", "origin": "ai"}]  # otro repo (IA-5)
-    assert slowdown_targets(m) == ["db", "service:pagos"]
+    assert build_graph(load_model(m), m).slowdown_targets == ["db", "service:pagos"]
     with pytest.raises(OverrideError):
         apply_overrides(m, slowdowns={"external:pagos": 2})

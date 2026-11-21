@@ -78,9 +78,22 @@ export interface GraphNode {
   simulated?: boolean;
 }
 
+export interface ScenarioOverrides {
+  endpoint_weights?: Record<string, number>;
+  slowdowns?: Record<string, number>;
+  business?: { conversion?: number; ticket_usd?: number };
+}
+
+export interface GraphEndpoint {
+  id: string;
+  weight: number;
+}
+
 export interface Graph {
   nodes: GraphNode[];
   edges: { source: string; target: string; endpoints: string[] }[];
+  endpoints?: GraphEndpoint[];
+  slowdown_targets?: string[];
 }
 
 export interface RunResource {
@@ -91,6 +104,7 @@ export interface RunResource {
 }
 
 export interface Run {
+  overrides?: string[];
   resources: RunResource[];
   bottleneck: {
     resource: string | null;
@@ -154,12 +168,16 @@ export interface Comparison {
   summary: string | null;
 }
 
-export function editorRunParams(scenario: string) {
+export function editorRunParams(
+  scenario: string,
+  overrides: ScenarioOverrides = {},
+) {
   return {
     scenario,
     seed: 0,
     duration_s: 60,
     traffic_profile: scenario === "cyberday" ? "pico" : null,
+    ...overrides,
   };
 }
 
@@ -241,16 +259,27 @@ export function createEditorApi(
       }),
     run: (id: string, version: number, scenario: string) =>
       post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
-    results: (id: string, version: number, scenario: string) =>
+    results: (
+      id: string,
+      version: number,
+      scenario: string,
+      overrides?: ScenarioOverrides,
+    ) =>
       post<VersionResults>(
         `${versionPath(id, version)}/results`,
-        editorRunParams(scenario),
+        editorRunParams(scenario, overrides),
       ),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),
-    compare: (id: string, base: number, target: number, scenario: string) =>
+    compare: (
+      id: string,
+      base: number,
+      target: number,
+      scenario: string,
+      overrides?: ScenarioOverrides,
+    ) =>
       post<Comparison>(`${projectPath(id)}/compare`, {
-        ...editorRunParams(scenario),
+        ...editorRunParams(scenario, overrides),
         a: base,
         b: target,
       }),

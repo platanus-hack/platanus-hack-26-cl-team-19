@@ -12,6 +12,7 @@ import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
 import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
+import ScenarioOverrideControls from "@/components/editor/ScenarioOverrideControls.vue";
 import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
@@ -53,6 +54,11 @@ import {
   toPlayback,
   toVersionChanges,
 } from "@/services/editor-view";
+
+import {
+  emptyScenarioOverrideDraft,
+  toScenarioOverrides,
+} from "@/services/scenario-overrides";
 
 definePageMeta({
   middleware: "supabase-session",
@@ -136,6 +142,19 @@ const inspected = computed(() => {
     toInspectedNode(node, run.value, provenance)
   );
 });
+const overrideDraft = ref(emptyScenarioOverrideDraft());
+const runOverrides = computed(() => toScenarioOverrides(overrideDraft.value));
+const dependencies = computed(() =>
+  (graph.value?.nodes ?? []).filter(({ id }) =>
+    graph.value?.slowdown_targets?.includes(id),
+  ),
+);
+const selectedDependency = computed(() =>
+  dependencies.value.find(({ id }) => id === selectedNode.value),
+);
+const overrideError =
+  "Usa pesos desde 0, una demora mayor que 0 y hasta ×100, una conversión mayor que 0 y hasta 100 % y un ticket mayor que 0.";
+
 const displayedCosts = computed(() => results.value?.cost ?? costs.value);
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
 const rows = computed(() =>
@@ -189,6 +208,7 @@ watch(run, (value) => {
   playing.value = !!value;
 });
 watch(version, (detail) => {
+  overrideDraft.value = emptyScenarioOverrideDraft();
   selectedNode.value = null;
   replicas.value = detail?.model.deployment.api.replicas.value ?? "";
 });
@@ -393,10 +413,20 @@ async function saveVersion() {
         :disabled="busy"
       >
         <div class="flex flex-col gap-3">
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
           <Button
             class="self-start"
-            :disabled="busy || !scenario"
-            @click="compare(base, target)"
+            :disabled="busy || !scenario || !runOverrides"
+            @click="runOverrides && compare(base, target, runOverrides)"
           >
             Ejecutar comparación
           </Button>
@@ -460,11 +490,21 @@ async function saveVersion() {
             :disabled="busy"
             hide-label
           />
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
           <Button
-            :disabled="busy || !scenario || !graph"
+            :disabled="busy || !scenario || !graph || !runOverrides"
             @click="
               panel = 'simulation';
-              simulate();
+              if (runOverrides) simulate(runOverrides);
             "
           >
             <Loader2
@@ -527,6 +567,25 @@ async function saveVersion() {
             : "Simula un escenario para ver el uso del componente."
         }}
       </p>
+      <div
+        v-if="!isMock && selectedDependency"
+        class="flex flex-col gap-2 border-t border-border p-4"
+      >
+        <Label for="editor-node-delay">Demora en la corrida (×)</Label>
+        <Input
+          id="editor-node-delay"
+          v-model="overrideDraft.slowdowns[selectedDependency.id]"
+          type="number"
+          min="0"
+          max="100"
+          step="any"
+          placeholder="Base"
+          :disabled="busy"
+        />
+        <p class="text-xs text-muted-foreground">
+          {{ selectedDependency.label }} · Mayor que 0 y hasta ×100
+        </p>
+      </div>
     </template>
 
     <template #canvas>
@@ -685,6 +744,16 @@ async function saveVersion() {
             <p v-else class="text-sm text-muted-foreground">
               Elige un escenario y pulsa Simular para reproducir el resultado.
             </p>
+            <section v-if="run?.overrides?.length" class="flex flex-col gap-1">
+              <h3 class="text-sm font-semibold">Ajustes aplicados</h3>
+              <ul
+                class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+              >
+                <li v-for="adjustment in run.overrides" :key="adjustment">
+                  {{ adjustment }}
+                </li>
+              </ul>
+            </section>
             <ul
               v-if="run?.warnings.length"
               class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"

@@ -33,6 +33,7 @@ from app.models.architecture import (
     value,
     walk_steps,
 )
+from app.models.overrides import slowdown_targets
 
 RESOURCE_EXTERNAL = "external"
 
@@ -83,6 +84,7 @@ class Graph:
     nodes: list[GraphNode]
     edges: list[GraphEdge]
     endpoints: list[GraphEndpoint]
+    slowdown_targets: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -259,6 +261,7 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
             for e in edges.values()
         ],
         endpoints=graph_endpoints,
+        slowdown_targets=slowdown_targets(raw),
     )
 
 
