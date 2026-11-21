@@ -294,8 +294,17 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
     unpriced: list[str] = []
     warnings: list[str] = []
 
-    for line in (_api_line(raw, region), _db_line(raw, region, mau, traffic_label)):
+    api_line, db_line = _api_line(raw, region), _db_line(raw, region, mau, traffic_label)
+    for line in (api_line, db_line):
         (lines.append if isinstance(line, CostLine) else unpriced.append)(line)
+    # JAJ-88: sin precio real = sin línea (proveedor sin precios) o en local (US$0). Sale de las mismas
+    # funciones que calculan el precio, así un proveedor nuevo con precio deja de faltar solo.
+    dep = raw["deployment"]
+    missing = [
+        c
+        for c, line in (("api", api_line), ("db", db_line))
+        if not isinstance(line, CostLine) or dep[c].get("provider", "local") == "local"
+    ]
 
     on_fargate = raw["deployment"]["api"].get("provider") == "fargate"
     if requests_month:
@@ -315,7 +324,6 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
     for name in raw["deployment"].get("queues", {}):
         unpriced.append(f"Workers de la cola '{name}': el modelo no dice en qué máquina corren.")
 
-    missing = _missing(raw)
     if missing:
         warnings.insert(0, _missing_warning(raw, missing))  # primero: cambia cómo leer el total
     if raw["deployment"]["db"].get("pooler"):
@@ -341,20 +349,13 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
     )
 
 
+# Proveedores con precio, para decirle al usuario qué elegir. Lo que falta se detecta de las líneas;
+# tests/costs/test_missing.py comprueba que estos conjuntos coinciden con _api_line y _db_line.
 PRICED_API = {"fargate"}
 PRICED_DB = {"supabase", "rds_postgres"}
 COMPONENT_NAMES = {"api": "la API", "db": "la DB"}
-
-
-def _missing(raw: dict[str, Any]) -> list[str]:
-    """La API y la DB que no tienen precio real: en local o en un proveedor sin precios (JAJ-88)."""
-    dep = raw["deployment"]
-    out = []
-    if dep["api"].get("provider", "local") not in PRICED_API:
-        out.append("api")
-    if dep["db"].get("provider", "local") not in PRICED_DB:
-        out.append("db")
-    return out
+# líneas de costo que dependen de cada componente: el ALB solo existe con la API en Fargate
+COMPONENT_LINES = {"api": {"api", "alb"}, "db": {"db"}}
 
 
 def describe_missing(missing: list[str]) -> str:
@@ -381,19 +382,39 @@ def _missing_warning(raw: dict[str, Any], missing: list[str]) -> str:
 
 @dataclass
 class CostDelta:
+    """Diferencia de costo entre dos versiones.
+
+    JAJ-88: ``a``, ``b``, ``diff``, ``pct`` y ``by_line`` cuentan solo los componentes con precio en
+    las dos versiones. Si la API tiene precio solo en v2 (v1 en local), sumarla haría que todo el
+    "+US$X" fuera la API de v2, presentado como una diferencia. Los totales completos de cada versión
+    siguen en su ``CostEstimate``.
+    """
+
     a: float
     b: float
     diff: float  # b − a
     pct: float | None  # (b − a) / a; None si a es 0
     by_line: dict[str, float]  # diferencia por componente (b − a), con 0 si falta en una
-    # JAJ-88: componentes sin precio en alguna de las dos versiones; la diferencia no los cuenta
+    # componentes sin precio en alguna de las dos versiones, y en cuál
     missing: list[str] = field(default_factory=list)
+    missing_a: list[str] = field(default_factory=list)
+    missing_b: list[str] = field(default_factory=list)
 
 
 def cost_delta(a: CostEstimate, b: CostEstimate) -> CostDelta:
-    va, vb = value(a.total), value(b.total)
-    la = {line.id: value(line.usd_month) for line in a.lines}
-    lb = {line.id: value(line.usd_month) for line in b.lines}
-    by_line = {k: round(lb.get(k, 0.0) - la.get(k, 0.0), 2) for k in sorted(set(la) | set(lb))}
     missing = [c for c in ("api", "db") if c in a.missing or c in b.missing]
-    return CostDelta(va, vb, round(vb - va, 2), round((vb - va) / va, 4) if va else None, by_line, missing)
+    skip = set().union(*(COMPONENT_LINES[c] for c in missing))
+    la = {line.id: value(line.usd_month) for line in a.lines if line.id not in skip}
+    lb = {line.id: value(line.usd_month) for line in b.lines if line.id not in skip}
+    va, vb = round(sum(la.values()), 2), round(sum(lb.values()), 2)
+    by_line = {k: round(lb.get(k, 0.0) - la.get(k, 0.0), 2) for k in sorted(set(la) | set(lb))}
+    return CostDelta(
+        va,
+        vb,
+        round(vb - va, 2),
+        round((vb - va) / va, 4) if va else None,
+        by_line,
+        missing,
+        list(a.missing),
+        list(b.missing),
+    )

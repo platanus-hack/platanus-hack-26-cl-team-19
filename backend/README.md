@@ -189,7 +189,7 @@ Además:
 
 ### Cuando el sistema no alcanza a atender (JAJ-89)
 
-`error_rate` solo cuenta las requests que terminaron, sea bien o con error. Una request que sigue en fila cuando se acaba la simulación, y todavía no llega al timeout del cliente, no es ni ok ni error: queda en `in_flight`. En un sistema saturado la fila crece sin parar, así que un "0 % de errores" puede esconder un colapso. Con branchpoint-shop-demo a 400 req/s y 60 s, el `Run` daba 0 % de errores con un p95 de 22 s.
+`error_rate` solo cuenta las requests que terminaron, sea bien o con error. Una request que sigue en fila cuando se acaba la simulación, y todavía no llega al timeout del cliente, no es ni ok ni error: queda en `in_flight`. En un sistema saturado la fila crece sin parar, así que un "0 % de errores" puede esconder un colapso. Con branchpoint-shop-demo a 400 req/s, 60 s y semilla 7 (el perfil de su `simulate_demo.py`), el `Run` daba 0 % de errores con un p95 de 22 s.
 
 Por eso el `Run` trae `saturation`:
 - `saturated`: se cumplen dos condiciones.
@@ -203,7 +203,7 @@ Por eso el `Run` trae `saturation`:
 - `offered_rps`: las req/s que llegaron (con perfil, el promedio).
 - `message`: el aviso en español. También va primero en `warnings`, y dice cuánto crece la espera y dónde estaba la fila.
 
-Los umbrales (5 %, ×1,5, 0,25 s) son **SUPUESTO**: los eligió el equipo, con el razonamiento de arriba, y no salen de una medición. Los tests cubren los dos lados: el colapso con 0 % de errores se marca, y un endpoint lento, una simulación corta o un perfil que sube no se marcan (`tests/engine/test_saturation.py`). Con branchpoint-shop-demo, a 400 req/s queda 39 % sin respuesta y la espera crece de 11 a 22 s. A 100 req/s no aparece el aviso.
+Los umbrales (5 %, ×1,5, 0,25 s) son **SUPUESTO**: los eligió el equipo, con el razonamiento de arriba, y no salen de una medición. Los tests cubren los dos lados: el colapso con 0 % de errores se marca, y un endpoint lento, una simulación corta o un perfil que sube no se marcan (`tests/engine/test_saturation.py`). Con branchpoint-shop-demo (60 s, semilla 7), a 400 req/s queda 39 % sin respuesta y la espera crece de 11 a 22 s. A 100 req/s no aparece el aviso.
 
 En `compare`, `summary` agrega "Ojo: v1 no alcanza a atender este tráfico (v1 deja 39 % de las requests sin respuesta al terminar): su tasa de error es un piso". Las metas del agente (`simulate` y `compare` de `app/agent/tools.py`) usan ese techo, así que una versión saturada nunca "cumple" por su 0 % de errores. El bloque `errors` dice con qué tasa juzgó (`basis`, `value` y el `error_rate` original), y el de `p95` dice por qué no cumple.
 
@@ -453,7 +453,8 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 
 **API o DB sin precio (JAJ-88).** Solo hay precios para la API en `fargate` y para la DB en `supabase` o `rds_postgres`. En `local` cuestan US$0, y en otro proveedor (por ejemplo `render`) no tienen precio. En ambos casos el total no las incluye, así que **no cambia con sus réplicas ni con su plan**. Un repo importado con Docker Compose queda en `local`. Con branchpoint-shop-demo, por ejemplo, 1 y 5 réplicas daban "= Igual", y los US$62/mes eran solo la caché.
 - **`CostEstimate.missing`:** `["api", "db"]`, los componentes sin precio. El primer elemento de `warnings` lo explica y dice qué proveedor usar para comparar.
-- **`CostDelta.missing`:** los que faltan en alguna de las dos versiones.
+- **`CostDelta.missing`:** los que faltan en alguna de las dos versiones. `missing_a` y `missing_b` dicen en cuál. `a`, `b`, `diff`, `pct` y `by_line` **cuentan solo los componentes con precio en las dos**. Si v1 está en local y v2 en Fargate, sumar la API (y su ALB) haría que todo el "+US$X" fuera la API de v2, presentado como una diferencia. En ese caso el resumen dice "sin contar la API, que tiene precio solo en v2". Los totales completos siguen en `cost_a` y `cost_b`.
+- **Proveedores con precio:** lo que falta se detecta de las mismas funciones que calculan el precio. `PRICED_API` y `PRICED_DB` solo arman el aviso, y un test comprueba que coinciden.
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
 - **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
 

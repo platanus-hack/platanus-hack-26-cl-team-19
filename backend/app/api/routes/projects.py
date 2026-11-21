@@ -35,7 +35,7 @@ from app.api.schemas import (
 )
 from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
 from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
-from app.costs.estimate import describe_missing
+from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
 
@@ -298,7 +298,7 @@ def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: 
     sign = "+" if cost.diff >= 0 else "−"
     text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
     if cost.missing:  # JAJ-88: sin esto, "+US$0.00" con la API en local se lee como "no cambia el costo"
-        text += f" sin contar {describe_missing(cost.missing)} (despliegue local o proveedor sin precios)"
+        text += " sin contar " + _missing_clause(a, b, cost)
     if fa is None or fb is None:
         return text + "."
     if fa.too_short or fb.too_short:
@@ -312,6 +312,20 @@ def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: 
     return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
 
 
+def _missing_clause(a: int, b: int, cost: CostDelta) -> str:
+    """'la API ni la DB, que no tienen precio (…)' o 'la API, que tiene precio solo en v2' (JAJ-88).
+
+    La diferencia no cuenta esos componentes (``cost_delta``), así que el texto dice cuáles y por qué.
+    """
+    both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
+    clauses = [f"{describe_missing(both)} (despliegue local o proveedor sin precios)"] if both else []
+    for c in cost.missing:
+        if c not in both:
+            priced_in = b if c in cost.missing_a else a
+            clauses.append(f"{COMPONENT_NAMES[c]}, que tiene precio solo en v{priced_in}")
+    return " ni ".join(clauses)
+
+
 def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -> str:
     saturated = [
         (n, r.saturation)
@@ -322,7 +336,8 @@ def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -
         return ""
     parts = " y ".join(f"v{n} deja {s.unanswered_rate * 100:.0f} % de las requests sin respuesta" for n, s in saturated)
     who = "Ninguna versión alcanza" if len(saturated) == 2 else f"v{saturated[0][0]} no alcanza"
-    return f" Ojo: {who} a atender este tráfico ({parts} al terminar): su tasa de error es un piso."
+    floor = "sus tasas de error son un piso" if len(saturated) == 2 else "su tasa de error es un piso"
+    return f" Ojo: {who} a atender este tráfico ({parts} al terminar): {floor}."
 
 
 @router.get(

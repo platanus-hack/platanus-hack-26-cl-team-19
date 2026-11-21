@@ -86,8 +86,41 @@ def test_agent_budget_is_not_judged_without_prices(template):
     assert check["meets_all"] is None  # nada falla, pero el presupuesto no se pudo evaluar
     priced = estimate_cost(template)
     assert _goal_check(goals, run, priced.total["value"], priced.missing)["budget"]["ok"] is True
+    # si otra meta falla, meets_all es False aunque el presupuesto no se pueda evaluar
+    strict = ProjectGoals(budget_usd_month=1_000_000, slo_p95_ms=0.001)
+    assert _goal_check(strict, run, est.total["value"], est.missing)["meets_all"] is False
 
 
-def test_missing_in_either_version_counts(template):
-    delta = cost_delta(estimate_cost(template), estimate_cost(with_api(template, "local")))
-    assert delta.missing == ["api"]
+def test_only_one_version_priced_is_not_counted_as_difference(template):
+    """La revisión de #55: v1 en local y v2 en Fargate. El +US$X no puede ser la API de v2."""
+    a, b = estimate_cost(with_api(template, "local")), estimate_cost(template)
+    delta = cost_delta(a, b)
+    assert delta.missing == ["api"] and delta.missing_a == ["api"] and delta.missing_b == []
+    assert "api" not in delta.by_line and "alb" not in delta.by_line  # ni la API ni su balanceador
+    assert delta.diff == pytest.approx(0, abs=0.01)  # el resto (DB, transferencia) es igual
+    assert delta.b - delta.a == pytest.approx(delta.diff, abs=0.01)
+    assert value_of(b) > value_of(a)  # los totales completos siguen en cada CostEstimate
+    text = compare_summary(1, 2, delta, None, None)
+    assert "sin contar la API, que tiene precio solo en v2" in text
+    reverse = compare_summary(1, 2, cost_delta(b, a), None, None)
+    assert "sin contar la API, que tiene precio solo en v1" in reverse
+
+
+def value_of(est):
+    return est.total["value"]
+
+
+def test_priced_provider_sets_match_the_price_functions(template):
+    """PRICED_API y PRICED_DB (para el aviso) coinciden con lo que de verdad tiene precio."""
+    from app.costs.estimate import PRICED_API, PRICED_DB, _api_line, _db_line
+
+    for provider in PRICED_API:
+        assert estimate_cost(with_api(template, provider)).missing == []
+        assert not isinstance(_api_line(with_api(template, provider), "us-east-1"), str)
+    assert isinstance(_api_line(with_api(template, "render"), "us-east-1"), str)
+    rds = copy.deepcopy(template)
+    rds["deployment"]["db"].update(provider="rds_postgres", plan="db.t4g.micro")
+    for provider, raw in (("supabase", template), ("rds_postgres", rds)):
+        assert provider in PRICED_DB
+        assert not isinstance(_db_line(raw, "us-east-1", 1000, None), str), provider
+        assert "db" not in estimate_cost(raw).missing

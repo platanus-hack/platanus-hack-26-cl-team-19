@@ -221,6 +221,14 @@ def _provenance(model: dict[str, Any], run: Run) -> dict[str, Any]:
     }
 
 
+# De dónde sale "saturated": umbrales elegidos por el equipo, no medidos (JAJ-89, README del backend)
+SATURATION_PROVENANCE = {
+    "label": "SUPUESTO",
+    "source": "JAJ-89: saturado = al menos 5 % de las requests sin respuesta al terminar y una espera (Ley de "
+    "Little) que crece de la mitad al final: ×1,5 más 0,25 s. Umbrales elegidos por el equipo.",
+}
+
+
 def _goal_check(
     goals: ProjectGoals, run: Run, monthly: float | None, missing: list[str] | None = None
 ) -> dict[str, Any] | None:
@@ -239,6 +247,7 @@ def _goal_check(
             "value": error_rate,
             "basis": "techo por saturación: error_rate más las requests sin respuesta al terminar (JAJ-89)",
             "error_rate": run.error_rate,
+            **SATURATION_PROVENANCE,
         }
         if saturated
         else {"value": error_rate, "basis": "error_rate"}
@@ -292,7 +301,7 @@ def _run_summary(run: Run, model: dict[str, Any]) -> dict[str, Any]:
         "errors": run.errors,
         "throughput_rps": round(run.throughput_rps, 1),
         # JAJ-89: si quedaron requests sin respuesta, error_rate es un piso; el agente debe decirlo
-        "saturation": asdict(run.saturation) if run.saturation is not None else None,
+        "saturation": {**asdict(run.saturation), **SATURATION_PROVENANCE} if run.saturation is not None else None,
         "bottleneck": {
             "resource": b.resource,
             "utilization": round(b.utilization, 3),
@@ -318,9 +327,12 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "list_assumptions": "Los números SUPUESTO de una versión, con su fuente: lo que conviene preguntarle al usuario.",
     "list_scenarios": "Los escenarios del proyecto (pico_normal, cyberday...) y su tasa (× el pico o req/s fijas).",
     "simulate": "Simula una versión bajo un escenario del proyecto. Devuelve p95, errores, throughput, el cuello "
-    "de botella con su archivo:línea, la procedencia y si cumple las metas.",
+    "de botella con su archivo:línea, la procedencia y si cumple las metas (goals.meets_all: true, false, o null "
+    "si nada falla pero algo no se pudo evaluar, como el presupuesto sin precio; dilo así). Si saturation.saturated "
+    "es true, la tasa de error es un piso: dilo.",
     "compare": "Simula dos versiones con el mismo escenario y semilla. Devuelve el delta de p95, errores y costo "
-    "mensual, las ventas en juego y si cada una cumple las metas.",
+    "mensual (sin los componentes de delta.usd_month_missing, que no tienen precio en alguna versión), las ventas "
+    "en juego y si cada una cumple las metas (meets_all puede ser null: no evaluable).",
     "estimate_cost": "Costo mensual de una versión por componente, con la tabla de precios fechada.",
     "ops_schema": "JSON Schema de las operaciones que acepta propose_version.",
     "propose_version": "Aplica operaciones de arquitectura (ops_schema) a una versión y guarda el resultado como "
