@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.costs import CostDelta, CostEstimate
+from app.costs import CostDelta, CostEstimate, FailureCost
 from app.models.compare import RunDelta
 from app.models.run import Run
 
@@ -147,6 +147,11 @@ class CompareResponse(BaseModel):
     cost_a: CostEstimate
     cost_b: CostEstimate
     cost_delta: CostDelta
+    # JAJ-74: ventas en juego por hora de cada versión, según su tasa de error (None si el modelo
+    # no trae conversión, ticket o requests por sesión)
+    failure_a: FailureCost | None = None
+    failure_b: FailureCost | None = None
+    summary: str | None = Field(None, description="La comparación en una frase: costo extra y ventas que se evitan.")
 
 
 class CostRequest(BaseModel):

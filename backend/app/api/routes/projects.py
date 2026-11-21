@@ -22,7 +22,7 @@ from app.api.schemas import (
     VersionSummary,
 )
 from app.api.store import Project, ProjectStore, Version
-from app.costs import CostEstimate, cost_delta, estimate_cost
+from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
 from app.models.compare import run_delta
 from app.models.run import Run
 
@@ -143,6 +143,8 @@ def compare(project_id: str, req: CompareRequest, store: ProjectStore = Depends(
     params = RunParams(**req.model_dump(exclude={"a", "b", "region"}))
     run_a, run_b = run_model(va.model, params), run_model(vb.model, params)
     cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
+    delta = cost_delta(cost_a, cost_b)
+    fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)  # JAJ-74
     return CompareResponse(
         a=_summary(va),
         b=_summary(vb),
@@ -151,8 +153,32 @@ def compare(project_id: str, req: CompareRequest, store: ProjectStore = Depends(
         delta=run_delta(run_a, run_b, va.model, vb.model),
         cost_a=cost_a,
         cost_b=cost_b,
-        cost_delta=cost_delta(cost_a, cost_b),
+        cost_delta=delta,
+        failure_a=fa,
+        failure_b=fb,
+        summary=compare_summary(va.number, vb.number, delta, fa, fb),
     )
+
+
+def compare_summary(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
+    """'v2 cuesta +US$57,66/mes y evita entre US$X y US$Y por hora en ventas en juego' (JAJ-74).
+
+    La diferencia se calcula con cada cota (piso y techo) y se ordena de menor a mayor: cuando las dos
+    versiones fallan mucho, sus techos se acercan a "si fallara todo" y esa diferencia queda cerca de 0.
+    """
+    sign = "+" if cost.diff >= 0 else "−"
+    text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
+    if fa is None or fb is None:
+        return text + "."
+    if fa.too_short or fb.too_short:
+        return text + ". La simulación es muy corta para ver los timeouts: simula más tiempo para comparar las ventas."
+    lo, hi = sorted(fa.lost_sales_per_hour[k]["value"] - fb.lost_sales_per_hour[k]["value"] for k in ("low", "high"))
+    floor = " (al menos)" if fa.is_floor or fb.is_floor else ""
+    if lo >= 0:
+        return text + f" y evita entre US${lo:,.0f} y US${hi:,.0f} por hora en ventas en juego{floor}."
+    if hi <= 0:
+        return text + f" y suma entre US${-hi:,.0f} y US${-lo:,.0f} por hora en ventas en juego{floor}."
+    return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
 
 
 @router.get(
