@@ -1,7 +1,8 @@
 """Correr una simulación desde la terminal.
 
-python -m app.cli tests/fixtures/full-stack-fastapi-template.model.json --scenario cyberday
+python -m app.cli app/samples/full-stack-fastapi-template.model.json --scenario cyberday
 python -m app.cli MODELO.json --rps 500 --duration 30 --out run.json
+python -m app.cli app/samples/fastapi-realworld-example-app.model.json --cpu-credits burst
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import sys
 from pathlib import Path
 
 from app.engine import simulate
-from app.engine.simulate import ARRIVALS
+from app.engine.simulate import ARRIVALS, CPU_CREDITS
 from app.models import load_model
 
 
@@ -28,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--cache-hit", type=float, default=None, help="tasa de aciertos (0 a 1) para todas las cachés con on_miss"
     )
+    ap.add_argument(
+        "--cpu-credits",
+        choices=CPU_CREDITS,
+        default="sustained",
+        help="DB con créditos de CPU (db.t4g.*): sustained = vCPU sostenidos (por defecto), burst = todos los vCPU",
+    )
     ap.add_argument("--out", type=Path, default=None, help="guarda el Run completo en JSON")
     a = ap.parse_args(argv)
 
@@ -41,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         arrivals=a.arrivals,
         client_timeout_s=a.client_timeout or None,
         cache_hit_ratio=a.cache_hit,
+        cpu_credits=a.cpu_credits,
     )
 
     lat = run.latency
