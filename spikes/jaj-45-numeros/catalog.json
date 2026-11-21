@@ -14,13 +14,33 @@
   "table_rows_default": {"value": 100000, "unit": "filas", "label": "SUPUESTO", "source": "Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro", "date": "2026-11-21"},
   "n_plus_one_list_default": {"value": 20, "unit": "iteraciones", "label": "SUPUESTO", "source": "Largo de la lista que recorre un N+1, sin dato", "date": "2026-11-21"},
   "api": {
-    "cpu_ms": {"value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-43: CPU de FastAPI por request a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms)", "date": "2026-11-21"},
+    "cpu_ms": {"value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-43: CPU de FastAPI por request en un endpoint async con asyncpg, a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms). Se usa en endpoints async", "date": "2026-11-21"},
+    "cpu_ms_sync": {"value": 2.1, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: endpoint def con SQLModel + psycopg (stack del template), lectura por PK, sostenido con 16-64 clientes (1,4 ms con 1 cliente; 3,4 ms con COUNT + lista de 100). Se usa en endpoints def", "date": "2026-11-21"},
     "latency_ms": {"value": 0.25, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: latencia cliente ↔ API con k6 y 1 VU, Docker local", "date": "2026-11-21"},
     "threads_per_worker": {"value": 40, "unit": "hilos", "label": "ESTIMADO", "source": "Threadpool por defecto de AnyIO/Starlette para endpoints `def`", "date": "2026-11-21"},
     "workers_default": {"value": 1, "unit": "procesos", "label": "ESTIMADO", "source": "uvicorn y `fastapi run` levantan 1 worker si no se configura", "date": "2026-11-21"}
   },
   "cpu_steps": {
-    "password_hash": {"value": 50, "unit": "ms", "label": "SUPUESTO", "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8", "date": "2026-11-21"}
+    "password_hash": {"value": 110, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop", "date": "2026-11-21"},
+    "password_hash_bcrypt": {"value": 188, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: pwdlib BcryptHasher() por defecto (cost 12), 1 CPU. Solo para contraseñas guardadas antes con bcrypt", "date": "2026-11-21"}
+  },
+  "app_rps_per_task": {
+    "_doc": "JAJ-46: capacidad de 1 worker en 1 núcleo del laptop de calibración, como referencia para JAJ-11 (rps_por_tarea). build_model.py no la usa: el motor la calcula desde los tiempos.",
+    "no_db": {"value": 7050, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "JAJ-46: endpoint async sin DB", "date": "2026-11-21"},
+    "read_pk": {"value": 470, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "JAJ-46: SQLModel síncrono, sostenido con carga (718 con 1 cliente)", "date": "2026-11-21"},
+    "list_100": {"value": 290, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "JAJ-46: COUNT + 100 filas, sostenido con carga (414 con 2 clientes)", "date": "2026-11-21"}
+  },
+  "cpu_core_factor": {
+    "_doc": "Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+    "local": {"value": 1.0, "unit": "×", "label": "CALIBRADO", "source": "Laptop de calibración (i7-13620H): los tiempos del catálogo se midieron ahí", "date": "2026-11-21"},
+    "graviton2": {"value": 1.95, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g", "date": "2026-11-21"},
+    "graviton3": {"value": 1.55, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: Geekbench 6 un núcleo, i7-13620H 2.343-2.498 vs c7g.metal 1.546 (un solo resultado público). m7g, c7g, db.m7g. ±30 %", "date": "2026-11-21"},
+    "graviton4": {"value": 1.25, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: factor de Graviton3 / 1,25 (Phoronix: ~25 % más por núcleo). m8g, r8g", "date": "2026-11-21"}
+  },
+  "burstable_baseline_per_vcpu": {
+    "_doc": "Instancias con créditos de CPU: con carga sostenida rinden su base por vCPU, salvo en modo unlimited (que cobra el exceso).",
+    "db.t4g.micro": {"value": 0.10, "unit": "fracción de vCPU", "label": "ESTIMADO", "source": "aws.amazon.com/ec2/instance-types/t4/ (t4g.micro: base de 10 % por vCPU)", "date": "2026-11-21"},
+    "db.t4g.medium": {"value": 0.20, "unit": "fracción de vCPU", "label": "ESTIMADO", "source": "aws.amazon.com/ec2/instance-types/t4/ (t4g.medium: base de 20 % por vCPU)", "date": "2026-11-21"}
   },
   "pools": {
     "sqlalchemy": {
@@ -43,33 +63,34 @@
     "_sources": {
       "supabase": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11",
       "rds_postgres": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor)",
-      "local": "JAJ-8: Postgres 16 en Docker con 1 CPU"
+      "local": "JAJ-8: Postgres 16 en Docker con 1 CPU",
+      "processor": "Procesador de cada plan para cpu_core_factor. RDS: db.t4g es Graviton2 y db.m7g Graviton3 (AWS). Supabase no publica el procesador: su cómputo es ARM y AWS cuenta que migró a Graviton; se asume Graviton2, el núcleo más lento de los tres (SUPUESTO)"
     },
     "supabase": {
-      "micro":  {"compute_usd_month": 10,   "vcpu": 0.5, "vcpu_label": "SUPUESTO", "ram_gb": 1,   "max_connections": 60,  "pooler_connections": 200},
-      "small":  {"compute_usd_month": 15,   "vcpu": 0.5, "vcpu_label": "SUPUESTO", "ram_gb": 2,   "max_connections": 90,  "pooler_connections": 400},
-      "medium": {"compute_usd_month": 60,   "vcpu": 1,   "vcpu_label": "SUPUESTO", "ram_gb": 4,   "max_connections": 120, "pooler_connections": 600},
-      "large":  {"compute_usd_month": 110,  "vcpu": 2,   "vcpu_label": "ESTIMADO", "ram_gb": 8,   "max_connections": 160, "pooler_connections": 800},
-      "xl":     {"compute_usd_month": 210,  "vcpu": 4,   "vcpu_label": "ESTIMADO", "ram_gb": 16,  "max_connections": 240, "pooler_connections": 1000},
-      "2xl":    {"compute_usd_month": 410,  "vcpu": 8,   "vcpu_label": "ESTIMADO", "ram_gb": 32,  "max_connections": 380, "pooler_connections": 1500},
-      "4xl":    {"compute_usd_month": 960,  "vcpu": 16,  "vcpu_label": "ESTIMADO", "ram_gb": 64,  "max_connections": 480, "pooler_connections": 3000}
+      "micro":  {"compute_usd_month": 10,   "vcpu": 0.5, "vcpu_label": "SUPUESTO", "ram_gb": 1,   "max_connections": 60,  "pooler_connections": 200, "processor": "graviton2", "processor_label": "SUPUESTO"},
+      "small":  {"compute_usd_month": 15,   "vcpu": 0.5, "vcpu_label": "SUPUESTO", "ram_gb": 2,   "max_connections": 90,  "pooler_connections": 400, "processor": "graviton2", "processor_label": "SUPUESTO"},
+      "medium": {"compute_usd_month": 60,   "vcpu": 1,   "vcpu_label": "SUPUESTO", "ram_gb": 4,   "max_connections": 120, "pooler_connections": 600, "processor": "graviton2", "processor_label": "SUPUESTO"},
+      "large":  {"compute_usd_month": 110,  "vcpu": 2,   "vcpu_label": "ESTIMADO", "ram_gb": 8,   "max_connections": 160, "pooler_connections": 800, "processor": "graviton2", "processor_label": "SUPUESTO"},
+      "xl":     {"compute_usd_month": 210,  "vcpu": 4,   "vcpu_label": "ESTIMADO", "ram_gb": 16,  "max_connections": 240, "pooler_connections": 1000, "processor": "graviton2", "processor_label": "SUPUESTO"},
+      "2xl":    {"compute_usd_month": 410,  "vcpu": 8,   "vcpu_label": "ESTIMADO", "ram_gb": 32,  "max_connections": 380, "pooler_connections": 1500, "processor": "graviton2", "processor_label": "SUPUESTO"},
+      "4xl":    {"compute_usd_month": 960,  "vcpu": 16,  "vcpu_label": "ESTIMADO", "ram_gb": 64,  "max_connections": 480, "pooler_connections": 3000, "processor": "graviton2", "processor_label": "SUPUESTO"}
     },
     "supabase_base_usd_month": 25,
     "supabase_compute_credit_usd_month": 10,
     "rds_postgres": {
-      "db.t4g.micro":  {"usd_hour": 0.016, "vcpu": 2, "vcpu_label": "ESTIMADO", "ram_gb": 1,  "max_connections": 112},
-      "db.t4g.medium": {"usd_hour": 0.065, "vcpu": 2, "vcpu_label": "ESTIMADO", "ram_gb": 4,  "max_connections": 450},
-      "db.m7g.large":  {"usd_hour": 0.168, "vcpu": 2, "vcpu_label": "ESTIMADO", "ram_gb": 8,  "max_connections": 901},
-      "db.m7g.xlarge": {"usd_hour": 0.337, "vcpu": 4, "vcpu_label": "ESTIMADO", "ram_gb": 16, "max_connections": 1802}
+      "db.t4g.micro":  {"usd_hour": 0.016, "vcpu": 2, "vcpu_label": "ESTIMADO", "ram_gb": 1,  "max_connections": 112, "processor": "graviton2", "processor_label": "ESTIMADO"},
+      "db.t4g.medium": {"usd_hour": 0.065, "vcpu": 2, "vcpu_label": "ESTIMADO", "ram_gb": 4,  "max_connections": 450, "processor": "graviton2", "processor_label": "ESTIMADO"},
+      "db.m7g.large":  {"usd_hour": 0.168, "vcpu": 2, "vcpu_label": "ESTIMADO", "ram_gb": 8,  "max_connections": 901, "processor": "graviton3", "processor_label": "ESTIMADO"},
+      "db.m7g.xlarge": {"usd_hour": 0.337, "vcpu": 4, "vcpu_label": "ESTIMADO", "ram_gb": 16, "max_connections": 1802, "processor": "graviton3", "processor_label": "ESTIMADO"}
     },
     "local": {
-      "docker": {"usd_hour": 0, "vcpu": 1, "vcpu_label": "CALIBRADO", "ram_gb": 2, "max_connections": 100}
+      "docker": {"usd_hour": 0, "vcpu": 1, "vcpu_label": "CALIBRADO", "ram_gb": 2, "max_connections": 100, "processor": "local", "processor_label": "CALIBRADO"}
     }
   },
   "app_plans": {
-    "_source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS",
-    "fargate": {"usd_vcpu_hour": 0.03238, "usd_gb_hour": 0.00356},
-    "local": {"usd_vcpu_hour": 0, "usd_gb_hour": 0}
+    "_source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
+    "fargate": {"usd_vcpu_hour": 0.03238, "usd_gb_hour": 0.00356, "processor": "graviton2", "processor_label": "ESTIMADO"},
+    "local": {"usd_vcpu_hour": 0, "usd_gb_hour": 0, "processor": "local", "processor_label": "CALIBRADO"}
   },
   "traffic": {
     "_source": "JAJ-11: perfiles de uso y factores de pico. Requests por sesión = consultas por sesión de JAJ-11 / 6 consultas por request.",

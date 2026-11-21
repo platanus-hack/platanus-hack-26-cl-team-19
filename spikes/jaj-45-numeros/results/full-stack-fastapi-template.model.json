@@ -70,8 +70,16 @@
         "value": 28.84,
         "unit": "US$/mes",
         "label": "ESTIMADO",
-        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS",
+        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
         "date": "2026-11-21"
+      },
+      "cpu_core_factor": {
+        "value": 1.95,
+        "unit": "×",
+        "label": "ESTIMADO",
+        "source": "API en fargate: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "date": "2026-11-21",
+        "processor": "graviton2"
       }
     },
     "db": {
@@ -122,6 +130,15 @@
           "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8). El repo no lo configura (backend/app/core/db.py:7)",
           "date": "2026-11-21"
         }
+      },
+      "cpu_core_factor": {
+        "value": 1.95,
+        "unit": "×",
+        "label": "SUPUESTO",
+        "source": "Plan supabase micro: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "date": "2026-11-21",
+        "needs_review": true,
+        "processor": "graviton2"
       },
       "pooler_connections": {
         "value": 200,
@@ -339,7 +356,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -410,7 +427,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -515,7 +532,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -637,7 +654,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -742,7 +759,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -848,12 +865,11 @@
           "at": "backend/app/core/security.py:32",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.login:login_access_token",
@@ -864,21 +880,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 51.3,
+        "value": 111.3,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "ESTIMADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 112.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -928,7 +942,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -983,7 +997,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -1088,12 +1102,11 @@
           "at": "backend/app/core/security.py:36",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.login:reset_password",
@@ -1104,21 +1117,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 51.3,
+        "value": 111.3,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "ESTIMADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 112.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -1186,7 +1197,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -1253,12 +1264,11 @@
           "at": "backend/app/core/security.py:36",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.private:create_user",
@@ -1276,12 +1286,11 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 112.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -1367,7 +1376,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -1489,12 +1498,11 @@
           "at": "backend/app/core/security.py:36",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.users:create_user",
@@ -1505,21 +1513,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 51.4,
+        "value": 111.4,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "ESTIMADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 112.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -1638,7 +1644,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -1722,12 +1728,11 @@
           "at": "backend/app/core/security.py:32",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.users:update_password_me",
@@ -1741,12 +1746,11 @@
           "at": "backend/app/core/security.py:36",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.users:update_password_me",
@@ -1756,21 +1760,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 101.2,
+        "value": 221.2,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 100.68,
+        "value": 222.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -1820,7 +1822,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -1908,7 +1910,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -2013,12 +2015,11 @@
           "at": "backend/app/core/security.py:36",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.users:register_user",
@@ -2029,21 +2030,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 51.3,
+        "value": 111.3,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "ESTIMADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 112.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -2110,7 +2109,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -2249,12 +2248,11 @@
           "at": "backend/app/core/security.py:36",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "backend.app.api.routes.users:update_user",
@@ -2265,21 +2263,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 51.5,
+        "value": 111.5,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "ESTIMADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 112.1,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -2397,7 +2393,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -2451,7 +2447,7 @@
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 0.68,
+        "value": 2.1,
         "unit": "ms",
         "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
@@ -2526,26 +2522,26 @@
       "status": "al límite"
     },
     "mean_db_hold_ms": {
-      "value": 4.7911,
+      "value": 16.5498,
       "unit": "ms",
       "label": "SUPUESTO",
-      "source": "promedio ponderado por el tráfico de db_hold_ms",
+      "source": "promedio ponderado por el tráfico de db_hold_ms, en la nube (× cpu_core_factor)",
       "date": "2026-11-21",
       "needs_review": true,
       "derived": true
     },
     "mean_api_cpu_ms": {
-      "value": 4.1999,
+      "value": 18.8026,
       "unit": "ms",
       "label": "SUPUESTO",
-      "source": "promedio ponderado por el tráfico de api_cpu_ms",
+      "source": "promedio ponderado por el tráfico de api_cpu_ms, en la nube (× cpu_core_factor)",
       "date": "2026-11-21",
       "needs_review": true,
       "derived": true
     },
     "capacity": {
       "pool": {
-        "value": 12523.2,
+        "value": 3625.4,
         "unit": "req/s",
         "label": "SUPUESTO",
         "source": "conexiones usables / tiempo promedio con la conexión tomada (ley de Little)",
@@ -2554,19 +2550,19 @@
         "derived": true
       },
       "db_cpu": {
-        "value": 292.2,
+        "value": 149.9,
         "unit": "req/s",
         "label": "SUPUESTO",
-        "source": "vCPU de la DB / tiempo de queries por request (los tiempos de JAJ-8 son de 1 CPU)",
+        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
         "date": "2026-11-21",
         "needs_review": true,
         "derived": true
       },
       "api_cpu": {
-        "value": 238.1,
+        "value": 53.2,
         "unit": "req/s",
         "label": "SUPUESTO",
-        "source": "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request",
+        "source": "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request en la nube",
         "date": "2026-11-21",
         "needs_review": true,
         "derived": true
@@ -2576,9 +2572,9 @@
       "pico_normal": {
         "rps": 13.12,
         "utilization": {
-          "pool": 0.001,
-          "db_cpu": 0.045,
-          "api_cpu": 0.055
+          "pool": 0.004,
+          "db_cpu": 0.088,
+          "api_cpu": 0.247
         },
         "bottleneck": "api_cpu",
         "sales_at_stake_per_hour": {
@@ -2594,9 +2590,9 @@
       "cyberday": {
         "rps": 262.4,
         "utilization": {
-          "pool": 0.021,
-          "db_cpu": 0.898,
-          "api_cpu": 1.102
+          "pool": 0.072,
+          "db_cpu": 1.751,
+          "api_cpu": 4.932
         },
         "bottleneck": "api_cpu",
         "sales_at_stake_per_hour": {
@@ -2612,19 +2608,13 @@
     }
   },
   "assumptions": {
-    "total": 45,
+    "total": 38,
     "by_source": [
       {
         "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "count": 23,
         "needs_review": true,
         "example_path": "endpoints[0].weight"
-      },
-      {
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "count": 8,
-        "needs_review": true,
-        "example_path": "endpoints[5].steps[4].time"
       },
       {
         "source": "Declarado por el usuario: réplicas de la API",
@@ -2649,6 +2639,12 @@
         "count": 1,
         "needs_review": false,
         "example_path": "deployment.db.vcpu"
+      },
+      {
+        "source": "Plan supabase micro: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "count": 1,
+        "needs_review": true,
+        "example_path": "deployment.db.cpu_core_factor"
       },
       {
         "source": "Declarado por el usuario: usuarios activos al mes",
@@ -2739,6 +2735,13 @@
         "unit": "vCPU",
         "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
         "needs_review": false
+      },
+      {
+        "path": "deployment.db.cpu_core_factor",
+        "value": 1.95,
+        "unit": "×",
+        "source": "Plan supabase micro: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "needs_review": true
       },
       {
         "path": "traffic.mau",
@@ -2839,13 +2842,6 @@
         "needs_review": true
       },
       {
-        "path": "endpoints[5].steps[4].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "needs_review": true
-      },
-      {
         "path": "endpoints[5].weight",
         "value": 0.0088,
         "unit": "fracción",
@@ -2867,13 +2863,6 @@
         "needs_review": true
       },
       {
-        "path": "endpoints[8].steps[4].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "needs_review": true
-      },
-      {
         "path": "endpoints[8].weight",
         "value": 0.0088,
         "unit": "fracción",
@@ -2885,13 +2874,6 @@
         "value": 0.0088,
         "unit": "fracción",
         "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
-        "needs_review": true
-      },
-      {
-        "path": "endpoints[10].steps[2].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
         "needs_review": true
       },
       {
@@ -2916,13 +2898,6 @@
         "needs_review": true
       },
       {
-        "path": "endpoints[12].steps[5].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "needs_review": true
-      },
-      {
         "path": "endpoints[12].weight",
         "value": 0.0088,
         "unit": "fracción",
@@ -2934,20 +2909,6 @@
         "value": 0.0088,
         "unit": "fracción",
         "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
-        "needs_review": true
-      },
-      {
-        "path": "endpoints[14].steps[3].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "needs_review": true
-      },
-      {
-        "path": "endpoints[14].steps[4].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
         "needs_review": true
       },
       {
@@ -2972,13 +2933,6 @@
         "needs_review": true
       },
       {
-        "path": "endpoints[17].steps[4].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "needs_review": true
-      },
-      {
         "path": "endpoints[17].weight",
         "value": 0.0088,
         "unit": "fracción",
@@ -2990,13 +2944,6 @@
         "value": 0.1417,
         "unit": "fracción",
         "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
-        "needs_review": true
-      },
-      {
-        "path": "endpoints[19].steps[6].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
         "needs_review": true
       },
       {

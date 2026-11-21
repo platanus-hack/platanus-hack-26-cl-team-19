@@ -70,8 +70,16 @@
         "value": 57.67,
         "unit": "US$/mes",
         "label": "ESTIMADO",
-        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS",
+        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
         "date": "2026-11-21"
+      },
+      "cpu_core_factor": {
+        "value": 1.95,
+        "unit": "×",
+        "label": "ESTIMADO",
+        "source": "API en fargate: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "date": "2026-11-21",
+        "processor": "graviton2"
       }
     },
     "db": {
@@ -121,6 +129,31 @@
           "label": "ESTIMADO",
           "source": "asyncpg espera una conexión sin límite si no se pasa timeout a acquire(). El repo no lo configura (app/db/events.py:11)",
           "date": "2026-11-21"
+        }
+      },
+      "cpu_core_factor": {
+        "value": 1.95,
+        "unit": "×",
+        "label": "ESTIMADO",
+        "source": "Plan rds_postgres db.t4g.medium: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "date": "2026-11-21",
+        "processor": "graviton2"
+      },
+      "cpu_credits": {
+        "baseline_per_vcpu": {
+          "value": 0.2,
+          "unit": "fracción de vCPU",
+          "label": "ESTIMADO",
+          "source": "aws.amazon.com/ec2/instance-types/t4/ (t4g.medium: base de 20 % por vCPU)",
+          "date": "2026-11-21"
+        },
+        "sustained_vcpu": {
+          "value": 0.4,
+          "unit": "vCPU",
+          "label": "ESTIMADO",
+          "source": "vCPU × base por vCPU: lo que rinde db.t4g.medium con carga sostenida. En modo unlimited rinde los vCPU nominales y cobra el exceso",
+          "date": "2026-11-21",
+          "derived": true
         }
       }
     }
@@ -1772,12 +1805,11 @@
           "at": "app/services/security.py:16",
           "resource": "api_cpu",
           "time": {
-            "value": 50,
+            "value": 110,
             "unit": "ms",
-            "label": "SUPUESTO",
-            "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-            "date": "2026-11-21",
-            "needs_review": true
+            "label": "CALIBRADO",
+            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "date": "2026-11-21"
           },
           "via": [
             "app.api.routes.authentication:register",
@@ -1789,21 +1821,19 @@
       ],
       "alternatives": [],
       "db_hold_ms": {
-        "value": 51.3,
+        "value": 111.3,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "ESTIMADO",
         "source": "Suma de las queries (y la CPU pesada que corre con la conexión tomada)",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "api_cpu_ms": {
-        "value": 50.68,
+        "value": 110.68,
         "unit": "ms",
-        "label": "SUPUESTO",
+        "label": "CALIBRADO",
         "source": "CPU base de FastAPI + CPU pesada del endpoint",
         "date": "2026-11-21",
-        "needs_review": true,
         "derived": true
       },
       "external_ms": null,
@@ -2857,26 +2887,26 @@
       "status": "ok"
     },
     "mean_db_hold_ms": {
-      "value": 4.5285,
+      "value": 10.2931,
       "unit": "ms",
       "label": "SUPUESTO",
-      "source": "promedio ponderado por el tráfico de db_hold_ms",
+      "source": "promedio ponderado por el tráfico de db_hold_ms, en la nube (× cpu_core_factor)",
       "date": "2026-11-21",
       "needs_review": true,
       "derived": true
     },
     "mean_api_cpu_ms": {
-      "value": 1.3049,
+      "value": 4.007,
       "unit": "ms",
       "label": "SUPUESTO",
-      "source": "promedio ponderado por el tráfico de api_cpu_ms",
+      "source": "promedio ponderado por el tráfico de api_cpu_ms, en la nube (× cpu_core_factor)",
       "date": "2026-11-21",
       "needs_review": true,
       "derived": true
     },
     "capacity": {
       "pool": {
-        "value": 4416.4,
+        "value": 1943.0,
         "unit": "req/s",
         "label": "SUPUESTO",
         "source": "conexiones usables / tiempo promedio con la conexión tomada (ley de Little)",
@@ -2885,19 +2915,19 @@
         "derived": true
       },
       "db_cpu": {
-        "value": 512.4,
+        "value": 52.5,
         "unit": "req/s",
         "label": "SUPUESTO",
-        "source": "vCPU de la DB / tiempo de queries por request (los tiempos de JAJ-8 son de 1 CPU)",
+        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
         "date": "2026-11-21",
         "needs_review": true,
         "derived": true
       },
       "api_cpu": {
-        "value": 1532.7,
+        "value": 499.1,
         "unit": "req/s",
         "label": "SUPUESTO",
-        "source": "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request",
+        "source": "núcleos usables (mín. entre workers y vCPU, por réplica) / CPU por request en la nube",
         "date": "2026-11-21",
         "needs_review": true,
         "derived": true
@@ -2907,9 +2937,9 @@
       "pico_normal": {
         "rps": 40,
         "utilization": {
-          "pool": 0.009,
-          "db_cpu": 0.078,
-          "api_cpu": 0.026
+          "pool": 0.021,
+          "db_cpu": 0.762,
+          "api_cpu": 0.08
         },
         "bottleneck": "db_cpu",
         "sales_at_stake_per_hour": {
@@ -2925,9 +2955,9 @@
       "cyberday": {
         "rps": 800,
         "utilization": {
-          "pool": 0.181,
-          "db_cpu": 1.561,
-          "api_cpu": 0.522
+          "pool": 0.412,
+          "db_cpu": 15.238,
+          "api_cpu": 1.603
         },
         "bottleneck": "db_cpu",
         "sales_at_stake_per_hour": {
@@ -2943,7 +2973,7 @@
     }
   },
   "assumptions": {
-    "total": 40,
+    "total": 39,
     "by_source": [
       {
         "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
@@ -3016,12 +3046,6 @@
         "count": 1,
         "needs_review": true,
         "example_path": "endpoints[3].steps[0].time"
-      },
-      {
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
-        "count": 1,
-        "needs_review": true,
-        "example_path": "endpoints[9].steps[3].time"
       },
       {
         "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
@@ -3218,13 +3242,6 @@
         "value": 0.0125,
         "unit": "fracción",
         "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
-        "needs_review": true
-      },
-      {
-        "path": "endpoints[9].steps[3].time",
-        "value": 50,
-        "unit": "ms",
-        "source": "Hash o verificación de contraseña (argon2/bcrypt). Sin calibrar: agregar a la calibración de JAJ-8",
         "needs_review": true
       },
       {
