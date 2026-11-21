@@ -10,7 +10,10 @@ const failed = ref(false);
 
 const { nextAfterLogin } = useOnboardingProgress();
 
-onMounted(async () => {
+// En el sitio estático (nuxt generate), Nuxt hidrata las páginas pre-renderizadas con la ruta
+// sin query y restaura la real recién en app:suspense:resolve, después de onMounted. Por eso el
+// query se lee en onNuxtReady, que corre después.
+onNuxtReady(async () => {
   const code = route.query.code;
   try {
     if (
