@@ -162,6 +162,10 @@ _QUOTA_MESSAGES = {
     "extract": ("team_extract_quota", "Usaste los {limit} análisis de repos diarios de Branchpoint."),
 }
 _ASK = {"chat": "enviar mensajes", "extract": "analizar el repo"}
+_MCP_HINT = {
+    "chat": "",
+    "extract": " También puedes analizarlo desde tu CLI de IA conectada por MCP (submit_architecture).",
+}
 
 
 def llm_key(
@@ -182,7 +186,11 @@ def llm_key(
     name = PROVIDER_NAMES[provider]
     header = "X-OpenAI-Api-Key" if provider == "openai" else "X-Anthropic-Api-Key"
     if user is None:
-        raise ApiError(422, INVALID_PARAMETERS, f"Ingresa tu API key de {name} ({header}) para {_ASK[purpose]}.")
+        raise ApiError(
+            422,
+            INVALID_PARAMETERS,
+            f"Ingresa tu API key de {name} ({header}) para {_ASK[purpose]}.{_MCP_HINT[purpose]}",
+        )
     store = _store(request)
     try:
         require_selected = provider not in _always_personal()
@@ -199,7 +207,8 @@ def llm_key(
             raise ApiError(
                 422,
                 INVALID_PARAMETERS,
-                f"Branchpoint no tiene una key de {name} configurada. Guarda tu API key en Configuración.",
+                f"Branchpoint no tiene una key de {name} configurada. Guarda tu API key en Configuración."
+                + _MCP_HINT[purpose],
             )
         limit = team_limit(purpose)
         if not store.charge_team(user.id, purpose, limit, units):

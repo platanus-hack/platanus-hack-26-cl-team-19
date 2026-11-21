@@ -15,6 +15,9 @@ Reglas, iguales en los dos modos:
 * **Errores con una sola forma:** ``{"error": "..."}``, con un mensaje que el LLM lee y corrige. Los
   argumentos desconocidos o mal tipados también se rechazan así.
 * **Límites por usuario** (``Limiter``): llamadas por minuto y simulaciones por día.
+* **La arquitectura de un repo** (ADR 0002) la manda la IA de la CLI, que lee el repo local, con
+  ``submit_architecture``: clasifica con evidencia y el catálogo pone los números
+  (``app/ingest/ai_graph.py``). Esa tool no se ofrece en el chat del editor, que no ve el repo.
 """
 
 from __future__ import annotations
@@ -38,12 +41,15 @@ from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, 
 from app.catalog import load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
 from app.costs.estimate import describe_missing
+from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai, replace_architecture
 from app.models import load_model
 from app.models.compare import run_delta
 from app.models.run import Run
 
 SIM_SECONDS = 60.0  # duración por defecto; la elige el servidor, nunca el LLM
 MIN_SIM_SECONDS = 5.0
+DAILY_SUBMISSIONS = 30  # arquitecturas que la IA puede mandar por usuario y día
+CLI_ONLY = frozenset({"submit_architecture"})  # tools que necesitan leer el repo local
 DEFAULT_ERROR_RATE = 0.01  # piso de errores cuando el usuario no declaró uno (SUPUESTO, se avisa)
 SECONDS_DAY = 86_400
 SECONDS_MONTH = 30 * SECONDS_DAY
@@ -155,6 +161,15 @@ class SetDeploymentArgs(VersionRef):
     field: Literal["api.replicas", "api.vcpu", "db.plan"]
     value: str = Field(description="El valor que dijo el usuario (ej. '3', '0.5', 'db.m7g.large').")
     quote: str = Field(min_length=3, max_length=500, description="La frase textual del usuario.")
+
+
+class SubmitArchitectureArgs(ArchitectureSubmission):
+    project_id: str | None = Field(
+        None,
+        description="Sin valor, crea un proyecto nuevo con esta arquitectura como v1. Con un project_id, guarda una "
+        "versión nueva con esta arquitectura y conserva el despliegue, el tráfico y lo que dijo la IaC.",
+    )
+    name: str | None = Field(None, max_length=120, description="Nombre del proyecto nuevo. Por defecto, repo.")
 
 
 class SetGoalsArgs(ProjectRef):
@@ -354,6 +369,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "set_deployment": "Cambia réplicas, vCPU o plan de DB con los valores que dijo el usuario (en quote), como "
     "versión nueva.",
     "set_goals": "Guarda las metas del proyecto (p95, errores, presupuesto) que dijo el usuario (en quote).",
+    "submit_architecture": "Manda la arquitectura de un repo que leíste en local, de cualquier framework. Lista cada "
+    "endpoint con sus pasos en orden (db, cache con on_miss, external, background, cpu), los trabajos de cola, los "
+    "componentes (caché, colas, servicios externos, storage) y, si están escritos en el repo, los workers y el pool "
+    "(observations). Todo con archivo:línea y why. No mandes tiempos, filas ni costos: el catálogo pone los números "
+    "y todo queda ESTIMADO o SUPUESTO con procedencia IA.",
 }
 
 
@@ -377,14 +397,17 @@ class AgentTools:
             "set_traffic": SetTrafficArgs,
             "set_deployment": SetDeploymentArgs,
             "set_goals": SetGoalsArgs,
+            "submit_architecture": SubmitArchitectureArgs,
         }
 
     # -- catálogo de tools (para MCP y para la API de Claude) --
 
-    def schemas(self) -> list[dict[str, Any]]:
+    def schemas(self, *, cli: bool = True) -> list[dict[str, Any]]:
+        """Las tools con su JSON Schema. ``cli=False`` (el chat del editor) deja fuera las que leen el repo."""
         return [
             {"name": name, "description": TOOL_DESCRIPTIONS[name], "input_schema": model.model_json_schema()}
             for name, model in self._args.items()
+            if cli or name not in CLI_ONLY
         ]
 
     def validate(self, name: str, args: dict[str, Any] | None) -> BaseModel:
@@ -706,6 +729,39 @@ class AgentTools:
             "parent": base.number,
             "changes": result.changes,
             "warnings": result.warnings,
+        }
+
+    def _submit_architecture(self, a: SubmitArchitectureArgs) -> dict[str, Any]:
+        self.limiter.daily(self.owner or "anon", DAILY_SUBMISSIONS, "arquitecturas enviadas")
+        sub = ArchitectureSubmission.model_validate(a.model_dump(exclude={"project_id", "name"}))
+        note = f"Arquitectura propuesta por la IA del usuario ({sub.framework}, {sub.language})"
+        if a.project_id is None:
+            model = build_from_ai(sub)
+            try:
+                load_model(model)
+            except (ValueError, KeyError, TypeError) as e:
+                raise ToolError(f"La arquitectura no carga en el motor: {e}") from None
+            project = self.store.create(a.name or sub.repo, model, None, owner=self.owner)
+            version = self.store.get_version(project.id, 1)
+        else:
+            project = self._project(a.project_id)
+            base = self._version(project, None)
+            version = self._save(project, base, replace_architecture(base.model, sub), note)
+        saved = version.model
+        ai_eps = [ep for ep in saved["endpoints"] if ep.get("origin")]
+        return {
+            "project_id": project.id,
+            "version": version.number,
+            "endpoints": len(saved["endpoints"]),
+            "endpoints_from_ai": len(ai_eps),
+            "components_from_ai": sum(1 for s in saved["deployment"].get("services", []) if s.get("origin")),
+            "assumptions": saved.get("assumptions", {}).get("total"),
+            "provenance": {
+                "label": "ESTIMADO",
+                "source": f"{note}. Los tiempos salen del catálogo; la CPU base del framework y el despliegue "
+                "quedan SUPUESTO hasta que el usuario los confirme.",
+            },
+            "next": "Pregúntale al usuario el tráfico (set_traffic) y el despliegue (set_deployment), y simula.",
         }
 
     def _set_goals(self, a: SetGoalsArgs) -> dict[str, Any]:

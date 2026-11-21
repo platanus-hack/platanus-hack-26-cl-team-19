@@ -77,5 +77,5 @@ def chat(
     return StreamingResponse(events(), media_type="application/x-ndjson")
 
 
-def default_llm_factory(api_key: str | None) -> AnthropicLLM:
-    return AnthropicLLM(api_key)
+def default_llm_factory(api_key: str | None, model: str | None = None) -> AnthropicLLM:
+    return AnthropicLLM(api_key, model)

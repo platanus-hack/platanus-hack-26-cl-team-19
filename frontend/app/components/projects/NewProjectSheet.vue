@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BrandIcon from "@/components/BrandIcon.vue";
+import IngestionCredential from "@/components/projects/IngestionCredential.vue";
 import { ExternalLink, Plus } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ const error = ref("");
 const name = ref("");
 const sample = ref("");
 const nameId = useId();
+const credentialUsable = ref(true);
 const modelId = useId();
 
 async function loadModels() {
@@ -112,7 +114,15 @@ async function createProject() {
         @submit.prevent="analyzeRepo"
       >
         <Alert v-if="github.error.value" variant="destructive">
-          <AlertDescription>{{ github.error.value }}</AlertDescription>
+          <AlertDescription
+            >{{ github.error.value }}
+            <NuxtLink
+              v-if="github.keyProblem.value"
+              to="/settings"
+              class="underline underline-offset-4"
+              >Ir a Configuración</NuxtLink
+            ></AlertDescription
+          >
         </Alert>
 
         <p
@@ -196,6 +206,11 @@ async function createProject() {
               </SelectContent>
             </Select>
           </div>
+          <IngestionCredential
+            v-model:provider="github.provider.value"
+            :disabled="github.running.value"
+            @usable="credentialUsable = $event"
+          />
           <Alert
             v-if="github.ingestion.value?.status === 'failed'"
             variant="destructive"
@@ -220,7 +235,10 @@ async function createProject() {
             v-if="github.repos.value.length"
             type="submit"
             :disabled="
-              github.running.value || !github.repo.value || !github.branch.value
+              github.running.value ||
+              !github.repo.value ||
+              !github.branch.value ||
+              !credentialUsable
             "
           >
             <Spinner v-if="github.running.value" data-icon="inline-start" />

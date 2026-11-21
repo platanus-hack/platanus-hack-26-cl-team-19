@@ -21,6 +21,8 @@ La extracción de la arquitectura es determinista: `extract.py` ([JAJ-7](https:/
 
 Los pasos 1 y 3 no dependen de la IA: si no hay API key, el producto igual entrega un modelo con los huecos marcados como `SUPUESTO`.
 
+> **El paso 1 cambió con el [ADR 0002](0002-la-ia-lee-la-arquitectura-del-repo.md).** La arquitectura ya no la extrae un AST de FastAPI: la lee una IA, en la CLI del usuario o en la ingesta, con un schema estricto y para cualquier framework. Los pasos 3 y 4, y la regla de que el LLM no escribe números ni edita el modelo, siguen vigentes. El paso 2 (huecos) queda absorbido: la IA usa `shape: "unknown"` cuando no sabe.
+
 ## [2] Enriquecer huecos
 
 `extract.py` expone una lista `gaps[]` con lo que no pudo resolver. Hoy ya los detecta, pero quedan dispersos en los efectos:
@@ -65,7 +67,7 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 
 ## Opciones descartadas
 
-* **El LLM lee el repo y escribe el modelo.** Es más lento, no es reproducible y puede inventar endpoints o latencias. Los spikes mostraron que el AST cubre casi todo.
+* **El LLM lee el repo y escribe el modelo.** Es más lento, no es reproducible y puede inventar endpoints o latencias. El ADR 0002 acepta que la IA proponga el grafo, con evidencia y schema estricto, pero nunca el modelo ni sus números.
 * **El LLM edita el JSON del modelo directamente.** No hay manera de garantizar que no invente números ni que el JSON siga siendo válido para el motor.
 * **El MCP de GitHub para leer el repo.** Es una llamada por archivo y pasa por el LLM (JAJ-53). Queda descartado para la ingesta.
 
@@ -82,3 +84,4 @@ El loop tiene un máximo de iteraciones por mensaje del usuario y transmite al c
 * [JAJ-67](https://linear.app/jajathom/issue/JAJ-67): loop del agente y sus tools (paso 4), expuestas por MCP y en el chat del editor. Depende de JAJ-68 y bloquea JAJ-59.
 * [JAJ-54](https://linear.app/jajathom/issue/JAJ-54): dónde corre el loop (MCP en la CLI del usuario). Enmienda la sección Consecuencias de este ADR.
 * [JAJ-81](https://linear.app/jajathom/issue/JAJ-81): conectar la CLI del usuario al MCP (token de Branchpoint y `claude mcp add`).
+* [JAJ-85](https://linear.app/jajathom/issue/JAJ-85) y [JAJ-86](https://linear.app/jajathom/issue/JAJ-86): la IA lee la arquitectura para cualquier framework. Reemplazan el paso 1 (ADR 0002).

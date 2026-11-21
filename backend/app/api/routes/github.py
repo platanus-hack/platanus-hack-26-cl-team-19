@@ -22,12 +22,14 @@ import os
 import urllib.parse
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+from app.agent.loop import model_for
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import NOT_FOUND, ApiError
+from app.api.routes.credentials import Provider, llm_key
 from app.github.client import GitHubApp, GitHubError, Repo
 from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion
 from app.github.state import InvalidState, sign_state, verify_state
@@ -63,6 +65,7 @@ class ConnectionOut(BaseModel):
 
 
 class StartIngestion(BaseModel):
+    provider: Provider = Field("anthropic", description="Quién lee el repo: Anthropic (Claude) u OpenAI.")
     repo_full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$", examples=["acme/tienda"])
     branch: str | None = Field(None, min_length=1, max_length=255, description="por defecto, la rama por defecto")
     name: str | None = Field(
@@ -275,12 +278,20 @@ def start_ingestion(
     github: GitHubApp = Depends(get_github),
     jobs: IngestionJobs = Depends(get_jobs),
     user: User | None = Depends(current_user),
+    x_anthropic_api_key: str | None = Header(default=None),
+    x_openai_api_key: str | None = Header(default=None),
 ) -> IngestionOut:
     owner = owner_of(user)
     repo = _repo_or_404(request, github, owner, req.repo_full_name)
+    # La arquitectura la lee la IA (ADR 0002). La key sale como en el chat: la del header, la personal elegida
+    # o la de Branchpoint con su cuota de extracción. El 422 y el 429 salen acá, antes de encolar.
+    header = x_openai_api_key if req.provider == "openai" else x_anthropic_api_key
+    key = llm_key(request, user, req.provider, header, None, purpose="extract")
+    factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
+    llm = factory(key.key, model=model_for(req.provider, "extract"))
     job = jobs.start(owner, repo.full_name, req.branch or repo.default_branch)
     name = req.name or repo.full_name.split("/", 1)[1]
-    tasks.add_task(run_ingestion, jobs, job.id, github, request.app.state.store, repo, name)
+    tasks.add_task(run_ingestion, jobs, job.id, github, request.app.state.store, repo, name, llm, provider=req.provider)
     return _out(job)
 
 
