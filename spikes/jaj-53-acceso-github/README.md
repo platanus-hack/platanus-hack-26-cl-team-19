@@ -26,7 +26,7 @@ La investigación completa, con la fuente de cada afirmación, está en [researc
 ```
 1. Login            Supabase Auth + GitHub (OAuth App, sin scopes extra) → user_id
 2. Conectar repo    github.com/apps/<slug>/installations/new → el usuario elige los repos
-3. Setup URL        GitHub redirige al backend con installation_id → se guarda con el user_id
+3. Callback URL     GitHub redirige al backend con code + installation_id → se verifica y se guarda con el user_id
 4. Analizar         backend: JWT con la private key → token de instalación (1 h, ese repo, contents:read)
                     → GET tarball/{ref} (302) → extracción segura en tmp → extract.py → borrar tmp
 ```
@@ -40,8 +40,16 @@ La investigación completa, con la fuente de cada afirmación, está en [researc
 [fetch_repo.py](fetch_repo.py) descarga el tarball con un token, lo extrae con `tarfile` y `filter="data"` (sin rutas fuera del directorio ni archivos de dispositivo) y corre el extractor de [JAJ-7](../jaj-7-ingestion/README.md). Usa solo la librería estándar.
 
 ```bash
+# con un token cualquiera (OAuth, user access token o de instalación)
 GITHUB_TOKEN=... python3 fetch_repo.py <owner>/<repo> [--ref rama] [-o grafo.json]
+
+# modo GitHub App (JAJ-65): pide el token de instalación acotado a ese repo y a contents:read
+GITHUB_APP_ID=5861305 GITHUB_APP_INSTALLATION_ID=... \
+GITHUB_APP_PRIVATE_KEY_PATH=~/.config/branchpoint/github-app.pem \
+backend/.venv/bin/python fetch_repo.py <owner>/<repo>
 ```
+
+El modo GitHub App necesita `pyjwt[crypto]`, que ya es dependencia de `backend/`. La private key se lee de un archivo fuera del repo (o de `GITHUB_APP_PRIVATE_KEY` con su contenido) y el token nunca se imprime.
 
 | Repo | Tarball | Archivos .py | Endpoints | Descarga | Descompresión | AST | Total |
 |---|---|---|---|---|---|---|---|
@@ -57,13 +65,32 @@ Respuestas de error observadas:
 | Rama inexistente | 404 |
 | Repo privado sin acceso | 404, según la documentación. La app no puede distinguirlo de "no existe" |
 
-**Límite de la prueba:** se hizo con un token OAuth de usuario (el de `gh` CLI), no con un token de instalación de una GitHub App. Según la documentación, el endpoint de tarball acepta los dos con `Contents: read`, pero para verificarlo de punta a punta hay que registrar la app (ver "Pendiente").
+La tabla de arriba se midió con un token OAuth de usuario (el de `gh` CLI).
+
+### Con un token de instalación de la GitHub App (JAJ-65)
+
+Con la app `branchpoint-dev` ([JAJ-64](https://linear.app/jajathom/issue/JAJ-64)) instalada en dos repos personales. El token sale con `contents: read` y `metadata: read`, y dura 1 h. Mediana de 3 corridas en el repo privado:
+
+| Repo | Tarball | Archivos .py | Endpoints | Token | Descarga | Descompresión | AST | Total (con token) |
+|---|---|---|---|---|---|---|---|---|
+| Repo privado de prueba (FastAPI, el mismo de arriba) | 3,2 MB | 47 | 29 | 0,59 s | 1,99 s | 0,05 s | 0,08 s | 2,7 s |
+| Repo público con la app instalada | 32,3 MB | 9 | 0 | 0,62 s | 3,95 s | 0,43 s | 0,02 s | 5,0 s |
+
+El endpoint de tarball acepta el token de instalación igual que el OAuth: queda verificado de punta a punta. Pedir el token suma unos 0,6 s.
+
+| Caso (modo app) | Respuesta |
+|---|---|
+| Repo sin la app instalada (de otro dueño o del mismo) | **422** al pedir el token: "There is at least one repository that does not exist or is not accessible to the parent installation." |
+| `installation_id` que no existe o no es de la app | 404 al pedir el token |
+| Rama inexistente | 404 al descargar el tarball |
+
+A diferencia del token OAuth, el modo app **sí distingue** "la app no está instalada en este repo": falla con 422 antes de descargar, porque el token se pide acotado al repo. El backend puede traducirlo a "instala la app en este repo".
 
 ## Riesgos
 
 | Riesgo | Mitigación |
 |---|---|
-| Un `installation_id` falsificado en el Setup URL liga la instalación de otro a mi usuario (GitHub lo advierte) | Activar "Request user authorization (OAuth) during installation" y verificar con `GET /user/installations`. En la demo se puede aceptar y dejarlo documentado |
+| Un `installation_id` falsificado en el redirect liga la instalación de otro a mi usuario (GitHub lo advierte) | Activar "Request user authorization (OAuth) during installation" y verificar con `GET /user/installations`. En la demo se puede aceptar y dejarlo documentado |
 | Si se filtra la private key, da acceso a todas las instalaciones | Secreto en el host del backend y rotarla si se filtra |
 | GitHub no documenta un límite de tamaño para el tarball | Tope de 200 MB y timeout de 60 s en la descarga, como en el prototipo |
 | Un tar malicioso (path traversal) | `tarfile` con `filter="data"` |
@@ -72,6 +99,6 @@ Respuestas de error observadas:
 
 ## Pendiente
 
-1. **Registrar la GitHub App** en una cuenta personal: pública, con `Contents: read`, Setup URL del backend y sin webhook. Este paso lo tiene que hacer una persona en GitHub: [JAJ-64](https://linear.app/jajathom/issue/JAJ-64).
-2. **Repetir el prototipo con un token de instalación:** firmar el JWT (RS256, con PyJWT) y pedir `POST /app/installations/{id}/access_tokens`: [JAJ-65](https://linear.app/jajathom/issue/JAJ-65).
+1. ~~**Registrar la GitHub App**~~, hecho en [JAJ-64](https://linear.app/jajathom/issue/JAJ-64): `branchpoint-dev`, pública, con `Contents: read`, sin webhook y con OAuth durante la instalación. Con esa opción GitHub deshabilita la Setup URL y redirige a la **Callback URL** (`http://localhost:8000/github/callback` en local).
+2. ~~**Repetir el prototipo con un token de instalación**~~, hecho en [JAJ-65](https://linear.app/jajathom/issue/JAJ-65) (ver "Prototipo").
 3. **Implementar el flujo en el backend:** [JAJ-57](https://linear.app/jajathom/issue/JAJ-57).
