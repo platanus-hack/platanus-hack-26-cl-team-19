@@ -22,8 +22,10 @@ def test_installations_by_owner_and_revoked(store):
     assert store.list_installations(None) == [GitHubInstallation(42, "alice-gh"), GitHubInstallation(43, "acme")]
     store.revoke_installation(43)
     assert store.list_installations(None) == [GitHubInstallation(42, "alice-gh")]
+    assert store.list_installations(None, revoked=True) == [GitHubInstallation(43, "acme")]
     store.save_installation(43, None, "acme")  # reinstalada: vuelve a listarse
     assert len(store.list_installations(None)) == 2
+    assert store.list_installations(None, revoked=True) == []
 
 
 def test_connect_repo_reuses_the_connection(store):

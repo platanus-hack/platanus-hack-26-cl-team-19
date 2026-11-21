@@ -82,6 +82,14 @@ async function addDemoRepository() {
           <AlertDescription>{{ github.error.value }}</AlertDescription>
         </Alert>
 
+        <Alert v-if="github.revoked.value" data-testid="github-revoked">
+          <AlertDescription>
+            Se revocó el acceso de la GitHub App de Branchpoint, así que ya no
+            vemos tus repos. Reconéctala para elegir uno o continúa a Mis
+            proyectos.
+          </AlertDescription>
+        </Alert>
+
         <p
           v-if="github.loading.value"
           class="flex items-center gap-2 text-sm text-muted-foreground"
@@ -137,6 +145,9 @@ async function addDemoRepository() {
             <Button variant="ghost" @click="github.connect()">
               Volver a abrir GitHub
             </Button>
+            <Button variant="ghost" @click="completeOnboarding">
+              Omitir por ahora
+            </Button>
           </div>
         </template>
 
@@ -148,11 +159,17 @@ async function addDemoRepository() {
           <div class="flex flex-wrap items-center gap-2">
             <Button @click="github.connect()">
               <BrandIcon brand="github" data-icon="inline-start" />
-              Conectar con GitHub
+              {{
+                github.revoked.value
+                  ? "Reconectar GitHub"
+                  : "Conectar con GitHub"
+              }}
             </Button>
-            <Button variant="ghost" @click="completeOnboarding"
-              >Omitir por ahora</Button
-            >
+            <Button variant="ghost" @click="completeOnboarding">{{
+              github.revoked.value
+                ? "Continuar a Mis proyectos"
+                : "Omitir por ahora"
+            }}</Button>
           </div>
           <button
             type="button"

@@ -13,6 +13,12 @@ export interface GithubInstallation {
   account_login: string;
 }
 
+export interface GithubConnection {
+  repos: GithubRepo[];
+  installations: GithubInstallation[];
+  revoked: boolean;
+}
+
 export type IngestionStage = "acceso" | "analisis" | "preparacion";
 
 export interface Ingestion {
@@ -49,6 +55,7 @@ export function createGithubApi(
     installUrl: () => fetchApi<{ url: string }>("/github/install-url"),
     // ya instalada: GitHub no redirige al cambiarla, así que se autoriza con OAuth (JAJ-57)
     authorizeUrl: () => fetchApi<{ url: string }>("/github/authorize-url"),
+    connection: () => fetchApi<GithubConnection>("/github/connection"),
     installations: () =>
       fetchApi<GithubInstallation[]>("/github/installations"),
     repos: () => fetchApi<GithubRepo[]>("/github/repos"),

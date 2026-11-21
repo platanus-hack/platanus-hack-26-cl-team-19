@@ -337,3 +337,21 @@ def test_extract_tarball_blocks_path_traversal(tmp_path):
     with pytest.raises(tarfile.OutsideDestinationError):
         extract_tarball(evil, tmp_path / "dest")
     assert not (tmp_path / "escapado.py").exists()
+
+
+def test_onboarding_connection_reports_revocation_and_recovery(client, github):
+    """JAJ-91: si desinstalan la app desde GitHub, el onboarding sabe por qué no hay repos."""
+    assert client.get("/github/connection").json() == {"repos": [], "installations": [], "revoked": False}
+    connect(client)
+    github.repos.pop(42)
+
+    revoked = client.get("/github/connection")
+    assert revoked.status_code == 200
+    assert revoked.json() == {"repos": [], "installations": [], "revoked": True}
+    assert client.get("/github/connection").json()["revoked"] is True
+
+    github.repos[42] = [Repo(7, "acme/tienda", True, "main", 42)]
+    connect(client)
+    restored = client.get("/github/connection").json()
+    assert restored["revoked"] is False
+    assert restored["repos"][0]["full_name"] == "acme/tienda"

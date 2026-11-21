@@ -202,8 +202,8 @@ class ProjectStore(Protocol):
         """Liga la instalación al usuario que la verificó. Si ya existía, pasa a ese usuario."""
         ...
 
-    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
-        """Las instalaciones vigentes de ``owner``."""
+    def list_installations(self, owner: str | None, *, revoked: bool = False) -> list[GitHubInstallation]:
+        """Las instalaciones de ``owner`` con el estado solicitado."""
         ...
 
     def revoke_installation(self, installation_id: int) -> None:
@@ -253,7 +253,7 @@ class InMemoryProjectStore:
         self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
         self._goals: dict[str, ProjectGoals] = {}  # proyecto → metas (JAJ-67)
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
-        self._installations: dict[int, tuple[str | None, str]] = {}  # id → (owner, cuenta)
+        self._installations: dict[int, tuple[str | None, str, bool]] = {}  # id → (owner, cuenta, revocada)
         self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
         self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
 
@@ -346,14 +346,22 @@ class InMemoryProjectStore:
 
     def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
         with self._lock:
-            self._installations[installation_id] = (owner, account_login)
+            self._installations[installation_id] = (owner, account_login, False)
 
-    def list_installations(self, owner: str | None) -> list[GitHubInstallation]:
-        return [GitHubInstallation(i, login) for i, (o, login) in self._installations.items() if o == owner]
+    def list_installations(self, owner: str | None, *, revoked: bool = False) -> list[GitHubInstallation]:
+        with self._lock:
+            return [
+                GitHubInstallation(i, login)
+                for i, (o, login, is_revoked) in self._installations.items()
+                if o == owner and is_revoked == revoked
+            ]
 
     def revoke_installation(self, installation_id: int) -> None:
         with self._lock:
-            self._installations.pop(installation_id, None)
+            entry = self._installations.get(installation_id)
+            if entry is not None:
+                owner, login, _ = entry
+                self._installations[installation_id] = (owner, login, True)
 
     def connect_repo(
         self, owner: str | None, installation_id: int, repo_id: int, full_name: str, default_branch: str

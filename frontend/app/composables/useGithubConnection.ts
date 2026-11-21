@@ -42,6 +42,7 @@ export function useGithubConnection({ immediate = true } = {}) {
 
   const repos = shallowRef<GithubRepo[]>([]);
   const installations = shallowRef<GithubInstallation[]>([]);
+  const revoked = ref(false);
   const branches = shallowRef<string[]>([]);
   const repo = ref("");
   const branch = ref("");
@@ -78,10 +79,10 @@ export function useGithubConnection({ immediate = true } = {}) {
     if (!quiet) loading.value = true;
     error.value = "";
     try {
-      [repos.value, installations.value] = await Promise.all([
-        api.repos(),
-        api.installations(),
-      ]);
+      const snapshot = await api.connection();
+      repos.value = snapshot.repos;
+      installations.value = snapshot.installations;
+      revoked.value = snapshot.revoked;
       if (!repos.value.some((item) => item.full_name === repo.value))
         repo.value = repos.value[0]?.full_name ?? "";
       if (installations.value.length && !installHref.value)
@@ -206,6 +207,7 @@ export function useGithubConnection({ immediate = true } = {}) {
     enabled: !!api,
     repos,
     installations,
+    revoked,
     branches,
     repo,
     branch,
