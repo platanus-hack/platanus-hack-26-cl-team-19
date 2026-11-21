@@ -10,6 +10,7 @@ from app.api.main import create_app
 from app.api.run_cache import ENGINE_VERSION, RUN_CACHE_HEADER, cache_key, run_from_json, run_to_json
 from app.api.schemas import RunParams
 from app.api.store import InMemoryProjectStore
+from app.samples import load_sample
 
 SAMPLE = "full-stack-fastapi-template"
 RUN = {"scenario": "cyberday", "seed": 1, "duration_s": 5}
@@ -132,3 +133,17 @@ def test_postgres_row_has_metrics_and_scenario(database_url, clean_pg_store):
     assert row[:4] == ("cyberday", "cyberday", 1, ENGINE_VERSION)
     assert float(row[4]) == pytest.approx(run["error_rate"])
     assert float(row[5]) == pytest.approx(run["rps"])
+
+
+def test_find_run_only_returns_runs_of_that_project_and_version(store):
+    """JAJ-97: la clave sola no basta. Un run guardado en otro proyecto o versión no se devuelve,
+    aunque tenga la misma clave (en Postgres, alguien que pudiera escribir en ``runs`` la plantaría)."""
+    model = load_sample(SAMPLE)
+    a, b = store.create("a", model, None), store.create("b", model, None)
+    store.add_version(b.id, model, "manual", 1, None)
+    run = run_to_json(run_cache.run_model(model, RunParams(**RUN)))
+    key = cache_key(a.id, 1, RunParams(**RUN))
+    store.save_run(b.id, 1, key, {}, run, ENGINE_VERSION)
+    assert store.find_run(a.id, 1, key) is None
+    assert store.find_run(b.id, 2, key) is None
+    assert store.find_run(b.id, 1, key) == run

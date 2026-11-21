@@ -176,8 +176,12 @@ class ProjectStore(Protocol):
         """Reemplaza las metas. ``KeyError`` si el proyecto no existe."""
         ...
 
-    def find_run(self, cache_key: str) -> dict[str, Any] | None:
-        """El ``Run`` guardado con esa clave (como dict ``branchpoint.run/v1``), o ``None`` (JAJ-75)."""
+    def find_run(self, project_id: str, number: int, cache_key: str) -> dict[str, Any] | None:
+        """El ``Run`` guardado de la versión ``number`` del proyecto con esa clave (como dict
+        ``branchpoint.run/v1``), o ``None`` (JAJ-75).
+
+        Busca por proyecto y versión además de la clave (JAJ-97): un run guardado con la clave de
+        otro proyecto nunca se devuelve, aunque alguien lograra escribirlo."""
         ...
 
     def save_run(
@@ -244,7 +248,8 @@ class InMemoryProjectStore:
 
     def __init__(self) -> None:
         self._projects: dict[str, Project] = {}
-        self._runs: dict[str, dict[str, Any]] = {}  # cache_key → Run como dict (JAJ-75)
+        # cache_key → (proyecto, versión, Run como dict) (JAJ-75, JAJ-97)
+        self._runs: dict[str, tuple[str, int, dict[str, Any]]] = {}
         self._scenarios: dict[str, dict[str, ProjectScenario]] = {}  # proyecto → nombre → escenario
         self._goals: dict[str, ProjectGoals] = {}  # proyecto → metas (JAJ-67)
         self._lock = threading.Lock()  # las rutas def corren en el pool de hilos de FastAPI
@@ -319,9 +324,11 @@ class InMemoryProjectStore:
             self._goals[project_id] = goals
         return goals
 
-    def find_run(self, cache_key: str) -> dict[str, Any] | None:
-        run = self._runs.get(cache_key)
-        return copy.deepcopy(run) if run is not None else None
+    def find_run(self, project_id: str, number: int, cache_key: str) -> dict[str, Any] | None:
+        saved = self._runs.get(cache_key)
+        if saved is None or saved[:2] != (project_id, number):
+            return None
+        return copy.deepcopy(saved[2])
 
     def save_run(
         self,
@@ -335,7 +342,7 @@ class InMemoryProjectStore:
         if self.get_version(project_id, number) is None:
             raise KeyError(f"{project_id} v{number}")
         with self._lock:
-            self._runs.setdefault(cache_key, copy.deepcopy(run))
+            self._runs.setdefault(cache_key, (project_id, number, copy.deepcopy(run)))
 
     def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
         with self._lock:

@@ -329,9 +329,18 @@ class PostgresProjectStore:
                 raise KeyError(project_id)
         return _goals(row)
 
-    def find_run(self, cache_key: str) -> dict[str, Any] | None:
+    def find_run(self, project_id: str, number: int, cache_key: str) -> dict[str, Any] | None:
+        pid = _uuid(project_id)
+        if pid is None:
+            return None
         with self._conn() as conn:
-            row = conn.execute("select result from runs where cache_key = %s", (cache_key,)).fetchone()
+            # por proyecto y versión además de la clave (JAJ-97): una fila con la clave de otro
+            # proyecto no se devuelve
+            row = conn.execute(
+                "select r.result from runs r join model_versions v on v.id = r.model_version_id"
+                " where r.cache_key = %s and r.project_id = %s and v.number = %s",
+                (cache_key, pid, number),
+            ).fetchone()
         return row["result"] if row is not None else None
 
     def save_run(
