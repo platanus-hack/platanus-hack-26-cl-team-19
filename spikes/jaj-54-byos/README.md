@@ -6,7 +6,12 @@
 2. **Es el único camino de suscripción que permiten los proveedores.** Anthropic prohíbe que una app de terceros ofrezca el login de claude.ai o mande requests con el plan Pro/Max del usuario. Sí permite que el usuario use su propio Claude Code, sin modificar, con su suscripción. OpenAI no ofrece un "Sign in with ChatGPT" para terceros.
 3. **Branchpoint no guarda ninguna credencial de IA.** En el modo CLI solo existe un token de Branchpoint para conectar la CLI al MCP (JAJ-81). El chat dentro del editor (JAJ-67) se usa solo con una API key del usuario, que no se guarda en el servidor, o con la credencial de demo del equipo, con límite de gasto.
 4. **Proveedores del MVP:** Claude Code primero. Como MCP es un estándar, otras CLIs con MCP por HTTP sirven sin código extra (Gemini CLI confirmado; Codex sin verificar).
-5. **El prototipo funciona con el motor real.** `mcp_server.py` expone 4 tools, y un cliente MCP (lo mismo que hace la CLI) simula CyberDay y propone "API ×4". El resultado es contraintuitivo, como pide la demo: el p95 baja de 22 s a 1 s, pero el cuello pasa a la DB y los errores suben al 37 %, por +US$86,50/mes.
+5. **Validado con Claude Code real** (plan Pro, sin API key). Conectado a `mcp_server.py`, el agente:
+   * simuló CyberDay y citó el cuello de botella con su `archivo:línea`;
+   * probó 4 propuestas con `propose`, porque cada arreglo movía el cuello a otro lado;
+   * recomendó 6 réplicas, pooler y DB large: p95 de 22,3 s a 287 ms, 0 % de errores, +US$244/mes.
+
+   Todos los números salieron de las tools.
 
 ## Qué permite cada proveedor
 
@@ -108,7 +113,31 @@ Resultado (template en CyberDay ×20):
   - el cuello pasa a la CPU de la DB (97 %, `backend/app/api/routes/users.py:43`);
   - el costo sube de US$148,67 a US$235,17 al mes.
 
-Para probarlo con Claude Code (con su sesión Pro/Max o con su key), con el servidor corriendo:
+### Prueba con Claude Code real (2026-11-21)
+
+Claude Code 2.1.323 con sesión **Claude Pro**, sin API key. Pregunta: "¿qué pasa en CyberDay? … propón un cambio con propose y compara".
+
+- **Diagnóstico:**
+  - la API atiende 81,1 de 262,4 req/s;
+  - el p95 queda en 22,3 s;
+  - el cuello es la CPU de la API al 100 %, y el 59 % se va en `backend/app/core/security.py:36`.
+- **Lo que probó el agente con `propose`, en orden:**
+
+| Cambio | p95 | Errores | Costo/mes | Nuevo cuello |
+|---|---|---|---|---|
+| Hoy | 22.261 ms | 0 % | US$148,67 | CPU de la API, `security.py:36` |
+| 4 réplicas | 989 ms | 37,2 % | US$235,17 | CPU de la DB, `routes/users.py:43`; pide 240 conexiones y la DB acepta 60 |
+| + pooler + DB small | 12.190 ms | 0 % | US$240,17 | CPU de la DB al 100 % |
+| + pooler + DB large | 3.687 ms | 0 % | US$335,17 | CPU de la API al 99 % |
+| **6 réplicas + pooler + DB large** | **287 ms** | **0 %** | **US$392,84** | CPU de la API al 84 % |
+
+- **Límites que respetó:**
+  - no inventó números;
+  - avisó que con la CPU al 100 % el motor es optimista;
+  - no simuló la caché de `GET /users/` porque la tasa de aciertos es un dato del usuario, y se la pidió;
+  - señaló que `propose` no tiene una operación para abaratar el hash de contraseñas.
+
+Para repetirlo con el servidor corriendo:
 
 ```bash
 claude mcp add --transport http branchpoint http://127.0.0.1:8765/mcp
@@ -127,7 +156,6 @@ claude -p "Con la tool simulate de branchpoint, ¿qué pasa en CyberDay en el ej
 
 ## Pendientes
 
-- Probar el prototipo con Claude Code real. En la máquina donde se hizo el spike no hay CLI de IA instalada.
 - Verificar el soporte de MCP por HTTP de Codex CLI.
 - Leer los Commercial Terms de Anthropic sobre apps que piden pegar la API key del usuario.
 - Autenticación del MCP en producción: el token de Branchpoint por ahora; después, OAuth de MCP.
