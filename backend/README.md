@@ -455,6 +455,7 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 - **`CostEstimate.missing`:** `["api", "db"]`, los componentes sin precio. El primer elemento de `warnings` lo explica y dice qué proveedor usar para comparar.
 - **`CostDelta.missing`:** los que faltan en alguna de las dos versiones.
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
+- **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
 
 ### Costo de fallar (JAJ-74)
 

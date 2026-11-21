@@ -357,12 +357,25 @@ def _missing(raw: dict[str, Any]) -> list[str]:
     return out
 
 
+def describe_missing(missing: list[str]) -> str:
+    """'la API, que no tiene precio' o 'la API ni la DB, que no tienen precio' (JAJ-88)."""
+    names = " ni ".join(COMPONENT_NAMES[c] for c in missing)
+    return f"{names}, que no {'tienen' if len(missing) > 1 else 'tiene'} precio"
+
+
+def _or_list(items: set[str]) -> str:
+    ordered = sorted(items)
+    return ordered[0] if len(ordered) == 1 else ", ".join(ordered[:-1]) + f" o {ordered[-1]}"
+
+
 def _missing_warning(raw: dict[str, Any], missing: list[str]) -> str:
     dep = raw["deployment"]
     parts = [f"{COMPONENT_NAMES[c]} ({dep[c].get('provider', 'local')})" for c in missing]
+    them = "las" if len(missing) > 1 else "la"
+    where = {"api": f"la API en {_or_list(PRICED_API)}", "db": f"la DB en {_or_list(PRICED_DB)}"}
     return (
-        f"Sin precio para {' ni '.join(parts)}: el total no las incluye y no cambia con sus réplicas ni con su "
-        "plan. Para comparar costos, indica dónde se desplegaría: la API en fargate y la DB en supabase o rds_postgres."
+        f"Sin precio para {' ni '.join(parts)}: el total no {them} incluye y no cambia con sus réplicas ni con su "
+        f"plan. Para comparar costos, indica dónde se desplegaría: {' y '.join(where[c] for c in missing)}."
     )
 
 
