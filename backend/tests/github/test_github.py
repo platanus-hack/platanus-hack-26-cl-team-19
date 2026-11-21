@@ -107,7 +107,7 @@ def connect(client) -> None:
 
 def redirect_params(r) -> dict[str, str]:
     loc = urllib.parse.urlparse(r.headers["location"])
-    assert f"{loc.scheme}://{loc.netloc}{loc.path}" == "http://front.test/conectar"
+    assert f"{loc.scheme}://{loc.netloc}{loc.path}" == "http://front.test/onboarding"
     return {k: v[0] for k, v in urllib.parse.parse_qs(loc.query).items()}
 
 
