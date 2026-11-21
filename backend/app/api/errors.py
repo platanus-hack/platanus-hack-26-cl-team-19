@@ -13,11 +13,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 INVALID_MODEL = "invalid_model"  # el modelo no es branchpoint.model/v1 o le faltan campos
-UNKNOWN_SCENARIO = "unknown_scenario"  # el escenario no está en el modelo
+UNKNOWN_SCENARIO = "unknown_scenario"  # el escenario no está en el modelo (o en el proyecto, JAJ-76)
 INVALID_PARAMETERS = "invalid_parameters"  # parámetros fuera de rango o combinación inválida
 RUN_TOO_LARGE = "run_too_large"  # la simulación pedida es demasiado grande para una request
 NOT_FOUND = "not_found"  # el modelo de ejemplo, proyecto o versión no existe (trae ``resource``)
 INVALID_OPERATIONS = "invalid_operations"  # una operación de propose_version no se puede aplicar (JAJ-68)
+UNAUTHORIZED = "unauthorized"  # falta el token de sesión, venció o no es válido (401, JAJ-78)
+AUTH_UNAVAILABLE = "auth_unavailable"  # no se pudieron bajar las claves de Supabase Auth (503, JAJ-78)
 
 
 class ApiError(Exception):

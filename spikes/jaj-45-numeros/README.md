@@ -28,7 +28,7 @@ Issue: [JAJ-45](https://linear.app/jajathom/issue/JAJ-45/definir-como-la-app-obt
 python3 build_model.py <ruta-al-repo> --answers answers/full-stack-fastapi-template.json -o modelo.json
 ```
 
-Requiere solo Python 3.12 (stdlib) y usa el extractor de `spikes/jaj-7-ingestion/`. Igual que el extractor, no importa ni ejecuta el código analizado. Es determinista: dos corridas con el mismo repo y las mismas respuestas dan el mismo archivo, salvo la fecha.
+Requiere Python 3.12 y PyYAML (`pip install pyyaml`, o el entorno del backend). Usa el extractor de `spikes/jaj-7-ingestion/` y el lector de despliegue de `backend/app/ingest/iac.py` (JAJ-60). Igual que el extractor, no importa ni ejecuta el código analizado. Es determinista: dos corridas con el mismo repo y las mismas respuestas dan el mismo archivo, salvo la fecha.
 
 ## A. Números que salen del repo (`OBSERVADO`)
 
@@ -41,8 +41,13 @@ Requiere solo Python 3.12 (stdlib) y usa el extractor de `spikes/jaj-7-ingestion
 | Endpoint `def` o `async def` | El AST del handler | No aplica |
 | Timeouts de llamadas HTTP | Ya lo marcaba JAJ-7 (`[sin timeout]`) | No aplica |
 
+**Archivos de despliegue (JAJ-60).** `backend/app/ingest/iac.py` lee Docker Compose, Dockerfile, Procfile, Kubernetes (`Deployment`, `StatefulSet`, `HorizontalPodAutoscaler`), `fly.toml`, `render.yaml`, Terraform de AWS (RDS, ECS, ElastiCache, SQS) y los workflows de despliegue. Con eso arma `deployment.services` (cada servicio con su rol: API, DB, caché, cola, worker, proxy u otro, y su `archivo:línea`). Las réplicas, vCPU, memoria y plan que encuentra entran con etiqueta `OBSERVADO`.
+
+Cada número del despliegue se toma en este orden: la respuesta del usuario, después lo que dice el repo, y si no hay nada, el valor por defecto `SUPUESTO`. `deployment.iac.missing` lista lo que no dicen ni el repo ni las respuestas, con la pregunta para el agente (JAJ-59). Un repo sin archivos de despliegue da `services: []` y todas las preguntas.
+
 Ejemplos de lo que encuentra:
 
+* **Template (IaC):** `compose.yml` da `proxy` (Traefik), `db` (Postgres 18), `adminer` y `backend` (la API, 4 workers por el `CMD` de `backend/Dockerfile`). `compose.override.yml` agrega `mailpit` y `playwright`, y el workflow de despliegue apunta a FastAPI Cloud. No dice réplicas, vCPU ni plan de la DB.
 * **Template:** `4 workers en backend/Dockerfile:65` y `create_engine` sin `pool_size`.
 * **realworld:** `max_size` de asyncpg = 10, leído de `app/core/settings/app.py:22`.
 * **Dispatch:** pool de 20 + 10 con 30 s de espera, leído de los defaults de `src/dispatch/config.py`.
@@ -126,6 +131,7 @@ Archivo único `branchpoint.model/v1`:
 * `repo`: nombre y estadísticas de la extracción.
 * `deployment.api`: réplicas, vCPU, workers, hilos, latencia y US$/mes.
 * `deployment.db`: plan, vCPU, `max_connections`, pool por worker y US$/mes.
+* `deployment.services` y `deployment.iac`: los servicios que dicen los archivos de despliegue, los archivos leídos, a dónde se despliega y `missing`, lo que falta preguntar (JAJ-60).
 * `traffic`: entradas, pico y `scenarios`.
 * `business`: ticket y conversión.
 * `endpoints[]`: `steps` con `resource` (`db_connection`, `api_cpu`, `cache`, `external`), `time`, `repeat` opcional, `at` (archivo:línea) y `via`; además `alternatives`, `weight`, `db_hold_ms`, `api_cpu_ms` y `risks`.

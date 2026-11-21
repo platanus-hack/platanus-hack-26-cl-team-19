@@ -32,6 +32,8 @@ backend/
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
 │   │   └── failure.py       #   failure_cost(modelo, run): ventas en juego por hora (JAJ-74)
+│   ├── ingest/              # ingesta determinista del repo (ADR 0001, paso 1)
+│   │   └── iac.py           #   archivos de despliegue → servicios y números OBSERVADO (JAJ-60)
 │   ├── samples/             # modelos de ejemplo que sirve GET /models (salida de JAJ-45)
 │   ├── db/                  # modelo de datos (JAJ-55) y ProjectStore sobre Postgres (JAJ-56)
 │   └── cli.py               # correr una simulación desde la terminal
@@ -40,6 +42,7 @@ backend/
     ├── engine/              # tests del kernel y del motor
     ├── agent/               # tests de las operaciones
     ├── costs/               # tests de los precios y del costo (contra el spike de JAJ-11)
+    ├── ingest/              # tests del lector de archivos de despliegue
     └── api/                 # tests de la API
 ```
 
@@ -231,13 +234,32 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. Si ya se simuló con los mismos parámetros, devuelve el run guardado (ver "Runs guardados" abajo). |
 | `POST` | `/projects/{id}/versions/{n}/ops` | Aplica `{"ops": [...], "note"}` a la versión `n` y guarda el resultado como versión nueva (`origin: agente`, antecesora `n`). Devuelve la versión con `changes` (una línea por operación) y `warnings`. Ver "Operaciones" abajo. |
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente), `failure_a` y `failure_b` (ventas en juego por hora, JAJ-74) y `summary`, la comparación en una frase. `region` opcional para los costos. |
+| `GET` | `/projects/{id}/scenarios` | Los escenarios del proyecto (`name`, `multiplier` o `rps`, `description`). Ver "Escenarios del proyecto" abajo. |
+| `GET` | `/projects/{id}/scenarios/{name}` | Un escenario. 404 si el proyecto no lo tiene. |
+| `PUT` | `/projects/{id}/scenarios/{name}` | Crea o reemplaza el escenario. Body: `{"multiplier": 20}` (× el pico de cada versión) o `{"rps": 300}` (req/s fijas), y `description` opcional. |
 | `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
 
+**Login y proyectos por usuario (JAJ-78):** con `SUPABASE_URL` en el entorno, todas las rutas de `/projects` piden el token de sesión de Supabase Auth: `Authorization: Bearer <access_token>`, el que entrega `supabase.auth.getSession()` en el frontend.
+- **Cómo se valida** (`app/api/auth.py`): la firma se revisa con las claves públicas del proyecto (JWKS, en `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`), que se bajan una vez y se vuelven a bajar si aparece una clave nueva. También se revisan `exp`, `aud = authenticated` e `iss = {SUPABASE_URL}/auth/v1`. Para un proyecto que todavía firma con el secreto compartido (HS256), va `SUPABASE_JWT_SECRET`.
+- **Errores:** sin token, o con uno vencido o inválido, 401 `unauthorized`, con el motivo en español. Si no se pueden bajar las claves, 503 `auth_unavailable`.
+- **Cada usuario ve solo lo suyo.** El proyecto guarda `owner_id`, que es el `sub` del token (el id de `auth.users`). El de otro usuario responde 404, como si no existiera: no se puede listar, abrir, simular, comparar, costear ni escribirle versiones u operaciones. Los runs guardados y los escenarios cuelgan del proyecto, así que quedan aislados con él. Todas las rutas de proyectos sacan el store de `get_store`, que exige la sesión y filtra por dueño, así que una ruta nueva no puede saltarse el filtro.
+- **Proyectos anónimos de antes de JAJ-78:** no son de nadie, y con login no se ven.
+- **Sin login** siguen `GET /health`, `GET /models`, `POST /graph`, `POST /runs` y `POST /costs`, que no guardan nada. Con ellas se puede ver el catálogo de templates sin cuenta.
+- **`BRANCHPOINT_AUTH=off`** (o no tener `SUPABASE_URL`) apaga el login: los proyectos quedan sin dueño, como antes. Sirve para usar el editor en local mientras no tenga login (JAJ-77). En producción no se pone.
+- **Postgres:** el backend entra con el rol `postgres`, que se salta RLS, así que el aislamiento lo hace `PostgresProjectStore`, filtrando por `owner_id`.
+
+**Escenarios del proyecto (JAJ-76):** los escenarios son del proyecto, no de una versión. Así se compara cualquier par de versiones con el mismo escenario.
+- **Al crear el proyecto** se cargan los de `traffic.scenarios` de la v1 (`pico_normal` ×1 y `cyberday` ×20), con su multiplicador.
+- **`multiplier`** se multiplica por el pico del modelo de cada versión (`traffic.peak_rps`). CyberDay ×20 da 262,4 req/s en el template y 100 req/s en una v2 con pico 5. **`rps`** son req/s fijas, iguales en todas las versiones.
+- **`POST /projects/{id}/versions/{n}/runs` y `compare`** buscan el escenario por nombre en el proyecto, no en el modelo. Uno creado con `PUT` sirve para cualquier versión, aunque no esté en su `traffic.scenarios`. Si no existe, responden 422 `unknown_scenario` con `available`. Con `rps` en la request, el escenario es solo un nombre y no se busca.
+- **Al editar un escenario** cambia la tasa final y, con ella, la clave del run guardado: se vuelve a simular y nunca se devuelve un run con la tasa vieja.
+- **Duración, llegadas y timeout** siguen saliendo de la request. Las columnas de la tabla para eso (`duration_s`, `arrivals`…) todavía no se usan.
+
 **Runs guardados (JAJ-75):** `POST /projects/{id}/versions/{n}/runs` y `compare` guardan cada `Run` y, si se pide lo mismo otra vez, devuelven el guardado sin simular. Funciona así porque las versiones no se editan y el motor es determinista con la misma semilla.
-- **La clave** (`cache_key`, en `app/api/run_cache.py`) es el sha256 del proyecto, el número de versión, los `RunParams` (escenario, semilla, duración, tasa, perfil, créditos de CPU…) y `ENGINE_VERSION`.
+- **La clave** (`cache_key`, en `app/api/run_cache.py`) es el sha256 del proyecto, el número de versión, los `RunParams` (escenario, semilla, duración, tasa, perfil, créditos de CPU…) y `ENGINE_VERSION`. La tasa es la final: si viene de un escenario del proyecto, ya va calculada con el pico de la versión (JAJ-76).
 - **`ENGINE_VERSION`** es el hash del código de `app/engine` y `app/models`. Si cambia el motor, cambia la clave y los runs viejos dejan de usarse, sin subir ningún número a mano.
 - **El header `X-Branchpoint-Run-Cache`** dice `hit` si el run venía guardado y `miss` si se simuló. En `compare` van los dos, de `a` y de `b` (`hit,miss`). El CORS lo expone, así que el editor lo puede leer.
 - **Dónde quedan:** con Postgres, en la tabla `runs`, con el `Run` completo en `result` y sus métricas en columnas (`p95_ms`, `error_rate`, `throughput_rps`, `bottleneck_resource`), y sobreviven a un reinicio. En memoria, se pierden con el resto.

@@ -11,6 +11,9 @@ Con ``DATABASE_URL`` los proyectos y versiones se guardan en Postgres (JAJ-56). 
 memoria y se pierden al reiniciar. Para leerla de ``backend/.env``:
 
   uvicorn app.api.main:app --reload --env-file .env
+
+Con ``SUPABASE_URL``, las rutas de proyectos piden el token de sesión de Supabase y cada usuario ve
+solo sus proyectos (JAJ-78, ver ``app/api/auth.py``). ``BRANCHPOINT_AUTH=off`` lo apaga en local.
 """
 
 from __future__ import annotations
@@ -18,10 +21,12 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth import SupabaseAuth, auth_from_env
 from app.api.errors import install_error_handlers
 from app.api.routes import costs, health, models, projects, runs
 from app.api.run_cache import RUN_CACHE_HEADER
@@ -39,7 +44,17 @@ def store_from_env() -> ProjectStore:
     return PostgresProjectStore.from_url(database_url)
 
 
-def create_app(cors_origins: list[str] | None = None, store: ProjectStore | None = None) -> FastAPI:
+_FROM_ENV: Any = object()  # create_app(auth=...) sin pasar: se lee del entorno
+
+
+def create_app(
+    cors_origins: list[str] | None = None,
+    store: ProjectStore | None = None,
+    auth: SupabaseAuth | None = _FROM_ENV,
+) -> FastAPI:
+    """``auth=None`` corre sin login (los tests de las rutas, y ``BRANCHPOINT_AUTH=off``)."""
+    if auth is _FROM_ENV:
+        auth = auth_from_env()
     if cors_origins is None:
         env = os.environ.get("BRANCHPOINT_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
         cors_origins = [o.strip() for o in env.split(",") if o.strip()]
@@ -61,12 +76,13 @@ def create_app(cors_origins: list[str] | None = None, store: ProjectStore | None
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "PUT"],  # PUT: escenarios del proyecto (JAJ-76)
+        allow_headers=["Content-Type", "Authorization"],  # Authorization: el token de sesión (JAJ-78)
         expose_headers=[RUN_CACHE_HEADER],  # para que el editor sepa si el run venía guardado (JAJ-75)
     )
     install_error_handlers(app)
     app.state.store = store
+    app.state.auth = auth
     app.include_router(health.router)
     app.include_router(runs.router)
     app.include_router(models.router)

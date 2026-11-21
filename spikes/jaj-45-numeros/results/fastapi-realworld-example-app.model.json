@@ -48,9 +48,10 @@
       "workers": {
         "value": 1,
         "unit": "procesos",
-        "label": "ESTIMADO",
-        "source": "uvicorn y `fastapi run` levantan 1 worker si no se configura",
-        "date": "2026-11-21"
+        "label": "OBSERVADO",
+        "source": "el CMD del Dockerfile de app no pasa --workers: el servidor levanta 1 proceso por defecto",
+        "date": "2026-11-21",
+        "at": "Dockerfile:20"
       },
       "threads_per_worker": {
         "value": 40,
@@ -156,6 +157,51 @@
           "derived": true
         }
       }
+    },
+    "services": [
+      {
+        "name": "app",
+        "role": "api",
+        "at": "docker-compose.yml:4",
+        "workers": {
+          "value": 1,
+          "unit": "procesos",
+          "label": "OBSERVADO",
+          "source": "el CMD del Dockerfile de app no pasa --workers: el servidor levanta 1 proceso por defecto",
+          "date": "2026-11-21",
+          "at": "Dockerfile:20"
+        },
+        "source_file": "compose:docker-compose.yml"
+      },
+      {
+        "name": "db",
+        "role": "db",
+        "at": "docker-compose.yml:15",
+        "image": "postgres:11.5-alpine",
+        "engine": "postgres",
+        "version": "11.5-alpine",
+        "source_file": "compose:docker-compose.yml"
+      }
+    ],
+    "iac": {
+      "files": [
+        {
+          "path": "docker-compose.yml",
+          "kind": "compose"
+        },
+        {
+          "path": "Dockerfile",
+          "kind": "dockerfile"
+        }
+      ],
+      "deploy_targets": [
+        {
+          "target": "docker registry",
+          "at": ".github/workflows/deploy.yml:26"
+        }
+      ],
+      "warnings": [],
+      "missing": []
     }
   },
   "traffic": {

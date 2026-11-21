@@ -1,2 +1,4 @@
 # dependencias de la raíz (CLI de Supabase, ver docs/supabase-local.md)
 node_modules/
+# llaves privadas (la de la GitHub App va en ~/.config/branchpoint/, fuera del repo)
+*.pem

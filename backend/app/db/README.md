@@ -93,11 +93,13 @@ erDiagram
 
 | Método | SQL |
 | -- | -- |
-| `create(name, model, sample)` | `insert into projects (name, sample_id, version_count) values (…, 1) returning id`; `insert into model_versions (project_id, number, origin, note, model) values (id, 1, 'repo', 'Extraída del repo', model)`; `insert into scenarios` con los escenarios de `traffic.scenarios` del modelo (`pico_normal` ×1 y `cyberday` ×20), guardando el multiplicador. |
-| `get(project_id)` | `select … from projects where id = $1`; `select number, origin, parent_number, note, created_at from model_versions where project_id = $1 order by number` (sin la columna `model`). |
+| `create(name, model, sample, owner)` | `insert into projects (name, sample_id, version_count, owner_id) values (…, 1, owner) returning id`; `insert into model_versions (project_id, number, origin, note, model) values (id, 1, 'repo', 'Extraída del repo', model)`; `insert into scenarios` con los escenarios de `traffic.scenarios` del modelo (`pico_normal` ×1 y `cyberday` ×20), guardando el multiplicador. |
+| `get(project_id, owner)` | `select … from projects where id = $1 and owner_id is not distinct from $owner` (el de otro usuario da `None`, JAJ-78); `select number, origin, parent_number, note, created_at from model_versions where project_id = $1 order by number` (sin la columna `model`). |
 | `get_version(project_id, number)` | `select number, origin, parent_number, note, created_at, model from model_versions where project_id = $1 and number = $2`. |
-| `list()` | `select … from projects where owner_id = $user order by created_at desc` (sin login: `owner_id is null`). |
+| `list(owner)` | `select … from projects where owner_id is not distinct from $owner order by created_at desc` (sin login, `owner` es `None`: los de `owner_id` nulo). |
 | `add_version(project_id, model, origin, parent, note)` | `update projects set version_count = version_count + 1, updated_at = now() where id = $1 returning version_count` → `n`; `insert into model_versions (project_id, number, parent_number, origin, note, model) values ($1, n, parent, origin, note, model)`. La FK compuesta rechaza una antecesora que no existe. |
+| `list_scenarios(project_id)` | `select name, multiplier, rps, description from scenarios where project_id = $1 order by name`. |
+| `upsert_scenario(project_id, scenario)` | `insert into scenarios (project_id, name, multiplier, rps, description) values (…) on conflict (project_id, name) do update set multiplier = excluded.multiplier, rps = excluded.rps, description = excluded.description`. El check `scenarios_one_rate` exige una sola tasa. |
 | `find_run(cache_key)` | `select result from runs where cache_key = $1`. |
 | `save_run(project_id, number, cache_key, params, run, engine_version)` | `select id from model_versions where project_id = $1 and number = $2`; `insert into runs (…, scenario_id, …) values (…, (select id from scenarios where project_id = $1 and name = run.scenario), …) on conflict (cache_key) do nothing`. Si dos requests iguales llegan a la vez, las dos simulan y solo la primera inserta. |
 
@@ -111,7 +113,7 @@ Los ids de proyecto son `uuid`. Un id que no lo es (por ejemplo `nope`) da `None
   - `POST /projects/{id}/versions/{n}/runs` y `POST /projects/{id}/compare` buscan primero por `cache_key` y simulan solo si no está (`app/api/run_cache.py`).
   - Comparar no se guarda: es la diferencia entre dos runs guardados.
   - La clave usa el proyecto y el número de versión en vez de `model_version_id`. Es lo mismo, porque la versión `n` de un proyecto no cambia, y sirve también para el store en memoria, que no tiene ese id. `engine_version` es el hash del código del motor (ver el README del backend).
-- **Pendiente: escenarios.** `create` ya los carga, pero las rutas todavía los leen de `traffic.scenarios` del modelo. Falta `list_scenarios(project_id)` y `upsert_scenario(...)`. Hoy los escenarios salen de `traffic.scenarios` del modelo.
+- **Hecho: escenarios (JAJ-76).** `list_scenarios(project_id)` y `upsert_scenario(project_id, scenario)`, en memoria y en Postgres. Las rutas resuelven el escenario por nombre desde la tabla, y la tasa con `traffic.peak_rps` del modelo de cada versión cuando es un `multiplier`. Las columnas `duration_s`, `arrivals`, `client_timeout_s`, `cache_hit_ratio` y `failures` todavía no se usan: esos valores salen de la request.
 
 ## Depende de otras investigaciones
 
