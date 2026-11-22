@@ -18,6 +18,8 @@ export interface ChatProposal {
   };
   changes: string[];
   warnings: string[];
+  /** El escenario no existía: al aceptar se crea en el proyecto, sin versión nueva (JAJ-149). */
+  new_scenario?: boolean;
 }
 
 type ToolResult = {

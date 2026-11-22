@@ -8,13 +8,12 @@ Todas las rutas piden sesión cuando la API tiene login (JAJ-78, ``get_store``).
 
 from __future__ import annotations
 
-import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
-from app.agent.proposals import ProposalDraft, prepare_proposal
+from app.agent.proposals import ProposalDraft, already_created, prepare_proposal
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
 from app.api.routes.attachments import purge_expired
@@ -41,7 +40,7 @@ from app.api.schemas import (
     VersionResultsRequest,
     VersionSummary,
 )
-from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
+from app.api.store import SCENARIO_NAME, OwnedStore, Project, ProjectScenario, ProjectStore, Version
 from app.costs import (
     CostDelta,
     CostEstimate,
@@ -58,8 +57,6 @@ from app.models.run import Run
 from app.storage.attachments import StorageError
 
 router = APIRouter(prefix="/projects", tags=["projects"])
-
-SCENARIO_NAME = re.compile(r"[a-z0-9_-]{1,60}")
 
 
 def get_store(request: Request, user: User | None = Depends(current_user)) -> ProjectStore:
@@ -197,10 +194,17 @@ def accept_chat_proposal(
     project_id: str, proposal_id: UUID, draft: ProposalDraft, store: ProjectStore = Depends(get_store)
 ) -> VersionDetail:
     base = _version(store, _project(store, project_id), draft.base)
+    scenarios = store.list_scenarios(project_id)
+    if already_created(base.model, draft, scenarios):
+        return VersionDetail(**_summary(base).model_dump(), model=base.model)
     try:
-        prepared = prepare_proposal(base.model, draft, store.list_scenarios(project_id))
+        prepared = prepare_proposal(base.model, draft, scenarios)
     except ValueError as e:
         raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
+    if prepared.new_scenario is not None:
+        # JAJ-149: un escenario nuevo es del proyecto, no de una versión: se guarda y la versión queda igual
+        store.upsert_scenario(project_id, prepared.new_scenario)
+        return VersionDetail(**_summary(base).model_dump(), model=base.model)
     note = draft.note or "; ".join(prepared.changes)
     version = store.add_version(project_id, prepared.model, "agente", draft.base, note[:500], proposal_id=proposal_id)
     return VersionDetail(**_summary(version).model_dump(), model=version.model)

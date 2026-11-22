@@ -17,9 +17,10 @@ const emit = defineEmits<{ apply: []; discard: [] }>();
 
 const title = computed(() => {
   const scenario = props.proposal.draft.scenario?.name;
-  return scenario
-    ? `Escenario ${scenarioLabel(scenario)}`
-    : "Cambio de arquitectura";
+  if (!scenario) return "Cambio de arquitectura";
+  return props.proposal.new_scenario
+    ? `Nuevo escenario: ${scenarioLabel(scenario)}`
+    : `Cambio de escenario: ${scenarioLabel(scenario)}`;
 });
 const changes = computed(() => props.proposal.changes.map(proposalChangeView));
 const showNote = ref(false);
@@ -33,7 +34,9 @@ const longNote = computed(() => (props.proposal.draft.note?.length ?? 0) > 140);
   >
     <header class="flex items-baseline justify-between gap-2">
       <h3 class="min-w-0 text-sm font-semibold wrap-anywhere">{{ title }}</h3>
-      <span class="shrink-0 font-mono text-xs text-muted-foreground"
+      <span
+        v-if="!proposal.new_scenario"
+        class="shrink-0 font-mono text-xs text-muted-foreground"
         >desde v{{ proposal.draft.base }}</span
       >
     </header>
@@ -142,9 +145,11 @@ const longNote = computed(() => (props.proposal.draft.note?.length ?? 0) > 140);
       <Check v-if="state === 'applied'" class="size-3.5" aria-hidden="true" />
       <X v-else class="size-3.5" aria-hidden="true" />
       {{
-        state === "applied"
-          ? `Aplicado como ${version}`
-          : "Propuesta descartada"
+        state !== "applied"
+          ? "Propuesta descartada"
+          : proposal.new_scenario
+            ? "Escenario creado"
+            : `Aplicado como ${version}`
       }}
     </p>
   </article>
