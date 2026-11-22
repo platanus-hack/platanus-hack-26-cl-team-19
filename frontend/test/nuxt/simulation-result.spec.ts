@@ -1,5 +1,5 @@
 import { mountSuspended } from "@nuxt/test-utils/runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ArchitectureDiagram from "../../app/components/editor/ArchitectureDiagram.vue";
 import SimulationRunStatus from "../../app/components/editor/SimulationRunStatus.vue";
 import type { Graph, Run } from "../../app/services/editor-api";
@@ -324,6 +324,36 @@ describe("ArchitectureDiagram con una corrida", () => {
     expect(wrapper.get('[data-testid="diagram-flow"]').html()).toContain(
       "0 llamadas/s simuladas",
     );
+  });
+
+  it("con movimiento reducido conserva el grosor medido sin animar partículas", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    const spy = vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+      const media = matchMedia(query);
+      if (query === "(prefers-reduced-motion: reduce)")
+        Object.defineProperty(media, "matches", { value: true });
+      return media;
+    });
+    try {
+      const wrapper = await mountSuspended(ArchitectureDiagram, {
+        props: {
+          ...props,
+          animating: true,
+          flows: props.flows.map((flow) => ({
+            ...flow,
+            measured: true,
+            errorShare: 0,
+          })),
+        },
+      });
+      const strokes = wrapper.findAll('[data-testid="diagram-flow-stroke"]');
+      expect(
+        strokes.map((stroke) => Number(stroke.attributes("stroke-width"))),
+      ).toEqual([4, 1.75]);
+      expect(wrapper.findAll("animateMotion")).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("sin corrida no dibuja partículas", async () => {

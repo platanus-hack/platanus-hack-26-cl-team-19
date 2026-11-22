@@ -1,3 +1,4 @@
+import type { DeploymentOptions } from "@/services/deployment-options";
 import type {
   Comparison,
   CostEstimate,
@@ -11,6 +12,7 @@ import type {
   VersionDetail,
 } from "@/services/editor-api";
 import type { ChatProposal } from "@/services/chat-stream";
+import { createMockEditorApi } from "@/services/editor-mock";
 import { editorRunParams } from "@/services/editor-api";
 import { toScenarios, toVersionEntry } from "@/services/editor-view";
 import type { RunReport } from "@/services/reports-api";
@@ -42,9 +44,14 @@ function changeReplicas(version: VersionDetail, replicas: number) {
   return model;
 }
 
-export function useEditorProject() {
-  const { api, isMock } = useProjectApi();
-  const reportsApi = useReportsApi();
+export function useEditorProject(embeddedDemo = false) {
+  const { api, isMock } = embeddedDemo
+    ? {
+        api: createMockEditorApi(undefined, { landing: true }),
+        isMock: true as const,
+      }
+    : useProjectApi();
+  const reportsApi = embeddedDemo ? null : useReportsApi();
   // JAJ-127: el reporte de la última corrida; reportsVersion avisa a la lista que hay uno nuevo
   const lastReport = shallowRef<RunReport | null>(null);
   const reportsVersion = ref(0);
@@ -95,8 +102,8 @@ export function useEditorProject() {
     }
   }
 
-  function resetResults() {
-    results.value = null;
+  function resetResults(keepRun = false) {
+    if (!keepRun) results.value = null;
     simulationError.value = "";
     costs.value = null;
     costsError.value = "";
@@ -105,8 +112,8 @@ export function useEditorProject() {
 
   async function displayVersion(detail: VersionDetail) {
     version.value = detail;
-    graph.value = null;
-    resetResults();
+    if (!embeddedDemo) graph.value = null;
+    resetResults(embeddedDemo);
     const available = scenarios.value.filter(({ disabled }) => !disabled);
     if (!available.some(({ id }) => id === scenario.value)) {
       scenario.value =
@@ -176,7 +183,11 @@ export function useEditorProject() {
     });
   }
 
-  async function openProject(id: string, repoId?: string) {
+  async function openProject(
+    id: string,
+    repoId?: string,
+    initialVersion?: number,
+  ) {
     await request("Abriendo proyecto…", async () => {
       const group = await api.getProject(id);
       projectGroup.value = group;
@@ -190,7 +201,7 @@ export function useEditorProject() {
       const latest = versions.value[0];
       if (!latest) throw new Error("El proyecto todavía no tiene una versión.");
       const [detail, projectScenarios] = await Promise.all([
-        api.getVersion(project.value.id, Number(latest.id)),
+        api.getVersion(project.value.id, initialVersion ?? Number(latest.id)),
         api.listScenarios(project.value.id),
       ]);
       savedScenarios.value = projectScenarios;
@@ -272,6 +283,33 @@ export function useEditorProject() {
       await displayVersion(saved);
     });
     return accepted as VersionDetail | null;
+  }
+
+  // JAJ-148: los proveedores y planes del catálogo, una vez por sesión (no cambian)
+  const deploymentOptions = shallowRef<DeploymentOptions | null>(null);
+  async function loadDeploymentOptions() {
+    if (isMock || deploymentOptions.value || !("deploymentOptions" in api))
+      return;
+    try {
+      deploymentOptions.value = await api.deploymentOptions();
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
+  }
+
+  // JAJ-148: el plan elegido en el inspector crea una versión nueva con la operación del catálogo
+  async function changeDeployment(
+    ops: Record<string, unknown>[],
+    note: string,
+  ) {
+    const current = project.value;
+    const parent = version.value;
+    if (!current || !parent || isMock || !("applyOps" in api)) return false;
+    return request("Creando versión…", async () => {
+      const saved = await api.applyOps(current.id, parent.number, ops, note);
+      project.value = { ...current, versions: [...current.versions, saved] };
+      await displayVersion(saved);
+    });
   }
 
   async function simulate(overrides?: ScenarioOverrides) {
@@ -390,6 +428,9 @@ export function useEditorProject() {
     saveScenario,
     createVersion,
     acceptChatProposal,
+    changeDeployment,
+    deploymentOptions,
+    loadDeploymentOptions,
     simulate,
     loadCosts,
     compare,

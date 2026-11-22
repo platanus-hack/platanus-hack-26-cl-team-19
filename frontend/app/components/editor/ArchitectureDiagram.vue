@@ -31,6 +31,7 @@ const props = defineProps<{
   flows?: DiagramFlow[];
   /** true mientras se reproduce la corrida: las partículas se mueven. */
   animating?: boolean;
+  animateLayout?: boolean;
 }>();
 
 const emit = defineEmits<{ select: [id: string | null]; explain: [] }>();
@@ -97,7 +98,7 @@ function columnGap(rows: ReturnType<typeof diagramRow>[]): number {
 }
 
 /** Columna = camino más largo desde una entrada (el grafo es acíclico). */
-const layout = computed(() => {
+const targetLayout = computed(() => {
   const layers = new Map<string, number>();
   const layerOf = (id: string, seen = new Set<string>()): number => {
     const known = layers.get(id);
@@ -162,6 +163,83 @@ const layout = computed(() => {
   };
 });
 
+type DiagramLayout = typeof targetLayout.value;
+const previousLayout = shallowRef<DiagramLayout>();
+const progress = ref(1);
+let layoutFrame: number | undefined;
+
+function geometryKey(layout: DiagramLayout) {
+  return [...layout.positions]
+    .map(([id, { x, y }]) => `${id}:${x},${y}`)
+    .join(";");
+}
+
+function stopLayoutAnimation() {
+  if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame);
+  layoutFrame = undefined;
+  previousLayout.value = undefined;
+  progress.value = 1;
+}
+
+function animateLayoutFrom(from: DiagramLayout) {
+  stopLayoutAnimation();
+  previousLayout.value = from;
+  progress.value = 0;
+  const start = performance.now();
+
+  function advance(now: number) {
+    const elapsed = Math.min(1, (now - start) / 460);
+    progress.value = 1 - (1 - elapsed) ** 3;
+    if (elapsed < 1) layoutFrame = requestAnimationFrame(advance);
+    else stopLayoutAnimation();
+  }
+  layoutFrame = requestAnimationFrame(advance);
+}
+
+function interpolate(from: number, to: number) {
+  return from + (to - from) * progress.value;
+}
+
+const layout = computed<DiagramLayout>(() => {
+  const next = targetLayout.value;
+  const previous = previousLayout.value;
+  if (!previous) return next;
+
+  const positions: DiagramLayout["positions"] = new Map();
+  for (const [id, point] of next.positions) {
+    const before = previous.positions.get(id) ?? {
+      x: point.x,
+      y: point.y + 10,
+    };
+    positions.set(id, {
+      x: interpolate(before.x, point.x),
+      y: interpolate(before.y, point.y),
+    });
+  }
+  return {
+    width: interpolate(previous.width, next.width),
+    height: interpolate(previous.height, next.height),
+    positions,
+    labelGroups: next.labelGroups.map((group) => {
+      const old = previous.labelGroups.find(({ id }) => id === group.id);
+      return old
+        ? {
+            ...group,
+            left: interpolate(old.left, group.left),
+            bottom: interpolate(old.bottom, group.bottom),
+          }
+        : group;
+    }),
+  };
+});
+
+function entryOpacity(...ids: string[]) {
+  const previous = previousLayout.value;
+  return previous && ids.some((id) => !previous.positions.has(id))
+    ? progress.value
+    : 1;
+}
+
 const paths = computed(() =>
   props.edges.flatMap((edge) => {
     const from = layout.value.positions.get(edge.from);
@@ -188,6 +266,7 @@ const paths = computed(() =>
     return [
       {
         key: `${edge.from}-${edge.to}`,
+        opacity: entryOpacity(edge.from, edge.to),
         d,
         start: { x: x1, y: y1 },
         end: { x: x2, y: y2 },
@@ -202,6 +281,13 @@ const paths = computed(() =>
 const MAX_PARTICLES = 8;
 const PARTICLE_SPEED = 90; // px/s
 const reducedMotion = usePreferredReducedMotion();
+const mounted = ref(false);
+onMounted(() => {
+  mounted.value = true;
+});
+const prefersStaticParticles = computed(
+  () => mounted.value && reducedMotion.value === "reduce",
+);
 const rpsFormat = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 });
 const percentFormat = new Intl.NumberFormat("es-CL", {
   style: "percent",
@@ -244,11 +330,29 @@ const particles = computed(() => {
   });
 });
 
+watch(targetLayout, (next, previous) => {
+  if (
+    !mounted.value ||
+    !props.animateLayout ||
+    reducedMotion.value === "reduce"
+  )
+    return;
+  if (!previous.positions.size || geometryKey(previous) === geometryKey(next))
+    return;
+  animateLayoutFrom(previous);
+});
+
+watch(reducedMotion, (motion) => {
+  if (motion === "reduce") stopLayoutAnimation();
+});
+
+onBeforeUnmount(stopLayoutAnimation);
+
 const flowLayer = useTemplateRef<SVGSVGElement>("flowLayer");
 watchEffect(() => {
   const layer = flowLayer.value;
   if (!layer) return;
-  if (props.animating) layer.unpauseAnimations();
+  if (props.animating && !previousLayout.value) layer.unpauseAnimations();
   else layer.pauseAnimations();
 });
 
@@ -366,7 +470,7 @@ const alertOf = (status?: SaturationStatus) =>
             :height="layout.height"
             aria-hidden="true"
           >
-            <g v-for="path in paths" :key="path.key">
+            <g v-for="path in paths" :key="path.key" :opacity="path.opacity">
               <path
                 :d="path.d"
                 fill="none"
@@ -396,7 +500,11 @@ const alertOf = (status?: SaturationStatus) =>
             :height="layout.height"
             data-testid="diagram-flow"
           >
-            <g v-for="item in particles" :key="item.key">
+            <g
+              v-for="item in particles"
+              :key="item.key"
+              :opacity="item.opacity"
+            >
               <path
                 :d="item.d"
                 fill="none"
@@ -410,7 +518,7 @@ const alertOf = (status?: SaturationStatus) =>
                 v-if="
                   item.flow.measured
                     ? item.flow.rps > 0
-                    : reducedMotion === 'reduce'
+                    : prefersStaticParticles
                 "
                 :d="item.d"
                 fill="none"
@@ -422,7 +530,7 @@ const alertOf = (status?: SaturationStatus) =>
                 :stroke-opacity="0.25 + item.flow.intensity * 0.75"
                 :stroke-dasharray="item.flow.errorShare > 0 ? '4 3' : undefined"
               />
-              <template v-if="reducedMotion !== 'reduce'">
+              <template v-if="!prefersStaticParticles">
                 <g
                   v-for="dot in item.dots"
                   :key="dot.index"
@@ -479,6 +587,7 @@ const alertOf = (status?: SaturationStatus) =>
                 left: `${layout.positions.get(node.id)?.x ?? 0}px`,
                 top: `${layout.positions.get(node.id)?.y ?? 0}px`,
                 width: `${NODE_WIDTH}px`,
+                opacity: entryOpacity(node.id),
                 height: `${NODE_HEIGHT}px`,
               }"
             >

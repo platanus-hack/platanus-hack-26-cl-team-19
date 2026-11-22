@@ -10,6 +10,7 @@ import type {
   CostLine,
   DatabaseHost,
   DiagramEdge,
+  DiagramFlow,
   DiagramNode,
   InspectedNode,
   NodeFrame,
@@ -146,6 +147,29 @@ export function simulate(
     });
   }
   return frames;
+}
+
+/** Flujo ilustrativo para el editor de ejemplo a partir de la carga de cada nodo. */
+export function sampleFlows(
+  edges: DiagramEdge[],
+  frame: SimulationFrame,
+  peak: number,
+): DiagramFlow[] {
+  return edges.map(({ from, to }) => {
+    const source = frame.nodes[from]?.load ?? 0;
+    const target = frame.nodes[to]?.load ?? 0;
+    const sources = edges.filter((edge) => edge.to === to).length;
+    const rps = Math.min(source, target / sources);
+    return {
+      from,
+      to,
+      rps,
+      measured: false,
+      intensity: peak > 0 ? Math.min(1, rps / peak) : 0,
+      errorShare:
+        frame.nodes[to]?.status === "down" ? (frame.failureRate ?? 0) : 0,
+    };
+  });
 }
 
 export const serviceIdOf = (repositoryId: string) =>

@@ -1,8 +1,6 @@
 <template>
-  <div class="@container border-t border-border pt-4">
-    <div
-      class="flex flex-col gap-2 @min-[26rem]:flex-row @min-[26rem]:flex-wrap @min-[26rem]:justify-end"
-    >
+  <div class="pt-2">
+    <div class="flex flex-wrap items-center gap-2">
       <slot />
     </div>
   </div>

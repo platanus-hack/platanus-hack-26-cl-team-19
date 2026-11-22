@@ -11,6 +11,86 @@ import type {
   VersionDetail,
 } from "./editor-api";
 
+const landingEndpoints = [
+  { id: "GET /catalogo", weight: 55 },
+  { id: "POST /pedidos", weight: 45 },
+];
+
+function hasLandingWorker(model: ArchitectureModel) {
+  return "landingWorker" in model && model.landingWorker === true;
+}
+
+function landingGraph(model: ArchitectureModel): Graph {
+  const graph: Graph = {
+    nodes: [
+      {
+        id: "api",
+        label: "Pedidos",
+        kind: "api",
+        resources: ["api_cpu"],
+        details: {
+          replicas: model.deployment.api.replicas.value,
+          technology: "FastAPI",
+        },
+      },
+      {
+        id: "cache",
+        label: "Redis",
+        kind: "cache",
+        resources: ["cache"],
+        details: { technology: "Redis" },
+      },
+      {
+        id: "db",
+        label: "PostgreSQL",
+        kind: "db",
+        resources: ["db"],
+        details: { technology: "PostgreSQL" },
+      },
+      {
+        id: "queue",
+        label: "Cola",
+        kind: "queue",
+        resources: ["queue"],
+        details: { technology: "RabbitMQ" },
+      },
+    ],
+    endpoints: landingEndpoints,
+    edges: [
+      { source: "api", target: "cache", endpoints: ["GET /catalogo"] },
+      {
+        source: "api",
+        target: "db",
+        endpoints: landingEndpoints.map(({ id }) => id),
+      },
+      { source: "api", target: "queue", endpoints: ["POST /pedidos"] },
+    ],
+  };
+  if (hasLandingWorker(model)) {
+    graph.nodes.push({
+      id: "orders-worker",
+      label: "Worker",
+      kind: "worker",
+      resources: ["worker"],
+      details: { technology: "Celery" },
+    });
+    graph.edges.push(
+      {
+        source: "queue",
+        target: "orders-worker",
+        endpoints: ["POST /pedidos"],
+      },
+      { source: "orders-worker", target: "db", endpoints: ["POST /pedidos"] },
+    );
+    graph.edges = graph.edges.filter(
+      ({ source, target }) => source !== "api" || target !== "db",
+    );
+  }
+  return graph;
+}
+
+export const DEMO_PROJECT_ID = "fastapi-template";
+
 const sample = {
   id: "full-stack-fastapi-template",
   name: "fastapi/full-stack-fastapi-template",
@@ -69,7 +149,8 @@ function mockSeries(
   step?: ProjectScenario["traffic_step"],
 ) {
   const params = editorRunParams(scenario);
-  const capacity = model.deployment.api.replicas.value * 125;
+  const perReplica = hasLandingWorker(model) ? 220 : 125;
+  const capacity = model.deployment.api.replicas.value * perReplica;
   const duration = step?.duration_s ?? params.duration_s;
   return Array.from({ length: duration }, (_, index) => {
     const progress = (index + 0.5) / duration;
@@ -98,15 +179,33 @@ function summarizeMockSeries(series: Run["series"]) {
   };
 }
 
-function mockRun(series: Run["series"]): Run {
-  const { utilization } = summarizeMockSeries(series);
+function landingSecond(
+  second: Run["series"][number],
+  hasWorker: boolean,
+): Run["series"][number] {
+  return {
+    ...second,
+    utilization: {
+      ...second.utilization,
+      cache: Math.min(0.6, second.ok / 450),
+      db: Math.min(0.8, second.ok / 390),
+      queue: Math.min(0.7, second.ok / 425),
+      ...(hasWorker ? { worker: second.ok / 300 } : {}),
+    },
+  };
+}
+
+function mockRun(series: Run["series"], landing: boolean): Run {
+  const { utilization, errorRate } = summarizeMockSeries(series);
   return {
     bottleneck: {
-      resource: "api_cpu",
+      resource: landing && errorRate === 0 ? null : "api_cpu",
       utilization,
-      message: "Resultado de demostración.",
-      line: null,
-      endpoint: null,
+      message: landing
+        ? "La API agota su capacidad durante el pico de carga."
+        : "Resultado de demostración.",
+      line: landing ? "app/api/routes/orders.py:42" : null,
+      endpoint: landing ? "POST /pedidos" : null,
     },
     resources: [
       { name: "api_cpu", label: "CPU de la API", utilization, by_line: [] },
@@ -118,12 +217,22 @@ function mockRun(series: Run["series"]): Run {
 
 function mockCosts(model: ArchitectureModel): CostEstimate {
   const apiCost = model.deployment.api.replicas.value * 29;
+  const worker = hasLandingWorker(model)
+    ? [
+        {
+          id: "orders-worker",
+          label: "Worker de pedidos",
+          usd_month: assumed(18, "US$/mes"),
+        },
+      ]
+    : [];
   return {
     region: "us-east-1",
-    total: assumed(apiCost + 25, "US$/mes"),
+    total: assumed(apiCost + 25 + (worker[0]?.usd_month.value ?? 0), "US$/mes"),
     lines: [
       { id: "api", label: "API", usd_month: assumed(apiCost, "US$/mes") },
       { id: "db", label: "Base de datos", usd_month: assumed(25, "US$/mes") },
+      ...worker,
     ],
     unpriced: [],
     missing: [],
@@ -182,11 +291,38 @@ function makeProject(id: string, fullName = sample.name): DemoProject {
 
 export function createMockEditorApi(
   storage?: Pick<Storage, "getItem" | "setItem">,
+  { landing = false } = {},
 ): Omit<
   ReturnType<typeof createEditorApi>,
-  "chat" | "acceptChatProposal" | "getChat" | "saveChat"
+  | "chat"
+  | "acceptChatProposal"
+  | "getChat"
+  | "saveChat"
+  // JAJ-148: el catálogo de planes y las operaciones viven en el backend
+  | "deploymentOptions"
+  | "applyOps"
 > {
-  const primary = makeProject("fastapi-template");
+  const primary = makeProject(
+    DEMO_PROJECT_ID,
+    landing ? "branchpoint-demo/tienda-api" : sample.name,
+  );
+  if (landing) {
+    primary.name = "Tienda API";
+    const baseModel = primary.versions[0]!.model;
+    baseModel.endpoints = structuredClone(landingEndpoints);
+    const model = {
+      ...structuredClone(baseModel),
+      landingWorker: true,
+    };
+    primary.versions.push({
+      number: 2,
+      label: "v2",
+      parent: 1,
+      origin: "agente",
+      note: "Agrega un worker para procesar pedidos en segundo plano",
+      model,
+    });
+  }
   const worker = makeProject(
     "fastapi-worker",
     "branchpoint-demo/background-worker",
@@ -235,7 +371,10 @@ export function createMockEditorApi(
     const rate =
       saved.rps ??
       (saved.multiplier ?? 0) * (model.traffic.peak_rps?.value ?? 13);
-    return mockSeries(model, scenario, rate, saved.traffic_step);
+    const series = mockSeries(model, scenario, rate, saved.traffic_step);
+    return landing
+      ? series.map((second) => landingSecond(second, hasLandingWorker(model)))
+      : series;
   }
 
   return {
@@ -267,7 +406,8 @@ export function createMockEditorApi(
       return structuredClone(saved);
     },
     getVersion: async (id, number) => getVersion(id, number),
-    getGraph: (model) => Promise.resolve(mockGraph(model)),
+    getGraph: (model) =>
+      Promise.resolve(landing ? landingGraph(model) : mockGraph(model)),
     saveVersion: async (id, _parent, model, note) => {
       const versions = getProject(id).versions;
       const number = versions.length + 1;
@@ -275,6 +415,7 @@ export function createMockEditorApi(
         number,
         label: `v${number}`,
         origin: "manual" as const,
+        ...(landing ? { parent: _parent } : {}),
         note,
         model,
       };
@@ -284,12 +425,12 @@ export function createMockEditorApi(
     },
     run: async (id, number, scenario) => {
       const { model } = getVersion(id, number);
-      return mockRun(seriesFor(id, scenario, model));
+      return mockRun(seriesFor(id, scenario, model), landing);
     },
     results: async (id, number, scenario) => {
       const { model } = getVersion(id, number);
       return {
-        run: mockRun(seriesFor(id, scenario, model)),
+        run: mockRun(seriesFor(id, scenario, model), landing),
         cost: mockCosts(model),
         failure: null,
         failure_missing: demoFailureMissing,

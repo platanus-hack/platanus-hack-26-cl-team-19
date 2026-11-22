@@ -1,3 +1,4 @@
+import type { DeploymentOptions } from "./deployment-options";
 import type {
   ChatKeySource,
   ChatProposal,
@@ -332,6 +333,19 @@ export function createEditorApi(
     getVersion: (id: string, version: number) =>
       fetchApi<VersionDetail>(versionPath(id, version)),
     getGraph: (model: ArchitectureModel) => post<Graph>("/graph", { model }),
+    // JAJ-148: proveedores y planes de cada componente, y la versión con el plan elegido en el editor
+    deploymentOptions: () => fetchApi<DeploymentOptions>("/catalog/deployment"),
+    applyOps: (
+      id: string,
+      version: number,
+      ops: Record<string, unknown>[],
+      note: string,
+    ) =>
+      post<VersionDetail>(`${versionPath(id, version)}/ops`, {
+        ops,
+        note,
+        origin: "manual",
+      }),
     saveVersion: (
       id: string,
       parent: number,

@@ -16,6 +16,7 @@ const props = defineProps<{
   slo?: number;
   timeUnit?: "minute" | "second";
   provenance: MetricProvenance;
+  prioritizeCharts?: boolean;
 }>();
 
 const minute = defineModel<number>("minute", { required: true });
@@ -222,9 +223,12 @@ const formatTime = (index: number) =>
       </div>
     </dl>
 
-    <div class="grid gap-6 @2xl/canvas:grid-cols-2">
+    <div
+      class="grid @2xl/canvas:grid-cols-2"
+      :class="prioritizeCharts ? 'order-first grid-cols-2 gap-3' : 'gap-6'"
+    >
       <SimulationChart
-        v-if="targetRps.some((value) => value !== null)"
+        v-if="!prioritizeCharts && targetRps.some((value) => value !== null)"
         title="Tráfico objetivo"
         unit="req/s"
         :series="[
