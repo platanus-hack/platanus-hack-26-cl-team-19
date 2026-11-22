@@ -30,8 +30,8 @@ export default defineNuxtConfig({
     head: {
       htmlAttrs: { lang: "es" },
       link: [
+        { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
         { rel: "icon", type: "image/svg+xml", href: "/logo.svg" },
-        { rel: "alternate icon", href: "/favicon.ico" },
       ],
       script: [
         {
