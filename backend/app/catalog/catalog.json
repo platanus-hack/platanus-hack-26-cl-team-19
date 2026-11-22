@@ -35,6 +35,7 @@
     "local": {"value": 1.0, "unit": "×", "label": "CALIBRADO", "source": "Laptop de calibración (i7-13620H): los tiempos del catálogo se midieron ahí", "date": "2026-11-21"},
     "graviton2": {"value": 1.95, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g", "date": "2026-11-21"},
     "graviton3": {"value": 1.55, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: Geekbench 6 un núcleo, i7-13620H 2.343-2.498 vs c7g.metal 1.546 (un solo resultado público). m7g, c7g, db.m7g. ±30 %", "date": "2026-11-21"},
+    "x86_cloud": {"value": 1.95, "unit": "×", "label": "SUPUESTO", "source": "JAJ-143: proveedores que no publican el procesador (Neon, Fly, Render). Sin medición propia: se usa el factor más lento del catálogo (Graviton2), por revisar", "date": "2026-11-21"},
     "graviton4": {"value": 1.25, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: factor de Graviton3 / 1,25 (Phoronix: ~25 % más por núcleo). m8g, r8g", "date": "2026-11-21"}
   },
   "burstable_baseline_per_vcpu": {
@@ -64,6 +65,7 @@
       "supabase": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11",
       "rds_postgres": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor)",
       "local": "JAJ-8: Postgres 16 en Docker con 1 CPU",
+      "neon": "JAJ-143: neon.com/docs/reference/compatibility (max_connections por tamaño = RAM / 9531392; 1 CU = 1 vCPU y 4 GB) leído el 2026-11-21. El precio por CU-hora (plan Launch) sale de app/costs/prices/manual.json (JAJ-11). Con pooler (PgBouncer) acepta hasta 10.000 clientes. Con autoscaling, max_connections sale del tamaño mínimo. Neon no publica el procesador (SUPUESTO)",
       "processor": "Procesador de cada plan para cpu_core_factor. RDS: db.t4g es Graviton2 y db.m7g Graviton3 (AWS). Supabase no publica el procesador: su cómputo es ARM y AWS cuenta que migró a Graviton; se asume Graviton2, el núcleo más lento de los tres (SUPUESTO)"
     },
     "supabase": {
@@ -85,12 +87,58 @@
     },
     "local": {
       "docker": {"usd_hour": 0, "vcpu": 1, "vcpu_label": "CALIBRADO", "ram_gb": 2, "max_connections": 100, "processor": "local", "processor_label": "CALIBRADO"}
+    },
+    "neon": {
+      "0.25cu": {"cu": 0.25, "vcpu": 0.25, "vcpu_label": "ESTIMADO", "ram_gb": 1,  "max_connections": 112,  "pooler_connections": 10000, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+      "0.5cu":  {"cu": 0.5,  "vcpu": 0.5,  "vcpu_label": "ESTIMADO", "ram_gb": 2,  "max_connections": 225,  "pooler_connections": 10000, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+      "1cu":    {"cu": 1,    "vcpu": 1,    "vcpu_label": "ESTIMADO", "ram_gb": 4,  "max_connections": 450,  "pooler_connections": 10000, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+      "2cu":    {"cu": 2,    "vcpu": 2,    "vcpu_label": "ESTIMADO", "ram_gb": 8,  "max_connections": 901,  "pooler_connections": 10000, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+      "4cu":    {"cu": 4,    "vcpu": 4,    "vcpu_label": "ESTIMADO", "ram_gb": 16, "max_connections": 1802, "pooler_connections": 10000, "processor": "x86_cloud", "processor_label": "SUPUESTO"}
     }
   },
   "app_plans": {
     "_source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
     "fargate": {"usd_vcpu_hour": 0.03238, "usd_gb_hour": 0.00356, "processor": "graviton2", "processor_label": "ESTIMADO"},
-    "local": {"usd_vcpu_hour": 0, "usd_gb_hour": 0, "processor": "local", "processor_label": "CALIBRADO"}
+    "local": {"usd_vcpu_hour": 0, "usd_gb_hour": 0, "processor": "local", "processor_label": "CALIBRADO"},
+    "fly": {
+      "_source": "JAJ-143: fly.io/pricing, leído el 2026-11-21. Las máquinas performance tienen 100 % de CPU dedicada (fly.io/docs/machines/cpu-performance). Las shared (1/16 de núcleo sostenido) no están: el motor no simula sus créditos en la API. Fly no publica el procesador (SUPUESTO)",
+      "plans": {
+        "performance-1x": {"vcpu": 1, "memory_gb": 2, "usd_month": 33, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "performance-2x": {"vcpu": 2, "memory_gb": 4, "usd_month": 66, "processor": "x86_cloud", "processor_label": "SUPUESTO"}
+      }
+    },
+    "render": {
+      "_source": "JAJ-143: render.com/pricing y render.com/docs/compute-plans, leídos el 2026-11-21 (los nombres starter, standard, pro... son los IDs anteriores a agosto de 2026). El plan free se suspende tras 15 minutos sin tráfico: el arranque en frío no se simula. Render no publica el procesador (SUPUESTO)",
+      "plans": {
+        "free":      {"vcpu": 0.1, "memory_gb": 0.5, "usd_month": 0,   "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "starter":   {"vcpu": 0.5, "memory_gb": 0.5, "usd_month": 7,   "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "standard":  {"vcpu": 1,   "memory_gb": 2,   "usd_month": 25,  "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "pro":       {"vcpu": 2,   "memory_gb": 4,   "usd_month": 85,  "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "pro_plus":  {"vcpu": 4,   "memory_gb": 8,   "usd_month": 175, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "pro_max":   {"vcpu": 4,   "memory_gb": 16,  "usd_month": 225, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
+        "pro_ultra": {"vcpu": 8,   "memory_gb": 32,  "usd_month": 450, "processor": "x86_cloud", "processor_label": "SUPUESTO"}
+      }
+    }
+  },
+  "frontend_plans": {
+    "_doc": "Dónde se sirve el frontend (JAJ-143). Define su costo y su tecnología. No cambia la simulación: el motor simula la API, y el frontend estático o en el borde no comparte sus recursos.",
+    "vercel": {
+      "_source": "JAJ-143: vercel.com/pricing, leído el 2026-11-21. Pro: US$20 al mes por miembro, con US$20 de uso incluido; el uso extra (Active CPU, memoria, transferencia) no se estima",
+      "plans": {"hobby": {"usd_month": 0}, "pro": {"usd_month": 20}}
+    },
+    "cloudfront": {
+      "_source": "JAJ-11: planes de tarifa plana de CloudFront; los precios salen de app/costs/prices/manual.json",
+      "prices": "cloudfront_flat_rate"
+    },
+    "local": {
+      "_source": "Servido en local o desde la misma API",
+      "plans": {"local": {"usd_month": 0}}
+    }
+  },
+  "network_rtt_ms": {
+    "_doc": "Ida y vuelta de red entre la API y la DB por cada consulta (JAJ-143). La conexión queda tomada durante la espera, pero la CPU de la DB no. Los tiempos de JAJ-8 se midieron con la DB en la misma máquina, así que en local no se suma nada.",
+    "local": {"value": 0, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: DB en Docker en la misma máquina; la red ya está en los tiempos calibrados", "date": "2026-11-21"},
+    "same_region": {"value": 1, "unit": "ms", "label": "SUPUESTO", "source": "AWS (whitepaper Fault Isolation Boundaries y Architecture Blog): dentro de una zona, menos de 1 ms; entre zonas de una región, un dígito de ms. Se asume 1 ms con la API y la DB en la misma región, por revisar", "date": "2026-11-21"}
   },
   "traffic": {
     "_source": "JAJ-11: perfiles de uso y factores de pico. Requests por sesión = consultas por sesión de JAJ-11 / 6 consultas por request.",

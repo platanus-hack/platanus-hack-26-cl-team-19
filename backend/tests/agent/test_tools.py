@@ -173,6 +173,12 @@ def test_set_deployment(tools, store, project):
         {"project_id": project.id, "field": "db.plan", "value": "large", "quote": "usamos Supabase large"},
     )
     assert "error" not in plan, plan
+    neon = tools.call(
+        "set_deployment",
+        {"project_id": project.id, "field": "db.plan", "value": "1cu", "quote": "la base está en Neon, 1 CU"},
+    )
+    db = store.get_version(project.id, neon["version"]).model["deployment"]["db"]
+    assert (db["provider"], db["plan"]) == ("neon", "1cu")  # el plan dice el proveedor (JAJ-143)
 
 
 def test_read_tools(tools, project):
