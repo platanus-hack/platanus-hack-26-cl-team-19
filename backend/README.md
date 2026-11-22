@@ -660,8 +660,13 @@ Cada simulación guarda su reporte (`branchpoint.report/v1`, tabla `reports`): u
   - **Costos y supuestos:** el costo por línea, el costo de fallar y los supuestos principales.
     - **El primer supuesto es el escenario de la corrida, sacado de la tabla del proyecto** (JAJ-152): «Escenario «cyberday» del proyecto: 20 veces el pico del modelo (26,2 req/s). Definido por el usuario». Para `actual` dice que nace con el proyecto, y para una tasa a mano, «Tasa elegida para esta corrida».
     - **No se listan los escenarios del catálogo que trae el modelo** (`traffic.scenarios`): la corrida no los usa.
-  - **Conclusión:** escrita con una plantilla, sin LLM.
+  - **Conclusión:** escrita con una plantilla, sin LLM, en formato es-CL (JAJ-164), con `app/reports/es.py`, igual que el Markdown y la frase de `compare`. Ejemplo: «En cyberday, v3 atiende en promedio 21,9 req/s (el escenario llega a 26,2 req/s), con p95 de 15 ms y sin errores. La API tiene holgura para este tráfico. Cuesta US$68,91/mes sin contar la base de datos, que no tiene precio».
+    - **Si atiende menos del 95 % de la tasa del escenario**, dice las dos tasas: con subida y bajada, el promedio queda bajo el pico.
+    - **Si el sistema no alcanza a atender**, dice «0 % de errores entre las que terminaron» en vez de «sin errores».
 - **Diagnóstico por componente** (API, DB, colas): uso promedio y pico del recurso más ocupado, costo mensual y estado.
+  - **Componentes con costo y sin recurso en el motor**, como la caché o el frontend (JAJ-164): aparecen igual.
+    - Van con estado `ok`, uso y margen en `null` (el editor muestra «—») y su costo.
+    - La caché dice además sus aciertos en la corrida.
   - **Estados:** `overloaded` (uso promedio de 80 % o más, o el cuello de botella con requests sin atender), `idle` (bajo 30 % incluso en el pico y con costo) u `ok`. Los umbrales van en `thresholds`, con etiqueta `SUPUESTO`.
   - **Margen hasta saturar:** req/s ÷ uso promedio. Es una aproximación lineal (`ESTIMADO`) y se omite si el recurso ya está saturado.
   - **Propósito:** son datos estructurados, pensados para decidir más adelante cambios de arquitectura por costo o por riesgo de caída.

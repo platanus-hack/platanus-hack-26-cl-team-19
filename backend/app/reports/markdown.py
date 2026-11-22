@@ -4,19 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.reports import es
+
 _STATUS = {"overloaded": "🔴 Sobrecargado", "idle": "🟡 Holgado", "ok": "🟢 OK"}
 
 
 def _ms(v: float | None) -> str:
-    return "—" if v is None else f"{v:,.0f} ms"
+    return "—" if v is None else f"{es.num(v, 0)} ms"
 
 
 def _pct(v: float | None) -> str:
-    return "—" if v is None else f"{v:.1%}"
+    return "—" if v is None else es.pct(v)
 
 
 def _usd(v: float | None) -> str:
-    return "—" if v is None else f"US${v:,.2f}"
+    return "—" if v is None else ("−" if v < 0 else "") + es.usd(v)
 
 
 def _label(n: dict[str, Any] | None) -> str:
@@ -29,7 +31,7 @@ def _run(r: dict[str, Any]) -> str:
     out = [
         f"# Reporte de simulación · {r['project']['name']} v{r['version']['number']}",
         "",
-        f"**Escenario:** {sc['label']} · {sc['rps']:g} req/s · {sc['duration_s']:g} s · semilla {sc['seed']}  ",
+        f"**Escenario:** {sc['label']} · {es.num(sc['rps'], 2)} req/s · {es.num(sc['duration_s'])} s · semilla {sc['seed']}  ",
         *([f"**Ajustes del escenario:** {'; '.join(sc['adjustments'])}  "] if sc.get("adjustments") else []),
         f"**Fecha:** {r['created_at']} · **Reporte:** `{r['id'][:8]}` · **Motor:** `{r['engine_version']}`",
         "",
@@ -40,7 +42,7 @@ def _run(r: dict[str, Any]) -> str:
         "| Métrica | Valor |",
         "| -- | -- |",
         f"| p50 / p95 / p99 | {_ms(lat['p50_ms'])} / {_ms(lat['p95_ms'])} / {_ms(lat['p99_ms'])} |",
-        f"| Throughput | {res['throughput_rps']:g} req/s |",
+        f"| Throughput | {es.num(res['throughput_rps'], 2)} req/s |",
         f"| Errores | {_pct(res['error_rate'])} ({res['requests'] - res['ok'] - res['in_flight']:,} de {res['requests']:,}) |",
         f"| Sin respuesta al terminar | {res['in_flight']:,} |",
         "",
@@ -50,11 +52,11 @@ def _run(r: dict[str, Any]) -> str:
         "",
     ]
     if b.get("resource"):
-        out.append(f"**{b.get('label') or b['resource']}** al {b['utilization']:.0%}. {b.get('message') or ''}")
+        out.append(f"**{b.get('label') or b['resource']}** al {es.pct(b['utilization'], 0)}. {b.get('message') or ''}")
         if b.get("line"):
             out.append(
                 f"\nLínea que más lo ocupa: `{b['line']}`"
-                + (f" ({b['line_share']:.0%})" if b.get("line_share") else "")
+                + (f" ({es.pct(b['line_share'], 0)})" if b.get("line_share") else "")
             )
         if b.get("endpoint"):
             out.append(f"\nEndpoint que más lo ocupa: `{b['endpoint']}`")
@@ -70,7 +72,7 @@ def _run(r: dict[str, Any]) -> str:
     for c in r["components"]:
         sat = c["saturates_at_rps"]
         margin = (
-            f"{sat['value']:,.0f} req/s ({c['headroom_x']:g}×)"
+            f"{es.num(sat['value'], 0)} req/s ({es.num(c['headroom_x'])}×)"
             if sat
             else "ya saturado"
             if c["status"] == "overloaded"
@@ -83,7 +85,7 @@ def _run(r: dict[str, Any]) -> str:
     t = r["thresholds"]
     out += [
         "",
-        f"Umbrales: sobrecargado ≥ {t['overloaded']['value']:.0%} de uso promedio; holgado < {t['idle']['value']:.0%} "
+        f"Umbrales: sobrecargado ≥ {es.pct(t['overloaded']['value'], 0)} de uso promedio; holgado < {es.pct(t['idle']['value'], 0)} "
         f"en el pico (`{t['idle']['label']}`). El margen es una aproximación lineal (`ESTIMADO`).",
         "",
         "## Costos",
@@ -130,7 +132,7 @@ def _comparison(r: dict[str, Any]) -> str:
         row("p95", "p95_ms", _ms),
         row("p99", "p99_ms", _ms),
         row("Errores", "error_rate", _pct),
-        row("Throughput (req/s)", "throughput_rps", lambda v: "—" if v is None else f"{v:g}"),
+        row("Throughput (req/s)", "throughput_rps", lambda v: "—" if v is None else es.num(v, 2)),
         row("Costo/mes", "usd_month", _usd),
         "",
         "## Componentes",
