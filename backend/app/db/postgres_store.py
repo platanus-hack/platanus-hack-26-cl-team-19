@@ -328,6 +328,20 @@ class PostgresProjectStore:
             repos = self._repos(conn, ids)
         return [_project(r, versions[r["id"]], repos.get(r["id"])) for r in rows]
 
+    def delete(self, project_id: str, owner: str | None = None) -> bool:
+        """Una sola sentencia: las tablas del proyecto se van por ``on delete cascade`` (versiones,
+        escenarios, runs, reportes, ingestas, chat, adjuntos, repos vinculados, perfiles de uso). La
+        ``repo_connection`` es del usuario, no del proyecto, y queda para el próximo análisis (JAJ-144)."""
+        pid = _uuid(project_id)
+        if pid is None:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                "delete from projects where id = %s and owner_id is not distinct from %s::uuid returning id",
+                (pid, owner),
+            ).fetchone()
+        return row is not None
+
     @staticmethod
     def _repos(conn: Connection, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[ProjectRepo]]:
         """Los repos de varios proyectos (IA-5), el principal primero. Solo los de más de un repo tienen filas."""

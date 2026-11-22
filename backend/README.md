@@ -310,6 +310,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/graph` | Grafo del diagrama desde `{"model": ...}`: nodos, aristas con sus endpoints y `archivo:línea`, y el peso de cada endpoint. |
 | `POST` | `/projects` | Crea un proyecto desde `{"sample": id}` o `{"model": ...}`, con `name` opcional. Queda con **v1** (`origin: repo`). |
 | `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos) y `repositories`, el repo del que salió (ver "Repo de cada proyecto" abajo). |
+| `DELETE` | `/projects/{id}` | Borra el proyecto con todo lo suyo (JAJ-144): versiones, escenarios, runs, reportes, chat, adjuntos (también sus archivos en Storage) y repos vinculados. 204; 404 si no existe o es de otro usuario. Si Storage falla, 502 y no borra nada. La conexión con el repo es del usuario y se conserva. |
 | `POST` | `/projects/{id}/versions` | Guarda `{"model", "origin", "parent", "note"}` como versión nueva. `origin`: `repo`, `manual` (por defecto) o `agente`; `parent`: por defecto, la última. |
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. Si ya se simuló con los mismos parámetros, devuelve el run guardado (ver "Runs guardados" abajo). |

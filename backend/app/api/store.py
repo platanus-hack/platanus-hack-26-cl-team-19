@@ -260,6 +260,12 @@ class ProjectStore(Protocol):
         """Los proyectos de ``owner``, del más nuevo al más viejo."""
         ...
 
+    def delete(self, project_id: str, owner: str | None = None) -> bool:
+        """Borra el proyecto de ``owner`` con todo lo suyo: versiones, escenarios, metas, runs, reportes,
+        chat, adjuntos (las filas; los archivos los borra la ruta) y repos vinculados (JAJ-144). ``False``
+        si no existe o es de otro: como ``get``, el dueño se valida aquí y no solo en la ruta."""
+        ...
+
     def add_version(
         self,
         project_id: str,
@@ -418,6 +424,9 @@ class OwnedStore:
     def list(self) -> list[Project]:
         return self._store.list(self.owner)
 
+    def delete(self, project_id: str) -> bool:
+        return self._store.delete(project_id, self.owner)
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._store, name)
 
@@ -492,6 +501,19 @@ class InMemoryProjectStore:
     def list(self, owner: str | None = None) -> list[Project]:
         mine = [p for p in self._projects.values() if p.owner == owner]
         return sorted(mine, key=lambda p: p.created_at, reverse=True)
+
+    def delete(self, project_id: str, owner: str | None = None) -> bool:
+        with self._lock:
+            project = self._projects.get(project_id)
+            if project is None or project.owner != owner:
+                return False
+            del self._projects[project_id]
+            for by_project in (self._scenarios, self._goals, self.sources, self._chats):
+                by_project.pop(project_id, None)
+            self._runs = {k: v for k, v in self._runs.items() if v[0] != project_id}
+            self._reports = {k: v for k, v in self._reports.items() if v[0] != project_id}
+            self._attachments = {k: a for k, a in self._attachments.items() if a.project_id != project_id}
+            return True
 
     def add_version(
         self,

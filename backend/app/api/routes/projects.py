@@ -17,6 +17,7 @@ from app.agent import OpError, apply_ops
 from app.agent.proposals import ProposalDraft, prepare_proposal
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
+from app.api.routes.attachments import purge_expired
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422, scenario_model
 from app.api.run_cache import RUN_CACHE_HEADER, cached_run
@@ -54,6 +55,7 @@ from app.costs import (
 from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
+from app.storage.attachments import StorageError
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -122,6 +124,34 @@ def list_projects(store: ProjectStore = Depends(get_store)) -> list[ProjectDetai
 @router.get("/{project_id}", response_model=ProjectDetail, summary="Un proyecto y su historial de versiones")
 def get_project(project_id: str, store: ProjectStore = Depends(get_store)) -> ProjectDetail:
     return _detail(_project(store, project_id))
+
+
+@router.delete("/{project_id}", status_code=204, summary="Borrar un proyecto con todo lo suyo (JAJ-144)")
+def delete_project(project_id: str, request: Request, store: OwnedStore = Depends(get_store)) -> Response:
+    """Borra el proyecto y todo lo que cuelga de él: versiones, escenarios, metas, runs, reportes, chat,
+    adjuntos y repos vinculados. Solo el dueño: el proyecto de otro da 404, como en ``GET``.
+
+    Primero borra de Storage los archivos de sus adjuntos, porque la cascada de Postgres solo borra las
+    filas: sin ellas, el barrido de vencidos ya no encontraría los archivos. Si Storage falla, responde
+    502 y no borra nada. La conexión al repo (``repo_connections``) es del usuario y se conserva."""
+    project = _project(store, project_id)
+    storage = request.app.state.attachments
+    # los adjuntos piden sesión: sin dueño no hay ninguno, y purge_expired(None) barrería los de todos
+    if storage is not None and store.owner is not None:
+        try:
+            purge_expired(store, storage, store.owner)  # los vencidos ya no aparecen en list_attachments
+            files = [a.storage_path for a in store.list_attachments(project.id, store.owner, include_pending=True)]
+            if files:
+                storage.delete(files)
+        except StorageError:
+            raise ApiError(
+                502,
+                "attachments_storage_error",
+                "No pudimos borrar los adjuntos del proyecto. Inténtalo de nuevo; el proyecto no se borró.",
+            ) from None
+    if not store.delete(project.id):
+        raise ApiError(404, NOT_FOUND, f"No existe el proyecto '{project_id}'.", resource="project")
+    return Response(status_code=204)
 
 
 @router.post(
