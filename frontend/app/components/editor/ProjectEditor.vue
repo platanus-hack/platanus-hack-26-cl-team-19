@@ -63,6 +63,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportPath } from "@/services/reports-api";
 import {
+  apiSize,
   currentDeployment,
   deploymentKind,
 } from "@/services/deployment-options";
@@ -1095,6 +1096,7 @@ function openVersionDraft() {
           :kind="selectedDeployment"
           :options="deploymentOptions?.[selectedDeployment] ?? null"
           :current="currentDeployment(version?.model, selectedDeployment)"
+          :size="apiSize(version?.model)"
           :busy="busy"
           :version-label="version ? `v${version.number}` : undefined"
           @apply="onChangeDeployment"

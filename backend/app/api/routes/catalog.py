@@ -73,7 +73,24 @@ def _api_options(catalog: dict[str, Any]) -> list[dict[str, Any]]:
         if provider in SIZED_BY_VCPU:
             p = deploy.app_profile(provider, None, one, one, {**one, "value": 2}, "1 vCPU y 2 GB", catalog)
             entry["sized_by_vcpu"] = True
-            entry["example"] = {"cpu_core_factor": _spec(p["cpu_core_factor"]), "usd_month": _spec(p["usd_month"])}
+            price = catalog["app_plans"][provider]
+            source = catalog["app_plans"]["_source"]
+            # el editor calcula el costo con los vCPU, la memoria y las réplicas que se elijan
+            entry["example"] = {
+                "cpu_core_factor": _spec(p["cpu_core_factor"]),
+                "usd_vcpu_hour": {
+                    "value": price["usd_vcpu_hour"],
+                    "unit": "US$/vCPU-h",
+                    "label": "ESTIMADO",
+                    "source": source,
+                },
+                "usd_gb_hour": {
+                    "value": price["usd_gb_hour"],
+                    "unit": "US$/GB-h",
+                    "label": "ESTIMADO",
+                    "source": source,
+                },
+            }
         out.append(entry)
     return out
 

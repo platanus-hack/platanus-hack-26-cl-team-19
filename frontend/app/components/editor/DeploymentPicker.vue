@@ -14,11 +14,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  apiCost,
   DEPLOYMENT_TITLES,
   deploymentNote,
   deploymentOps,
   sameDeployment,
   specRows,
+  type ApiSize,
   type DeploymentChoice,
   type DeploymentKind,
   type ProviderOption,
@@ -30,6 +32,8 @@ const props = defineProps<{
   options: ProviderOption[] | null;
   current: DeploymentChoice | null;
   busy?: boolean;
+  /** API: réplicas y memoria de la versión abierta, para calcular el costo del plan elegido. */
+  size?: ApiSize;
   /** La versión abierta, para decir de cuál sale la nueva. */
   versionLabel?: string;
 }>();
@@ -70,12 +74,21 @@ const choice = computed<DeploymentChoice>(() => ({
   plan: provider.value?.sized_by_vcpu ? null : planId.value || null,
   vcpu: provider.value?.sized_by_vcpu ? vcpuNumber.value : null,
 }));
-const rows = computed(() =>
-  specRows(
-    plan.value?.specs ??
-      (provider.value?.sized_by_vcpu ? (provider.value.example ?? {}) : {}),
-  ),
-);
+const rows = computed(() => {
+  const specs = {
+    ...(plan.value?.specs ??
+      (provider.value?.sized_by_vcpu ? (provider.value.example ?? {}) : {})),
+  };
+  // la API: el costo de todas las réplicas con los vCPU o el plan elegidos, no el de un ejemplo fijo
+  if (props.kind === "api" && provider.value && props.size)
+    specs.usd_month = apiCost(
+      provider.value,
+      plan.value,
+      vcpuNumber.value,
+      props.size,
+    );
+  return specRows(specs);
+});
 const valid = computed(() => {
   if (!provider.value) return false;
   if (provider.value.sized_by_vcpu)
@@ -149,7 +162,12 @@ const ids = {
           :disabled="busy"
         />
         <p class="text-xs text-muted-foreground">
-          Se paga por vCPU-hora. El costo de abajo es de 1 vCPU y 2 GB.
+          Se paga por vCPU-hora y GB-hora.
+          <template v-if="size"
+            >El costo es de {{ size.replicas }}
+            {{ size.replicas === 1 ? "réplica" : "réplicas" }} con
+            {{ size.memoryGb }} GB cada una.</template
+          >
         </p>
       </div>
       <div v-else-if="provider" class="grid gap-1.5">

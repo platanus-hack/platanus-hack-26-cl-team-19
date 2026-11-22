@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ArchitectureModel } from "@/services/editor-api";
 import {
+  apiCost,
+  apiSize,
   currentDeployment,
   deploymentKind,
   deploymentNote,
@@ -114,5 +116,52 @@ describe("dónde corre cada componente (JAJ-148)", () => {
     expect(
       deploymentNote("db", { provider: "neon", plan: "1cu" }, [neon]),
     ).toBe("Base de datos en Neon 1cu (elegido en el editor)");
+  });
+
+  it("el costo de la API cambia con los vCPU, la memoria y las réplicas", () => {
+    const fargate: ProviderOption = {
+      id: "fargate",
+      label: "AWS Fargate",
+      plans: [],
+      sized_by_vcpu: true,
+      example: {
+        usd_vcpu_hour: {
+          value: 0.04,
+          unit: "US$/vCPU-h",
+          label: "ESTIMADO",
+          source: "AWS",
+        },
+        usd_gb_hour: {
+          value: 0.005,
+          unit: "US$/GB-h",
+          label: "ESTIMADO",
+          source: "AWS",
+        },
+      },
+    };
+    const size = apiSize(model);
+    expect(size).toEqual({ replicas: 2, memoryGb: 2 });
+    const one = apiCost(fargate, undefined, 1, size)!.value!;
+    const four = apiCost(fargate, undefined, 4, size)!.value!;
+    expect(one).toBeCloseTo(2 * (1 * 0.04 + 2 * 0.005) * 730, 2);
+    expect(four).toBeGreaterThan(one);
+    const render: ProviderOption = {
+      id: "render",
+      label: "Render",
+      plans: [
+        {
+          id: "pro",
+          specs: {
+            usd_month: {
+              value: 85,
+              unit: "US$/mes",
+              label: "ESTIMADO",
+              source: "Render",
+            },
+          },
+        },
+      ],
+    };
+    expect(apiCost(render, render.plans[0], 0, size)!.value).toBe(170);
   });
 });

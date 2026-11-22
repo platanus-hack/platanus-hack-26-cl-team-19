@@ -51,7 +51,12 @@ type Deployed = {
   provider?: string;
   plan?: string | null;
   vcpu?: ModelNumber | number;
+  memory_gb?: ModelNumber | number;
+  replicas?: ModelNumber | number;
 };
+
+const numberOf = (x: ModelNumber | number | undefined) =>
+  typeof x === "number" ? x : x?.value;
 
 /** Dónde corre hoy el componente en la versión abierta. */
 export function currentDeployment(
@@ -62,8 +67,62 @@ export function currentDeployment(
     model?.deployment as Record<string, Deployed | undefined> | undefined
   )?.[kind];
   if (!raw?.provider) return null;
-  const vcpu = typeof raw.vcpu === "number" ? raw.vcpu : raw.vcpu?.value;
-  return { provider: raw.provider, plan: raw.plan ?? null, vcpu: vcpu ?? null };
+  return {
+    provider: raw.provider,
+    plan: raw.plan ?? null,
+    vcpu: numberOf(raw.vcpu) ?? null,
+  };
+}
+
+export interface ApiSize {
+  replicas: number;
+  memoryGb: number;
+}
+
+/** Réplicas y memoria por réplica de la API en la versión abierta: con ellas se calcula el costo. */
+export function apiSize(model: ArchitectureModel | undefined): ApiSize {
+  const api = (model?.deployment as Record<string, Deployed | undefined>)?.api;
+  return {
+    replicas: numberOf(api?.replicas) ?? 1,
+    memoryGb: numberOf(api?.memory_gb) ?? 2,
+  };
+}
+
+const HOURS_MONTH = 730;
+
+/** Costo mensual de la API con el plan o los vCPU elegidos, para todas las réplicas (JAJ-143).
+ * Fargate y local: réplicas × (vCPU × US$/vCPU-h + GB × US$/GB-h) × 730 h. Fly y Render:
+ * réplicas × US$/mes del plan. Es la misma fórmula del backend (app.catalog.deploy). */
+export function apiCost(
+  provider: ProviderOption,
+  plan: PlanOption | undefined,
+  vcpu: number,
+  size: ApiSize,
+): PlanSpec | null {
+  const replicas = `${size.replicas} réplica${size.replicas === 1 ? "" : "s"}`;
+  if (provider.sized_by_vcpu) {
+    const perVcpu = provider.example?.usd_vcpu_hour;
+    const perGb = provider.example?.usd_gb_hour;
+    if (!perVcpu || !perGb || perVcpu.value === null || perGb.value === null)
+      return null;
+    const usd =
+      size.replicas *
+      (vcpu * perVcpu.value + size.memoryGb * perGb.value) *
+      HOURS_MONTH;
+    return {
+      value: Math.round(usd * 100) / 100,
+      unit: "US$/mes",
+      label: "ESTIMADO",
+      source: `${perVcpu.source}. ${replicas} × (${vcpu} vCPU × US$${perVcpu.value}/h + ${size.memoryGb} GB × US$${perGb.value}/h) × ${HOURS_MONTH} h`,
+    };
+  }
+  const perPlan = plan?.specs.usd_month;
+  if (!perPlan || perPlan.value === null) return null;
+  return {
+    ...perPlan,
+    value: Math.round(perPlan.value * size.replicas * 100) / 100,
+    source: `${perPlan.source}. ${replicas} × US$${perPlan.value}/mes`,
+  };
 }
 
 /** La operación que crea la versión con el plan elegido (ver backend/app/agent/ops.py). */
