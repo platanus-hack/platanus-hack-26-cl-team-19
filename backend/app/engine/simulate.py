@@ -121,7 +121,7 @@ MIN_SECONDS_FOR_GROWTH = 4
 def saturation_source() -> str:
     """De dónde sale ``Saturation.saturated``: los umbrales, armados desde las constantes (JAJ-89)."""
     return (
-        f"JAJ-89, umbrales elegidos por el equipo: saturado = al menos {_es(UNANSWERED_SATURATED * 100)} % de las "
+        f"Umbrales elegidos por el equipo: saturado = al menos {_es(UNANSWERED_SATURATED * 100)} % de las "
         f"requests sin respuesta al terminar, y una espera (Ley de Little, tasa de llegada en {WAIT_WINDOW_S} s) "
         f"que crece de la mitad al final (×{_es(WAIT_GROWTH)} más {_es(WAIT_GROWTH_MIN_S)} s) o que llega al "
         f"{_es(TIMEOUT_SHARE * 100)} % del timeout del cliente. No se evalúa con menos de {MIN_SECONDS_FOR_GROWTH} s."
@@ -551,7 +551,7 @@ def _cpu_adjustment(model: ArchitectureModel, cpu_credits: str, warnings: list[s
     if adjusted:
         warnings.append(
             "Capacidad de la nube: los tiempos de CPU del modelo son de 1 núcleo del laptop de calibración "
-            f"y se multiplican por el factor de cada procesador: {', '.join(adjusted)} (JAJ-46)."
+            f"y se multiplican por el factor de cada procesador: {', '.join(adjusted)}."
         )
 
     db_vcpu, credits = db.vcpu, None
@@ -663,8 +663,8 @@ def _build_run(
     for rs in resource_stats:
         if rs.utilization >= SATURATION_WARNING:
             warnings.append(
-                f"{rs.label} al {rs.utilization:.0%}: cerca o sobre la capacidad el modelo es optimista "
-                f'(JAJ-44). Tomar la latencia y los errores como piso ("al menos").'
+                f"{rs.label} al {rs.utilization:.0%}: cerca o sobre la capacidad el modelo es optimista. "
+                'Tomar la latencia y los errores como piso ("al menos").'
             )
 
     return Run(

@@ -63,21 +63,21 @@
         "value": 0.25,
         "unit": "ms",
         "label": "CALIBRADO",
-        "source": "JAJ-8: latencia cliente ↔ API con k6 y 1 VU, Docker local",
+        "source": "Latencia cliente ↔ API con k6 y 1 VU, Docker local",
         "date": "2026-11-21"
       },
       "usd_month": {
         "value": 28.84,
         "unit": "US$/mes",
         "label": "ESTIMADO",
-        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
+        "source": "Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
         "date": "2026-11-21"
       },
       "cpu_core_factor": {
         "value": 1.95,
         "unit": "×",
         "label": "ESTIMADO",
-        "source": "API en fargate: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "source": "API en fargate: procesador graviton2. Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
         "date": "2026-11-21",
         "processor": "graviton2"
       }
@@ -89,21 +89,21 @@
         "value": 0.5,
         "unit": "vCPU",
         "label": "SUPUESTO",
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario",
         "date": "2026-11-21"
       },
       "max_connections": {
         "value": 60,
         "unit": "conexiones",
         "label": "ESTIMADO",
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario",
         "date": "2026-11-21"
       },
       "usd_month": {
         "value": 25,
         "unit": "US$/mes",
         "label": "ESTIMADO",
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730 (JAJ-11)",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730",
         "date": "2026-11-21"
       },
       "pool_per_worker": {
@@ -113,21 +113,21 @@
           "value": 5,
           "unit": "conexiones",
           "label": "ESTIMADO",
-          "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8). El repo no lo configura (backend/app/core/db.py:7)",
+          "source": "Default de QueuePool, SQLAlchemy 2.1.9. El repo no lo configura (backend/app/core/db.py:7)",
           "date": "2026-11-21"
         },
         "max_overflow": {
           "value": 10,
           "unit": "conexiones",
           "label": "ESTIMADO",
-          "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8). El repo no lo configura (backend/app/core/db.py:7)",
+          "source": "Default de QueuePool, SQLAlchemy 2.1.9. El repo no lo configura (backend/app/core/db.py:7)",
           "date": "2026-11-21"
         },
         "pool_timeout_s": {
           "value": 30,
           "unit": "s",
           "label": "ESTIMADO",
-          "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8). El repo no lo configura (backend/app/core/db.py:7)",
+          "source": "Default de QueuePool, SQLAlchemy 2.1.9. El repo no lo configura (backend/app/core/db.py:7)",
           "date": "2026-11-21"
         }
       },
@@ -135,7 +135,7 @@
         "value": 1.95,
         "unit": "×",
         "label": "SUPUESTO",
-        "source": "Plan supabase micro: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "source": "Plan supabase micro: procesador graviton2. Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
         "date": "2026-11-21",
         "needs_review": true,
         "processor": "graviton2"
@@ -144,7 +144,7 @@
         "value": 200,
         "unit": "conexiones",
         "label": "ESTIMADO",
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario",
         "date": "2026-11-21"
       }
     },
@@ -248,7 +248,7 @@
       "value": "medio",
       "unit": "perfil",
       "label": "SUPUESTO",
-      "source": "Declarado por el usuario. JAJ-11: perfiles de uso y factores de pico. Requests por sesión = consultas por sesión de JAJ-11 / 6 consultas por request.",
+      "source": "Declarado por el usuario. Perfiles de uso y factores de pico. Requests por sesión = consultas por sesión del perfil / 6 consultas por request.",
       "date": "2026-11-21",
       "sessions_per_month": 8,
       "requests_per_session": 17
@@ -257,7 +257,7 @@
       "value": 2.5,
       "unit": "×",
       "label": "SUPUESTO",
-      "source": "JAJ-11: hora pico sobre el promedio, de guías generales de capacidad",
+      "source": "Hora pico sobre el promedio, de guías generales de capacidad",
       "date": "2026-11-21",
       "needs_review": true
     },
@@ -265,7 +265,7 @@
       "value": 13.12,
       "unit": "req/s",
       "label": "SUPUESTO",
-      "source": "usuarios/mes × sesiones/mes × requests/sesión / segundos del mes × K_hora (JAJ-11)",
+      "source": "usuarios/mes × sesiones/mes × requests/sesión / segundos del mes × K_hora",
       "date": "2026-11-21",
       "needs_review": true,
       "derived": true
@@ -274,7 +274,7 @@
       "value": 17,
       "unit": "requests/sesión",
       "label": "SUPUESTO",
-      "source": "Perfil medio de JAJ-11",
+      "source": "Perfil medio de uso de una app web",
       "date": "2026-11-21"
     },
     "scenarios": {
@@ -302,7 +302,7 @@
           "value": 20,
           "unit": "×",
           "label": "SUPUESTO",
-          "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+          "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas",
           "date": "2026-11-21",
           "needs_review": true
         },
@@ -330,7 +330,7 @@
       "value": 0.02,
       "unit": "fracción",
       "label": "SUPUESTO",
-      "source": "JAJ-11: conversión sin datos reales",
+      "source": "Conversión típica de una tienda en línea, sin datos reales del usuario",
       "date": "2026-11-21",
       "needs_review": true
     }
@@ -354,7 +354,7 @@
             "value": 5.0,
             "unit": "ms",
             "label": "SUPUESTO",
-            "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de Item (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+            "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de Item (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
             "date": "2026-11-21",
             "needs_review": true
           },
@@ -372,7 +372,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -389,7 +389,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -408,7 +408,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -425,7 +425,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -456,7 +456,7 @@
         "value": 0.1417,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -479,7 +479,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -496,7 +496,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -527,7 +527,7 @@
         "value": 0.1417,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -567,7 +567,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -584,7 +584,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -601,7 +601,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -632,7 +632,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -655,7 +655,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -689,7 +689,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -706,7 +706,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -723,7 +723,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -754,7 +754,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -777,7 +777,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -811,7 +811,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -828,7 +828,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -859,7 +859,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -900,7 +900,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -918,7 +918,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -936,7 +936,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -955,7 +955,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -988,7 +988,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1011,7 +1011,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1042,7 +1042,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1065,7 +1065,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1097,7 +1097,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1120,7 +1120,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1156,7 +1156,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1174,7 +1174,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1192,7 +1192,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -1225,7 +1225,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1248,7 +1248,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1265,7 +1265,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1297,7 +1297,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1337,7 +1337,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1354,7 +1354,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -1386,7 +1386,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1409,7 +1409,7 @@
             "value": 5.0,
             "unit": "ms",
             "label": "SUPUESTO",
-            "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de User (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+            "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de User (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
             "date": "2026-11-21",
             "needs_review": true
           },
@@ -1427,7 +1427,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1444,7 +1444,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1476,7 +1476,7 @@
         "value": 0.1417,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1499,7 +1499,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1516,7 +1516,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1552,7 +1552,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1570,7 +1570,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1588,7 +1588,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -1621,7 +1621,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1661,7 +1661,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1678,7 +1678,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1695,7 +1695,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1712,7 +1712,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1744,7 +1744,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1784,7 +1784,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1801,7 +1801,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1818,7 +1818,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -1836,7 +1836,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -1868,7 +1868,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1891,7 +1891,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1922,7 +1922,7 @@
         "value": 0.1417,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1962,7 +1962,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1979,7 +1979,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2010,7 +2010,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2033,7 +2033,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2069,7 +2069,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2087,7 +2087,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2105,7 +2105,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -2138,7 +2138,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2161,7 +2161,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2178,7 +2178,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2209,7 +2209,7 @@
         "value": 0.1417,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2232,7 +2232,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2249,7 +2249,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2266,7 +2266,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2302,7 +2302,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2320,7 +2320,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2338,7 +2338,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -2371,7 +2371,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2394,7 +2394,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2411,7 +2411,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -2445,7 +2445,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2462,7 +2462,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2493,7 +2493,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2516,7 +2516,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
+            "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2547,7 +2547,7 @@
         "value": 0.0088,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2582,14 +2582,14 @@
         "value": 0.1417,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
     }
   ],
   "checks": {
-    "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación (JAJ-9).",
+    "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación.",
     "connections": {
       "app_max": {
         "value": 60,
@@ -2603,7 +2603,7 @@
         "value": 60,
         "unit": "conexiones",
         "label": "ESTIMADO",
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario",
         "date": "2026-11-21"
       },
       "status": "al límite"
@@ -2640,7 +2640,7 @@
         "value": 149.9,
         "unit": "req/s",
         "label": "SUPUESTO",
-        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
+        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos calibrados son de 1 núcleo del laptop × cpu_core_factor)",
         "date": "2026-11-21",
         "needs_review": true,
         "derived": true
@@ -2668,7 +2668,7 @@
           "value": 1667.0,
           "unit": "US$/hora",
           "label": "SUPUESTO",
-          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae",
           "date": "2026-11-21",
           "needs_review": true,
           "derived": true
@@ -2686,7 +2686,7 @@
           "value": 33340.0,
           "unit": "US$/hora",
           "label": "SUPUESTO",
-          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae",
           "date": "2026-11-21",
           "needs_review": true,
           "derived": true
@@ -2698,7 +2698,7 @@
     "total": 38,
     "by_source": [
       {
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "count": 23,
         "needs_review": true,
         "example_path": "endpoints[0].weight"
@@ -2722,13 +2722,13 @@
         "example_path": "deployment.api.memory_gb"
       },
       {
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario",
         "count": 1,
         "needs_review": false,
         "example_path": "deployment.db.vcpu"
       },
       {
-        "source": "Plan supabase micro: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "source": "Plan supabase micro: procesador graviton2. Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
         "count": 1,
         "needs_review": true,
         "example_path": "deployment.db.cpu_core_factor"
@@ -2740,19 +2740,19 @@
         "example_path": "traffic.mau"
       },
       {
-        "source": "Declarado por el usuario. JAJ-11: perfiles de uso y factores de pico. Requests por sesión = consultas por sesión de JAJ-11 / 6 consultas por request.",
+        "source": "Declarado por el usuario. Perfiles de uso y factores de pico. Requests por sesión = consultas por sesión del perfil / 6 consultas por request.",
         "count": 1,
         "needs_review": false,
         "example_path": "traffic.profile"
       },
       {
-        "source": "JAJ-11: hora pico sobre el promedio, de guías generales de capacidad",
+        "source": "Hora pico sobre el promedio, de guías generales de capacidad",
         "count": 1,
         "needs_review": true,
         "example_path": "traffic.k_hour"
       },
       {
-        "source": "Perfil medio de JAJ-11",
+        "source": "Perfil medio de uso de una app web",
         "count": 1,
         "needs_review": false,
         "example_path": "traffic.requests_per_session"
@@ -2764,7 +2764,7 @@
         "example_path": "traffic.scenarios.pico_normal.multiplier"
       },
       {
-        "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+        "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas",
         "count": 1,
         "needs_review": true,
         "example_path": "traffic.scenarios.cyberday.multiplier"
@@ -2776,19 +2776,19 @@
         "example_path": "business.ticket_usd"
       },
       {
-        "source": "JAJ-11: conversión sin datos reales",
+        "source": "Conversión típica de una tienda en línea, sin datos reales del usuario",
         "count": 1,
         "needs_review": true,
         "example_path": "business.conversion"
       },
       {
-        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de Item (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de Item (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
         "count": 1,
         "needs_review": true,
         "example_path": "endpoints[0].steps[0].time"
       },
       {
-        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de User (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de User (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
         "count": 1,
         "needs_review": true,
         "example_path": "endpoints[11].steps[0].time"
@@ -2820,14 +2820,14 @@
         "path": "deployment.db.vcpu",
         "value": 0.5,
         "unit": "vCPU",
-        "source": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11. Plan supabase micro declarado por el usuario",
+        "source": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto. Plan supabase micro declarado por el usuario",
         "needs_review": false
       },
       {
         "path": "deployment.db.cpu_core_factor",
         "value": 1.95,
         "unit": "×",
-        "source": "Plan supabase micro: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "source": "Plan supabase micro: procesador graviton2. Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
         "needs_review": true
       },
       {
@@ -2841,21 +2841,21 @@
         "path": "traffic.profile",
         "value": "medio",
         "unit": "perfil",
-        "source": "Declarado por el usuario. JAJ-11: perfiles de uso y factores de pico. Requests por sesión = consultas por sesión de JAJ-11 / 6 consultas por request.",
+        "source": "Declarado por el usuario. Perfiles de uso y factores de pico. Requests por sesión = consultas por sesión del perfil / 6 consultas por request.",
         "needs_review": false
       },
       {
         "path": "traffic.k_hour",
         "value": 2.5,
         "unit": "×",
-        "source": "JAJ-11: hora pico sobre el promedio, de guías generales de capacidad",
+        "source": "Hora pico sobre el promedio, de guías generales de capacidad",
         "needs_review": true
       },
       {
         "path": "traffic.requests_per_session",
         "value": 17,
         "unit": "requests/sesión",
-        "source": "Perfil medio de JAJ-11",
+        "source": "Perfil medio de uso de una app web",
         "needs_review": false
       },
       {
@@ -2869,7 +2869,7 @@
         "path": "traffic.scenarios.cyberday.multiplier",
         "value": 20,
         "unit": "×",
-        "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+        "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas",
         "needs_review": true
       },
       {
@@ -2883,182 +2883,182 @@
         "path": "business.conversion",
         "value": 0.02,
         "unit": "fracción",
-        "source": "JAJ-11: conversión sin datos reales",
+        "source": "Conversión típica de una tienda en línea, sin datos reales del usuario",
         "needs_review": true
       },
       {
         "path": "endpoints[0].steps[0].time",
         "value": 5.0,
         "unit": "ms",
-        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de Item (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de Item (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
         "needs_review": true
       },
       {
         "path": "endpoints[0].weight",
         "value": 0.1417,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[1].weight",
         "value": 0.1417,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[2].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[3].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[4].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[5].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[6].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[7].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[8].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[9].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[10].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[11].steps[0].time",
         "value": 5.0,
         "unit": "ms",
-        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de User (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla × 100000 filas de User (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
         "needs_review": true
       },
       {
         "path": "endpoints[11].weight",
         "value": 0.1417,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[12].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[13].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[14].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[15].weight",
         "value": 0.1417,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[16].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[17].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[18].weight",
         "value": 0.1417,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[19].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[20].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[21].weight",
         "value": 0.0088,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[22].weight",
         "value": 0.1417,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       }
     ]

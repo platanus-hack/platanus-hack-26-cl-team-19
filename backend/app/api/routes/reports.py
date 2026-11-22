@@ -26,7 +26,7 @@ from app.api.routes.projects import _project, _version, _with_scenario_rate, get
 from app.api.routes.runs import scenario_model
 from app.api.run_cache import ENGINE_VERSION, cached_run, run_to_json
 from app.api.schemas import RunParams
-from app.api.store import Project, ProjectStore, ReportSummary, Version
+from app.api.store import INITIAL_SCENARIO, Project, ProjectStore, ReportSummary, Version
 from app.costs import estimate_cost, failure_cost
 from app.models.run import Run
 from app.reports import build_comparison, build_report, to_markdown
@@ -51,6 +51,35 @@ def new_seed() -> int:
     return secrets.randbelow(2**31 - 1) + 1
 
 
+def _es(x: float) -> str:
+    return f"{x:g}".replace(".", ",")
+
+
+def scenario_source(store: ProjectStore, project_id: str, params: RunParams, custom_rps: bool) -> str:
+    """De dónde sale la tasa de la corrida, para los supuestos del reporte (JAJ-152).
+
+    El escenario es de la tabla del proyecto: lo definió el usuario (o lo aceptó desde el chat), salvo
+    ``actual``, que nace con el proyecto. No se cita el catálogo, aunque el escenario se llame igual."""
+    if custom_rps:
+        return f"Tasa elegida para esta corrida: {_es(params.rps)} req/s"
+    scenario = next((s for s in store.list_scenarios(project_id) if s.name == params.scenario), None)
+    if scenario is None:  # no pasa: _with_scenario_rate ya lo validó
+        return f"Escenario «{params.scenario}»: {_es(params.rps)} req/s"
+    rate = (
+        f"{_es(scenario.multiplier)} veces el pico del modelo ({_es(params.rps)} req/s)"
+        if scenario.multiplier is not None
+        else f"{_es(params.rps)} req/s fijas"
+    )
+    if scenario.traffic_step is not None:
+        rate += ", con un salto de tráfico"
+    who = (
+        "Nace con el proyecto, con el tráfico de hoy del modelo"
+        if scenario.name == INITIAL_SCENARIO
+        else "Definido por el usuario"
+    )
+    return f"Escenario «{scenario.name}» del proyecto: {rate}. {who}"
+
+
 def simulate_and_report(
     store: ProjectStore, project: Project, version: Version, params: RunParams, custom_rps: bool
 ) -> tuple[Run, dict[str, Any]]:
@@ -73,6 +102,7 @@ def simulate_and_report(
         # el costo de fallar con el negocio del escenario, como POST …/results (JAJ-131)
         failure=failure_cost(scenario_model(version.model, params)[0], run),
         engine_version=ENGINE_VERSION,
+        scenario_source=scenario_source(store, project.id, params, custom_rps),
     )
     store.save_report(project.id, report)
     return run, report

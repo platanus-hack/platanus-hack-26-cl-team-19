@@ -32,13 +32,13 @@ _THRESHOLDS = {
         "value": OVERLOADED,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "Umbral del equipo (JAJ-127): un recurso sobre 80 % de uso promedio tiene poco margen para picos",
+        "source": "Umbral elegido por el equipo: un recurso sobre 80 % de uso promedio tiene poco margen para picos",
     },
     "idle": {
         "value": IDLE,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "Umbral del equipo (JAJ-127): un componente pagado que no llega a 30 % ni en su pico está holgado",
+        "source": "Umbral elegido por el equipo: un componente pagado que no llega a 30 % ni en su pico está holgado",
     },
 }
 _COMPONENT_NAMES = {"api": "API", "db": "Base de datos"}
@@ -138,12 +138,19 @@ def _components(run: Run, cost: CostEstimate) -> list[dict[str, Any]]:
     return sorted(out, key=lambda c: (order[c["status"]], -c["utilization"]))
 
 
-def _assumptions(model: dict[str, Any]) -> dict[str, Any]:
+def _assumptions(model: dict[str, Any], scenario_source: str | None = None) -> dict[str, Any]:
+    """Los supuestos del modelo, con el escenario de la corrida primero.
+
+    Los escenarios que trae el modelo (``traffic.scenarios``) no se listan: la corrida usa un escenario
+    de la tabla del proyecto, y citar el del catálogo diría que el usuario no lo definió (JAJ-152). En su
+    lugar va ``scenario_source``, que dice de dónde sale la tasa de esta corrida."""
     a = model.get("assumptions") or {}
-    return {
-        "total": a.get("total", 0),
-        "by_source": (a.get("by_source") or [])[:TOP_ASSUMPTIONS],
-    }
+    groups = a.get("by_source") or []
+    kept = [g for g in groups if not str(g.get("example_path", "")).startswith("traffic.scenarios.")]
+    total = a.get("total", 0) - sum(g.get("count", 0) for g in groups if g not in kept)
+    if scenario_source:
+        kept = [{"source": scenario_source, "count": 1, "needs_review": False, "example_path": "scenario"}, *kept]
+    return {"total": total, "by_source": kept[:TOP_ASSUMPTIONS]}
 
 
 def _conclusion(r: dict[str, Any]) -> str:
@@ -195,9 +202,11 @@ def build_report(
     cost: CostEstimate,
     failure: FailureCost | None,
     engine_version: str,
+    scenario_source: str | None = None,
 ) -> dict[str, Any]:
     """El reporte de una corrida. ``run_dict`` es el ``Run`` serializado; ``params``, los ``RunParams``
-    resueltos (con las req/s finales)."""
+    resueltos (con las req/s finales). ``scenario_source``: de dónde sale la tasa de la corrida, que va
+    primero en los supuestos (``scenario_source`` de ``app/api/routes/reports.py``)."""
     sat = run_dict.get("saturation")
     report: dict[str, Any] = {
         "schema": REPORT_SCHEMA,
@@ -265,7 +274,7 @@ def build_report(
             "region": cost.region,
         },
         "failure_cost": failure.to_dict() if failure is not None and hasattr(failure, "to_dict") else None,
-        "assumptions": _assumptions(model),
+        "assumptions": _assumptions(model, scenario_source),
         "warnings": run.warnings,
     }
     report["conclusion"] = _conclusion(report)

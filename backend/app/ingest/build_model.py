@@ -402,7 +402,7 @@ def traffic_model(ans: dict) -> dict:
             tr["profiles"]["medio"]["requests_per_session"],
             "requests/sesión",
             "SUPUESTO",
-            "JAJ-11: perfil medio, sin dato del usuario",
+            "Perfil medio de uso de una app web, sin dato del usuario",
             default=True,
         )
         inputs = {"peak_rps": peak}
@@ -423,12 +423,14 @@ def traffic_model(ans: dict) -> dict:
             sessions_per_month=prof["sessions_per_month"],
             requests_per_session=prof["requests_per_session"],
         )
-        rps_session = num(prof["requests_per_session"], "requests/sesión", "SUPUESTO", f"Perfil {prof_name} de JAJ-11")
+        rps_session = num(
+            prof["requests_per_session"], "requests/sesión", "SUPUESTO", f"Perfil {prof_name} de uso de una app web"
+        )
         avg = mau["value"] * prof["sessions_per_month"] * prof["requests_per_session"] / SECONDS_MONTH
         peak = derived(
             round(avg * k_hour["value"], 2),
             "req/s",
-            "usuarios/mes × sesiones/mes × requests/sesión / segundos del mes × K_hora (JAJ-11)",
+            "usuarios/mes × sesiones/mes × requests/sesión / segundos del mes × K_hora",
             mau,
             profile,
             k_hour,
@@ -720,7 +722,7 @@ def checks(model: dict) -> dict:
             round(db_vcpu["value"] * 1000 / db_ms, 1) if db_ms else None,
             "req/s",
             "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la "
-            "nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
+            "nube (los tiempos calibrados son de 1 núcleo del laptop × cpu_core_factor)",
             db_vcpu,
             mean_hold,
             f_db,
@@ -747,7 +749,7 @@ def checks(model: dict) -> dict:
         at_stake = derived(
             round(sessions_h * biz["conversion"]["value"] * biz["ticket_usd"]["value"], 0),
             "US$/hora",
-            "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+            "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae",
             sc["rps"],
             t["requests_per_session"],
             biz["conversion"],
@@ -767,7 +769,7 @@ def checks(model: dict) -> dict:
         else "ok"
     )
     return {
-        "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación (JAJ-9).",
+        "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación.",
         "connections": {"app_max": conns, "db_max": db["max_connections"], "status": status},
         "mean_db_hold_ms": mean_hold,
         "mean_api_cpu_ms": mean_cpu,

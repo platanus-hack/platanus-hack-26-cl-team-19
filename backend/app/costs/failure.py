@@ -114,7 +114,7 @@ def failure_cost(raw: dict[str, Any], run: Run) -> FailureCost | None:
     is_floor = any(r.utilization >= SATURATION for r in run.resources)
 
     src = (
-        f"sesiones/hora × fracción que falla × conversión ({conv:g}) × ticket (US${tick:g}) (JAJ-11); "
+        f"sesiones/hora × fracción que falla × conversión ({conv:g}) × ticket (US${tick:g}); "
         f"sesiones/hora = req/s del Run × 3600 / {k:g} requests por sesión"
     )
     # de dónde salen la conversión y el ticket: del modelo o del escenario (JAJ-131)
@@ -137,7 +137,7 @@ def failure_cost(raw: dict[str, Any], run: Run) -> FailureCost | None:
     warnings = []
     if is_floor:
         warnings.append(
-            "Algún recurso pasa el 90 % de uso: el motor es optimista ahí (JAJ-44), así que la tasa de error y "
+            "Algún recurso pasa el 90 % de uso: el motor es optimista ahí, así que la tasa de error y "
             "las ventas en juego son un piso (al menos)."
         )
     if run.in_flight:

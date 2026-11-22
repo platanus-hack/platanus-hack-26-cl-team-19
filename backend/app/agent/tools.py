@@ -297,7 +297,7 @@ def _goal_check(
     basis = (
         {
             "value": error_rate,
-            "basis": "techo por saturación: error_rate más las requests sin respuesta al terminar (JAJ-89)",
+            "basis": "techo por saturación: error_rate más las requests sin respuesta al terminar",
             "error_rate": run.error_rate,
             # anidado: si va suelto, el label y el source del piso del 1 % (sin meta) lo pisarían
             "saturated_provenance": _saturation_provenance(run),
@@ -312,7 +312,7 @@ def _goal_check(
             "ok": p95 is not None and p95 <= goals.slo_p95_ms and not saturated,
         }
         if saturated:
-            out["p95"]["basis"] = "no cumple por saturación: el p95 solo mide las requests que terminaron (JAJ-89)"
+            out["p95"]["basis"] = "no cumple por saturación: el p95 solo mide las requests que terminaron"
             out["p95"]["saturated_provenance"] = _saturation_provenance(run)
     if goals.slo_error_rate is not None:
         out["errors"] = {"goal": goals.slo_error_rate, "ok": error_rate <= goals.slo_error_rate, **basis}
@@ -404,7 +404,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "propose_version": "Aplica operaciones de arquitectura (ops_schema) a una versión y guarda el resultado como "
     "versión nueva con origen agente. No simula: después usa compare.",
     "set_traffic": "Guarda el tráfico que dijo el usuario como versión nueva: calcula el pico en req/s con la "
-    "fórmula de JAJ-45 y, con peak_factor, el escenario del evento. Los números tienen que estar en quote.",
+    "fórmula del perfil de uso y, con peak_factor, el escenario del evento. Los números tienen que estar en quote.",
     "set_deployment": "Cambia réplicas, vCPU o plan de DB con los valores que dijo el usuario (en quote), como "
     "versión nueva.",
     "set_goals": "Guarda las metas del proyecto (p95, errores, presupuesto) que dijo el usuario (en quote).",
@@ -747,7 +747,7 @@ class AgentTools:
                 )
             sessions = a.volume / conversion["value"]
             peak = sessions * rps_session["value"] / SECONDS_DAY * k_hour["value"]
-            formula = "pedidos/día / conversión × requests/sesión / 86.400 × K_hora (JAJ-11)"
+            formula = "pedidos/día / conversión × requests/sesión / 86.400 × K_hora"
             parts += [conversion, rps_session, k_hour]
         else:  # users_per_month
             profile = traffic.get("profile") or {}
@@ -757,7 +757,7 @@ class AgentTools:
                     "El modelo no tiene el perfil de uso (sesiones/mes y requests/sesión) para pasar usuarios a req/s."
                 )
             peak = a.volume * spm * rps_session["value"] / SECONDS_MONTH * k_hour["value"]
-            formula = "usuarios/mes × sesiones/mes × requests/sesión / segundos del mes × K_hora (JAJ-45)"
+            formula = "usuarios/mes × sesiones/mes × requests/sesión / segundos del mes × K_hora"
             parts += [rps_session, k_hour]
         label = _weakest(*(p.get("label", "SUPUESTO") for p in parts))
         traffic["declared"] = {"volume": volume, "quote": a.quote}

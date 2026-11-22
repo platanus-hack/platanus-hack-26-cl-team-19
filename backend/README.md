@@ -56,6 +56,14 @@ backend/
 
 El flujo es: **modelo v1 (JSON)** → `load_model()` → `simulate()` → **Run**. La API recibe el modelo en `POST /runs` y devuelve el `Run`.
 
+## Textos que ve el usuario
+
+Las fuentes de los números (`source`) y los avisos explican de dónde sale cada número con palabras del usuario: «Lectura por PK, pgbench, 1 M filas…» o «Default de QueuePool, SQLAlchemy 2.1.9». Esto vale para el catálogo, los modelos de ejemplo, los avisos del motor y del costo, el reporte, y las descripciones de las tools y el prompt del agente, que el agente puede repetir en el chat.
+
+- **No llevan IDs de Linear** (`JAJ-8`, `P-JAJ-1`), ni rutas de `spikes/`, ni «guion de la demo» (JAJ-152). Esos IDs van en los comentarios y los docstrings.
+- **Lo revisa `tests/api/test_no_internal_refs.py`:** recorre los JSON y lo que devuelve la API en el camino de la demo (resultados, costos, comparación y reportes).
+- **Las versiones ya guardadas** en la base conservan las fuentes con que se crearon.
+
 ## Cómo modela el sistema el motor
 
 Los recursos se arman desde el `deployment` del modelo:
@@ -644,6 +652,8 @@ Cada simulación guarda su reporte (`branchpoint.report/v1`, tabla `reports`): u
   - **Resultados:** latencias, throughput, errores, requests sin respuesta y saturación, con su procedencia.
   - **Cuello de botella:** el recurso, su `archivo:línea` y el endpoint que más lo ocupa.
   - **Costos y supuestos:** el costo por línea, el costo de fallar y los supuestos principales.
+    - **El primer supuesto es el escenario de la corrida, sacado de la tabla del proyecto** (JAJ-152): «Escenario «cyberday» del proyecto: 20 veces el pico del modelo (26,2 req/s). Definido por el usuario». Para `actual` dice que nace con el proyecto, y para una tasa a mano, «Tasa elegida para esta corrida».
+    - **No se listan los escenarios del catálogo que trae el modelo** (`traffic.scenarios`): la corrida no los usa.
   - **Conclusión:** escrita con una plantilla, sin LLM.
 - **Diagnóstico por componente** (API, DB, colas): uso promedio y pico del recurso más ocupado, costo mensual y estado.
   - **Estados:** `overloaded` (uso promedio de 80 % o más, o el cuello de botella con requests sin atender), `idle` (bajo 30 % incluso en el pico y con costo) u `ok`. Los umbrales van en `thresholds`, con etiqueta `SUPUESTO`.
