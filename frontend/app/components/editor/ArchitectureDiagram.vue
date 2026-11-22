@@ -537,6 +537,21 @@ const alertOf = (status?: SaturationStatus) =>
                 >Cuello de botella</span
               >
               <span
+                v-if="node.change"
+                class="absolute -bottom-2.5 left-2 rounded-sm border px-1 text-[0.625rem] leading-4"
+                :class="
+                  node.change === 'new'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-foreground'
+                "
+                :title="
+                  node.change === 'new'
+                    ? 'No estaba en la versión anterior'
+                    : 'Cambió respecto de la versión anterior'
+                "
+                >{{ node.change === "new" ? "Nuevo" : "Cambiado" }}</span
+              >
+              <span
                 v-if="node.queue"
                 class="absolute -right-2 -bottom-2.5 rounded-sm border border-border bg-card px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground tabular-nums"
                 :title="`${node.queue} requests en espera en este segundo`"

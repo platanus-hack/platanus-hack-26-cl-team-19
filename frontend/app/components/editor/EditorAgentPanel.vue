@@ -61,6 +61,7 @@ const emit = defineEmits<{
   attach: [files: File[]];
   removeAttachment: [localId: string];
   dismissEvidence: [request: EvidenceRequest];
+  openVersion: [version: number];
 }>();
 
 const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
@@ -187,6 +188,8 @@ watch(
             :status="message.status"
             :output="message.output"
             :detail="message.detail"
+            :version="message.version"
+            @open-version="emit('openVersion', $event)"
           />
           <AgentProposalCard
             v-else

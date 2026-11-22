@@ -140,12 +140,25 @@ def cost_usd(model: str, usage: dict[str, int]) -> dict[str, Any] | None:
     return {"value": round(usd, 4), "unit": "US$", "label": "ESTIMADO", "source": table["source"]}
 
 
-def system_prompt(project_id: str) -> str:
-    return (
+def system_prompt(project_id: str, context: dict[str, Any] | None = None) -> str:
+    prompt = (
         f"{INSTRUCTIONS}\n\nEstás en el chat del editor de Branchpoint. El proyecto abierto es project_id="
         f"{project_id!r}: úsalo en las tools sin preguntar. Responde en español, breve, y cita la procedencia "
-        "de los números."
+        "de los números. Cuando el usuario pida probar un componente o un cambio (caché, cola, pooler, réplicas de "
+        "la API o de lectura de la DB, plan de la DB), crea la versión con propose_version: el editor la abre y la simula sola, así que no "
+        "hace falta que llames simulate para mostrarla. Si pregunta qué cambiar, sugiere operaciones de "
+        "ops_schema, cada una con lo que esperas que mejore, y crea la versión solo cuando acepte una."
     )
+    # JAJ-141: lo que el usuario está mirando en el editor
+    if context and context.get("version"):
+        scenario = context.get("scenario")
+        prompt += (
+            f"\n\nEn el editor está abierta la versión {int(context['version'])}"
+            + (f" con el escenario {scenario!r}" if scenario else "")
+            + ". Parte de esa versión en propose_version, set_deployment, simulate y compare, y usa ese "
+            "escenario, salvo que el usuario pida otra cosa."
+        )
+    return prompt
 
 
 _BILLING_ERRORS = {
@@ -189,6 +202,7 @@ def run_agent(
     project_id: str,
     messages: list[dict[str, Any]],
     max_iterations: int = MAX_ITERATIONS,
+    context: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Corre el loop y emite eventos para el editor:
 
@@ -202,7 +216,7 @@ def run_agent(
     usage: dict[str, int] = {}
     for iteration in range(1, max_iterations + 1):
         try:
-            turn = llm.complete(system_prompt(project_id), history, schemas)
+            turn = llm.complete(system_prompt(project_id, context), history, schemas)
         except (anthropic.APIError, openai.APIError) as error:
             yield {"type": "error", "message": _provider_error(error, llm.model)}
             return

@@ -96,6 +96,8 @@ export type ChatMessage =
       status: ToolCallStatus;
       output?: string;
       detail?: string;
+      /** La versión que creó la herramienta (JAJ-141): se puede abrir y simular. */
+      version?: number;
     }
   | {
       id: string;
@@ -140,6 +142,8 @@ export interface DiagramNode {
   queue?: number;
   /** El nodo dueño del recurso que es el cuello de botella de la corrida. */
   bottleneck?: boolean;
+  /** Frente a la versión padre (JAJ-141): no estaba, o cambió de tamaño o de plan. */
+  change?: "new" | "changed";
 }
 
 export interface DiagramEdge {

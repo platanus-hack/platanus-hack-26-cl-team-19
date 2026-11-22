@@ -1,4 +1,7 @@
 export type ChatProvider = "anthropic" | "openai";
+
+/** Lo que el usuario mira en el editor (JAJ-141): el agente parte de esa versión. */
+export type ChatContext = { version: number; scenario?: string };
 export type ChatKeySource = "team" | "personal";
 
 export type ChatTurn = {
@@ -18,6 +21,8 @@ type ToolResult = {
   endpoints?: unknown[];
   version?: number;
   note?: string;
+  // propose_version, set_deployment, set_traffic (JAJ-141)
+  changes?: string[];
 };
 
 /** Lo que el backend calcula que falta respaldar con evidencia (IA-7). */

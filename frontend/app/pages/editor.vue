@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
-import { Ellipsis, Loader2, Pause, Play } from "@lucide/vue";
+import { Ellipsis, GitCompare, Loader2, Pause, Play } from "@lucide/vue";
+import { until } from "@vueuse/core";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
@@ -54,6 +55,7 @@ import {
   toEdges,
   toFlows,
   toInspectedNode,
+  toRunDelta,
   toRunSummary,
   toUnsimulatedNode,
   toNodes,
@@ -79,6 +81,7 @@ const {
   projectGroup,
   version,
   graph,
+  parentGraph,
   scenario,
   run,
   results,
@@ -95,6 +98,7 @@ const {
   openSample,
   openProject,
   openVersion,
+  reloadVersions,
   saveReplicas,
   simulate,
   loadCosts,
@@ -146,7 +150,12 @@ const primaryRepository = computed(() => {
 // El diagrama sigue el segundo que se reproduce (JAJ-129).
 const nodes = computed(() =>
   graph.value
-    ? toNodes(graph.value, run.value, run.value ? cursor.value : undefined)
+    ? toNodes(
+        graph.value,
+        run.value,
+        run.value ? cursor.value : undefined,
+        parentGraph.value,
+      )
     : [],
 );
 const edges = computed(() => (graph.value ? toEdges(graph.value) : []));
@@ -232,6 +241,18 @@ const runSaturation = computed(() => {
     },
   };
 });
+// JAJ-141: la corrida que estaba en pantalla antes de abrir una versión del agente
+const baseline = shallowRef<{
+  version: number;
+  label: string;
+  run: NonNullable<typeof run.value>;
+} | null>(null);
+const parentNumber = computed(() => version.value?.parent ?? null);
+const runDelta = computed(() =>
+  baseline.value && run.value && baseline.value.version === parentNumber.value
+    ? toRunDelta(baseline.value.run, run.value)
+    : [],
+);
 const simulationLabel = computed(() => {
   if (simulating.value) return "Simulando…";
   if (playing.value) return "Pausar";
@@ -307,6 +328,31 @@ function showCompare(baseId?: string) {
   view.value = "compare";
 }
 
+/**
+ * El agente creó una versión (JAJ-141): se abre y se simula con el mismo escenario y ajustes, para
+ * ver el efecto en el diagrama. También lo usa el botón «Abrir y simular» de cada versión del chat.
+ */
+async function openAndSimulate(number: number) {
+  const before =
+    version.value && run.value
+      ? {
+          version: version.value.number,
+          label: version.value.label,
+          run: run.value,
+        }
+      : null;
+  const draft = structuredClone(toRaw(overrideDraft.value));
+  await until(busy).toBe(false);
+  await reloadVersions();
+  await openVersion(number);
+  if (version.value?.number !== number) return;
+  overrideDraft.value = draft; // abrir la versión limpia los ajustes: se conservan
+  baseline.value = before;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (runOverrides.value) await simulate(runOverrides.value);
+}
+
 function retrySimulation() {
   if (runOverrides.value && !busy.value) void simulate(runOverrides.value);
 }
@@ -351,7 +397,20 @@ const {
   send,
   reset,
   dismissEvidence,
-} = useEditorChat(computed(() => project.value?.id));
+} = useEditorChat(
+  computed(() => project.value?.id),
+  {
+    // JAJ-141: el agente parte de lo que el usuario está mirando
+    context: () =>
+      version.value
+        ? {
+            version: version.value.number,
+            scenario: scenario.value || undefined,
+          }
+        : undefined,
+    onVersion: (number) => void openAndSimulate(number),
+  },
+);
 // adjuntos del chat (IA-9): imágenes y logs que el agente usa como evidencia
 const chatAttachments = useChatAttachments(computed(() => project.value?.id));
 const attachNotice = ref("");
@@ -821,6 +880,7 @@ async function saveVersion() {
           @remove-attachment="chatAttachments.remove"
           @dismiss-evidence="dismissRequest"
           @send="sendChat"
+          @open-version="openAndSimulate"
           @reset="reset"
         >
           <template #intro>
@@ -849,6 +909,37 @@ async function saveVersion() {
               :error="simulationError"
               @retry="retrySimulation"
             />
+            <section
+              v-if="
+                simulationState === 'done' && (runDelta.length || parentNumber)
+              "
+              aria-label="Frente a la versión anterior"
+              class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+            >
+              <template v-if="runDelta.length">
+                <span class="text-muted-foreground"
+                  >Frente a {{ baseline?.label }}:</span
+                >
+                <span
+                  v-for="row in runDelta"
+                  :key="row.label"
+                  class="font-mono tabular-nums"
+                  >{{ row.label }} {{ row.before }} →
+                  <span class="font-semibold">{{ row.after }}</span></span
+                >
+              </template>
+              <Button
+                v-if="parentNumber && versions.length > 1"
+                type="button"
+                size="xs"
+                variant="outline"
+                :disabled="busy"
+                @click="showCompare(String(parentNumber))"
+              >
+                <GitCompare data-icon="inline-start" aria-hidden="true" />
+                Ver comparación con v{{ parentNumber }}
+              </Button>
+            </section>
             <SimulationPanel
               v-if="playback"
               v-model:minute="cursor"

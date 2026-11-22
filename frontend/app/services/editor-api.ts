@@ -1,4 +1,9 @@
-import type { ChatKeySource, ChatProvider, ChatTurn } from "./chat-stream";
+import type {
+  ChatContext,
+  ChatKeySource,
+  ChatProvider,
+  ChatTurn,
+} from "./chat-stream";
 export interface ModelSummary {
   id: string;
   name: string;
@@ -28,6 +33,8 @@ export interface ProjectVersion {
   number: number;
   label: string;
   origin: "repo" | "manual" | "agente";
+  /** La versión de la que salió; null en la primera. */
+  parent?: number | null;
   note: string | null;
 }
 
@@ -236,12 +243,18 @@ export function createEditorApi(
       provider: ChatProvider,
       signal: AbortSignal,
       expectedSource?: ChatKeySource,
+      context?: ChatContext,
     ) {
       const response = await fetchApi.raw<ReadableStream<Uint8Array>>(
         `${projectPath(id)}/chat`,
         {
           method: "POST",
-          body: { messages, provider, expected_source: expectedSource },
+          body: {
+            messages,
+            provider,
+            expected_source: expectedSource,
+            context,
+          },
           responseType: "stream",
           ignoreResponseError: true,
           signal,

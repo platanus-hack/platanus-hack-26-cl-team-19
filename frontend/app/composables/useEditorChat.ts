@@ -2,6 +2,7 @@ import type { ChatAttachmentRef, ChatMessage } from "@/components/editor/types";
 import {
   readChatEvents,
   type ChatEvent,
+  type ChatContext,
   type ChatEvidence,
   type ChatKeySource,
   type ChatTurn,
@@ -36,10 +37,15 @@ export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
     output = `${number(result.peak_rps.value)} req/s pico · ${result.endpoints?.length ?? 0} endpoints`;
   else if (event.name === "apply_log_traffic" && result?.version)
     output = `Versión ${result.version} con tráfico observado`;
+  else if (typeof result?.version === "number")
+    output = [`Versión ${result.version} creada`, ...(result.changes ?? [])]
+      .slice(0, 3)
+      .join(" · ");
   return {
     status: "done" as const,
     output,
     detail: JSON.stringify(result, null, 2),
+    version: typeof result?.version === "number" ? result.version : undefined,
   };
 }
 
@@ -94,7 +100,15 @@ function chatError(cause: unknown): string {
     : "No se pudo completar el mensaje.";
 }
 
-export function useEditorChat(projectId: Ref<string | undefined>) {
+export function useEditorChat(
+  projectId: Ref<string | undefined>,
+  options: {
+    /** La versión y el escenario abiertos en el editor (JAJ-141). */
+    context?: () => ChatContext | undefined;
+    /** La última versión que creó el agente en el turno, al terminar la respuesta. */
+    onVersion?: (version: number) => void;
+  } = {},
+) {
   const baseURL = useRuntimeConfig().public.apiBase.trim();
   const auth = useSupabaseAuth();
   const api = createEditorApi(
@@ -160,8 +174,16 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
         provider.value,
         request.signal,
         expectedSource,
+        options.context?.(),
       );
-      await finishTurn(stream, state, historyTurn(text, attachments), turnId);
+      const created = await finishTurn(
+        stream,
+        state,
+        historyTurn(text, attachments),
+        turnId,
+      );
+      const last = created.at(-1);
+      if (last !== undefined) options.onVersion?.(last);
     } catch (cause) {
       if (!request.signal.aborted) error.value = chatError(cause);
       for (const message of state.messages) {
@@ -206,11 +228,18 @@ export async function finishTurn(
   conversation: Conversation,
   user: ChatTurn,
   turnId: string,
-) {
+): Promise<number[]> {
   const reply: string[] = [];
+  const created: number[] = [];
   for await (const event of readChatEvents(stream)) {
     applyChatEvent(conversation, event, turnId);
     if (event.type === "text") reply.push(event.text);
+    if (
+      event.type === "tool_result" &&
+      !event.result?.error &&
+      typeof event.result?.version === "number"
+    )
+      created.push(event.result.version);
     if (event.type === "done") {
       if (reply.length)
         conversation.history = [
@@ -218,7 +247,7 @@ export async function finishTurn(
           user,
           { role: "assistant", content: reply.join("\n\n").slice(0, 20_000) },
         ];
-      return;
+      return created;
     }
   }
   throw new Error("La conexión se interrumpió antes de completar el mensaje.");

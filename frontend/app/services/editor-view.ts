@@ -111,8 +111,16 @@ function utilizationAt(run: Run, second?: number): Record<string, number> {
  * Los nodos del diagrama. Con ``second``, el estado y la cola salen de ese segundo de la corrida, así
  * el diagrama sigue la reproducción (JAJ-129); sin él, del promedio de la corrida.
  */
-export function toNodes(graph: Graph, run: Run | null, second?: number) {
+export function toNodes(
+  graph: Graph,
+  run: Run | null,
+  second?: number,
+  parent?: Graph | null,
+) {
   const multi = isMultiRepo(graph);
+  const before = parent
+    ? new Map(parent.nodes.map((node) => [node.id, node]))
+    : undefined;
   const usage = run ? utilizationAt(run, second) : {};
   const queue = second === undefined ? undefined : run?.series[second]?.queue;
   return graph.nodes.map((node) => {
@@ -145,8 +153,20 @@ export function toNodes(graph: Graph, run: Run | null, second?: number) {
         simulated &&
         !!run?.bottleneck?.resource &&
         node.resources.includes(run.bottleneck.resource),
+      change: before ? nodeChange(node, before.get(node.id)) : undefined,
     };
   });
+}
+
+/** JAJ-141: si el nodo no estaba en la versión padre o cambió su tamaño o plan. */
+function nodeChange(
+  node: GraphNode,
+  previous?: GraphNode,
+): "new" | "changed" | undefined {
+  if (!previous) return "new";
+  const size = (details: GraphNode["details"]) =>
+    [details.replicas, details.plan, details.technology].join("|");
+  return size(node.details) === size(previous.details) ? undefined : "changed";
 }
 
 /** Cuántas requests de la corrida pasa por cada endpoint (o "cola <nombre>" para sus trabajos). */
@@ -389,6 +409,48 @@ export function toRunSummary(
   if (run.resources.some((resource) => resource.max_queue !== undefined))
     add("Cola máxima", `${count.format(maxQueue)} req`);
   return items;
+}
+
+/** Antes y después frente a la versión padre (JAJ-141): p95, tasa de error y cola máxima. */
+export function toRunDelta(before: Run, after: Run) {
+  const count = new Intl.NumberFormat("es-CL");
+  const percent = new Intl.NumberFormat("es-CL", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  });
+  const maxQueue = (run: Run) =>
+    run.resources.some((resource) => resource.max_queue !== undefined)
+      ? Math.max(0, ...run.resources.map((resource) => resource.max_queue ?? 0))
+      : undefined;
+  const p95 = (run: Run) =>
+    run.latency === undefined
+      ? undefined
+      : run.latency.p95_ms === null
+        ? "sin valor fiable"
+        : `${count.format(Math.round(run.latency.p95_ms))} ms`;
+  const rows: { label: string; before: string; after: string }[] = [];
+  const add = (label: string, a?: string, b?: string) => {
+    if (a !== undefined && b !== undefined)
+      rows.push({ label, before: a, after: b });
+  };
+  add("p95", p95(before), p95(after));
+  add(
+    "Error",
+    before.error_rate === undefined
+      ? undefined
+      : percent.format(before.error_rate),
+    after.error_rate === undefined
+      ? undefined
+      : percent.format(after.error_rate),
+  );
+  const qa = maxQueue(before);
+  const qb = maxQueue(after);
+  add(
+    "Cola máx.",
+    qa === undefined ? undefined : count.format(qa),
+    qb === undefined ? undefined : count.format(qb),
+  );
+  return rows;
 }
 
 export function toComparisonRows(

@@ -51,6 +51,15 @@ class ChatMessage(BaseModel):
         return self
 
 
+class ChatContext(BaseModel):
+    """Lo que el usuario está mirando en el editor (JAJ-141): el agente parte de esa versión."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1, description="La versión abierta en el editor.")
+    scenario: str | None = Field(default=None, max_length=64, pattern=r"^[\w-]+$", description="El escenario elegido.")
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -59,6 +68,7 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(
         min_length=1, max_length=40, description="La conversación, la última del usuario."
     )
+    context: ChatContext | None = None
 
 
 @router.post("/{project_id}/chat", summary="Chat con el agente: transmite cada tool call (NDJSON)")
@@ -88,7 +98,8 @@ def chat(
     tools = AgentTools(store, owner, limiter, storage if user is not None else None)
 
     def events() -> Iterator[bytes]:
-        for event in run_agent(tools, llm, project_id, messages):
+        context = req.context.model_dump() if req.context else None
+        for event in run_agent(tools, llm, project_id, messages, context=context):
             if event["type"] == "done":
                 event["evidence"] = _evidence(store, project_id, owner)
             yield (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode()

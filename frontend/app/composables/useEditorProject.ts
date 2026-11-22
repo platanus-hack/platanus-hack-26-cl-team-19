@@ -50,6 +50,8 @@ export function useEditorProject() {
   const projectGroup = shallowRef<Project | null>(null);
   const version = shallowRef<VersionDetail | null>(null);
   const graph = shallowRef<Graph | null>(null);
+  // JAJ-141: el grafo de la versión padre, para marcar lo nuevo y lo que cambió
+  const parentGraph = shallowRef<Graph | null>(null);
   const results = shallowRef<VersionResults | null>(null);
   const run = computed(() => results.value?.run ?? null);
   const costs = shallowRef<CostEstimate | null>(null);
@@ -105,12 +107,39 @@ export function useEditorProject() {
         scenarios.value[0]?.id ??
         "";
     }
+    parentGraph.value = null;
     // Los costos dependen solo de la versión: se estiman junto al diagrama.
     const [nextGraph] = await Promise.all([
       api.getGraph(detail.model),
       fetchCosts(detail),
     ]);
     graph.value = nextGraph;
+    void fetchParentGraph(detail);
+  }
+
+  async function fetchParentGraph(detail: VersionDetail) {
+    const id = project.value?.id;
+    const parent = detail.parent;
+    if (!id || !parent) return;
+    try {
+      const base = await api.getVersion(id, parent);
+      const baseGraph = await api.getGraph(base.model);
+      if (version.value === detail) parentGraph.value = baseGraph;
+    } catch {
+      // sin el padre el diagrama se ve igual, solo sin las marcas de Nuevo y Cambiado
+    }
+  }
+
+  /** Vuelve a leer las versiones del proyecto: el agente pudo crear una (JAJ-141). */
+  async function reloadVersions() {
+    const current = project.value;
+    if (!current) return;
+    try {
+      const fresh = await api.getProject(current.id);
+      if (project.value?.id === fresh.id) project.value = fresh;
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
   }
 
   async function fetchCosts(detail: VersionDetail) {
@@ -287,6 +316,7 @@ export function useEditorProject() {
     projectGroup,
     version,
     graph,
+    parentGraph,
     run,
     results,
     costs,
@@ -303,6 +333,7 @@ export function useEditorProject() {
     openProject,
     openSample,
     openVersion,
+    reloadVersions,
     saveReplicas,
     simulate,
     loadCosts,
