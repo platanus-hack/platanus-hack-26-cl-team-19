@@ -68,6 +68,7 @@ import {
 } from "@/services/deployment-options";
 import {
   costComponentLabel,
+  flowPeak,
   simulationProvenance,
   toBottleneck,
   toComparisonRows,
@@ -242,8 +243,11 @@ const edges = computed(() =>
       : edge,
   ),
 );
+const peakFlow = computed(() => (run.value ? flowPeak(run.value) : 1));
 const flows = computed(() =>
-  graph.value && run.value ? toFlows(graph.value, run.value, cursor.value) : [],
+  graph.value && run.value
+    ? toFlows(graph.value, run.value, cursor.value, peakFlow.value)
+    : [],
 );
 const bottleneck = computed(() =>
   run.value

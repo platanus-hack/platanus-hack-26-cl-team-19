@@ -49,11 +49,15 @@ class EndpointCounters:
 
 
 class Recorder:
-    def __init__(self, duration_s: float, endpoints: Sequence[Endpoint], resources: Sequence[Resource]) -> None:
+    def __init__(
+        self, duration_s: float, endpoints: Sequence[Endpoint], resources: Sequence[Resource], measured_edges: set[str]
+    ) -> None:
         self.seconds = max(1, math.ceil(duration_s))
         self.arrivals = [0] * self.seconds
         self.ok = [0] * self.seconds
         self.errors = [0] * self.seconds
+        self.measured_edges = sorted(measured_edges)
+        self.edge_calls: list[dict[str, int]] = [{} for _ in range(self.seconds)]
         self.latencies_ms: list[list[float]] = [[] for _ in range(self.seconds)]
         self.error_types = {ERROR_POOL_TIMEOUT: 0, ERROR_CLIENT_TIMEOUT: 0, ERROR_QUEUE_FULL: 0, ERROR_DB_REFUSED: 0}
         self.by_endpoint = {e.id: EndpointCounters() for e in endpoints}
@@ -64,6 +68,10 @@ class Recorder:
 
     def _second(self, t: float) -> int:
         return min(int(t), self.seconds - 1)
+
+    def edge_call(self, edge: str, t: float) -> None:
+        calls = self.edge_calls[self._second(t)]
+        calls[edge] = calls.get(edge, 0) + 1
 
     def arrival(self, endpoint: Endpoint, t: float) -> None:
         self.arrivals[self._second(t)] += 1

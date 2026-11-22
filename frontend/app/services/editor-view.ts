@@ -208,18 +208,50 @@ function endpointLoad(graph: Graph, run: Run): Map<string, number> {
   return load;
 }
 
-/**
- * El flujo estimado de cada conector en el segundo ``second`` (JAJ-129): las llegadas de ese segundo
- * por la fracción de requests de los endpoints que pasan por él. Las requests que fallan se reparten
- * en los conectores que llegan a un nodo en riesgo, saturado o caído. El dato real por arista
- * queda para JAJ-136.
- */
-export function toFlows(graph: Graph, run: Run, second: number): DiagramFlow[] {
+/** Escala fija de la corrida para que el grosor sea comparable durante la reproducción. */
+export function flowPeak(run: Run): number {
+  if (run.measured_edges == null)
+    return Math.max(1, ...run.series.map((sample) => sample.arrivals));
+
+  let peak = 1;
+  for (const sample of run.series) {
+    for (const count of Object.values(sample.edge_calls ?? {}))
+      peak = Math.max(peak, count);
+  }
+  return peak;
+}
+
+export function toFlows(
+  graph: Graph,
+  run: Run,
+  second: number,
+  peak = flowPeak(run),
+): DiagramFlow[] {
   const sample = run.series[second];
   if (!sample) return [];
+
+  if (run.measured_edges != null) {
+    const measured = new Set(run.measured_edges);
+    return graph.edges.flatMap((edge) => {
+      const id = edge.id ?? `${edge.source}->${edge.target}`;
+      if (!measured.has(id)) return [];
+      const rps = sample.edge_calls?.[id] ?? 0;
+      return [
+        {
+          from: edge.source,
+          to: edge.target,
+          rps,
+          measured: true,
+          errorShare: 0,
+          intensity: Math.min(1, rps / peak),
+        },
+      ];
+    });
+  }
+
+  // JAJ-129: las corridas antiguas y el modo demo conservan la estimación del editor.
   const load = endpointLoad(graph, run);
   const total = [...load.values()].reduce((sum, value) => sum + value, 0);
-  const peak = Math.max(1, ...run.series.map((item) => item.arrivals));
   const completed = sample.ok + sample.errors;
   const failing = completed ? sample.errors / completed : 0;
   const nodes = toNodes(graph, run, undefined, { second });
@@ -239,6 +271,7 @@ export function toFlows(graph: Graph, run: Run, second: number): DiagramFlow[] {
       from: edge.source,
       to: edge.target,
       rps,
+      measured: false,
       errorShare:
         pressured.has(edge.target) || pressured.has(edge.source) ? failing : 0,
       intensity: Math.min(1, rps / peak),

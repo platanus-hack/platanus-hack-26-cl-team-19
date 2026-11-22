@@ -27,7 +27,7 @@ const props = defineProps<{
   selectedId?: string | null;
   bottleneck?: Bottleneck | null;
   canExplain?: boolean;
-  /** Flujo estimado por conector en el segundo que se muestra (JAJ-129). */
+  /** Flujo por conector en el segundo visible. */
   flows?: DiagramFlow[];
   /** true mientras se reproduce la corrida: las partículas se mueven. */
   animating?: boolean;
@@ -277,7 +277,7 @@ const paths = computed(() =>
 );
 
 // Partículas del flujo (JAJ-129): representan flujo agregado, no requests individuales (JAJ-38).
-// La densidad sigue al req/s estimado y la velocidad es fija.
+// La densidad y el grosor siguen al flujo. La velocidad es fija.
 const MAX_PARTICLES = 8;
 const PARTICLE_SPEED = 90; // px/s
 const reducedMotion = usePreferredReducedMotion();
@@ -314,11 +314,12 @@ const particles = computed(() => {
         ...path,
         flow,
         duration,
-        title:
-          `≈ ${rpsFormat.format(flow.rps)} req/s, estimado a partir de la mezcla de endpoints` +
-          (flow.errorShare > 0
-            ? ` · ${percentFormat.format(flow.errorShare)} con error`
-            : ""),
+        title: flow.measured
+          ? `${rpsFormat.format(flow.rps)} llamadas/s simuladas`
+          : `≈ ${rpsFormat.format(flow.rps)} req/s, estimado a partir de la mezcla de endpoints` +
+            (flow.errorShare > 0
+              ? ` · ${percentFormat.format(flow.errorShare)} con error`
+              : ""),
         dots: Array.from({ length: count }, (_, index) => ({
           index,
           error: failing(index),
@@ -514,15 +515,22 @@ const alertOf = (status?: SaturationStatus) =>
                 <title>{{ item.title }}</title>
               </path>
               <path
-                v-if="prefersStaticParticles"
+                v-if="
+                  item.flow.measured
+                    ? item.flow.rps > 0
+                    : prefersStaticParticles
+                "
                 :d="item.d"
                 fill="none"
                 class="stroke-primary"
-                stroke-width="2"
+                :stroke-width="
+                  item.flow.measured ? 1 + 3 * item.flow.intensity : 2
+                "
+                data-testid="diagram-flow-stroke"
                 :stroke-opacity="0.25 + item.flow.intensity * 0.75"
                 :stroke-dasharray="item.flow.errorShare > 0 ? '4 3' : undefined"
               />
-              <template v-else>
+              <template v-if="!prefersStaticParticles">
                 <g
                   v-for="dot in item.dots"
                   :key="dot.index"
