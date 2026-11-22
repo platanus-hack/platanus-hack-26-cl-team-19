@@ -16,11 +16,11 @@ const css = readFileSync(
 );
 
 describe("temas de la app", () => {
-  it("ofrece cuatro temas con ids únicos y el de por defecto entre ellos", () => {
+  it("ofrece cinco temas con ids únicos y el de por defecto entre ellos", () => {
     const ids = APP_THEMES.map((theme) => theme.id);
 
-    expect(APP_THEMES).toHaveLength(4);
-    expect(new Set(ids).size).toBe(4);
+    expect(APP_THEMES).toHaveLength(5);
+    expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain(DEFAULT_APP_THEME);
   });
 
@@ -29,6 +29,11 @@ describe("temas de la app", () => {
       if (theme.id === DEFAULT_APP_THEME) continue;
       expect(css).toContain(`.dark[data-theme="${theme.id}"]`);
     }
+  });
+
+  it("conserva ambas variantes de la paleta clásica", () => {
+    expect(css).toContain(':root[data-theme="clasico"]');
+    expect(isAppThemeId("clasico")).toBe(true);
   });
 
   it("reconoce solo ids de tema válidos", () => {

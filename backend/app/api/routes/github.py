@@ -25,11 +25,11 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from app.agent.loop import model_for
 from app.api.auth import User, current_user, owner_of
-from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
+from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, UNAUTHORIZED, ApiError
 from app.api.routes.credentials import Provider, llm_key
 from app.github.client import GitHubApp, GitHubError, Repo
 from app.github.ingestion import Ingestion, IngestionJobs, run_add_repos, run_ingestion, team_token_cap
@@ -44,6 +44,10 @@ DEFAULT_FRONTEND_URL = "http://localhost:3000"
 
 class InstallUrl(BaseModel):
     url: str
+
+
+class SyncInstallationsRequest(BaseModel):
+    provider_token: SecretStr
 
 
 class InstallationOut(BaseModel):
@@ -249,6 +253,26 @@ def callback(
     for inst_id, account in visible.items():
         store.save_installation(inst_id, owner, account)
     return RedirectResponse(_frontend({"github": "ok", "account": ", ".join(visible.values())}), status_code=302)
+
+
+@router.post("/sync-installations", response_model=list[InstallationOut])
+def sync_installations(
+    body: SyncInstallationsRequest,
+    request: Request,
+    user: User | None = Depends(current_user),
+    github: GitHubApp = Depends(get_github),
+) -> list[InstallationOut]:
+    """Reconoce instalaciones autorizadas por el token de usuario de la GitHub App."""
+    if user is None:
+        raise ApiError(401, UNAUTHORIZED, "Inicia sesión para conectar GitHub.")
+    try:
+        visible = github.visible_installations(body.provider_token.get_secret_value(), require_app_match=True)
+    except GitHubError as e:
+        raise _github_error(e) from e
+
+    for installation_id, account in visible.items():
+        request.app.state.store.save_installation(installation_id, user.id, account)
+    return [InstallationOut(installation_id=i, account_login=account) for i, account in visible.items()]
 
 
 @router.get("/installations", response_model=list[InstallationOut])

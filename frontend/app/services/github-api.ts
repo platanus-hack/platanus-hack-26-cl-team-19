@@ -101,6 +101,11 @@ export function createGithubApi(
     // ya instalada: GitHub no redirige al cambiarla, así que se autoriza con OAuth (JAJ-57)
     authorizeUrl: () => fetchApi<{ url: string }>("/github/authorize-url"),
     connection: () => fetchApi<GithubConnection>("/github/connection"),
+    syncInstallations: (token: string) =>
+      fetchApi<GithubInstallation[]>("/github/sync-installations", {
+        method: "POST",
+        body: { provider_token: token },
+      }),
     installations: () =>
       fetchApi<GithubInstallation[]>("/github/installations"),
     repos: () => fetchApi<GithubRepo[]>("/github/repos"),

@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { EditorSection } from "./types";
 
-defineProps<{ active: EditorSection }>();
+const props = defineProps<{ active: EditorSection; hideReports?: boolean }>();
 
 const emit = defineEmits<{ change: [section: EditorSection] }>();
 
@@ -19,6 +19,10 @@ const sections = [
   { id: "versions", label: "Versiones", icon: History },
   { id: "reports", label: "Reportes", icon: FileText },
 ] as const satisfies { id: EditorSection; label: string; icon: unknown }[];
+
+const visibleSections = computed(() =>
+  props.hideReports ? sections.filter(({ id }) => id !== "reports") : sections,
+);
 </script>
 
 <template>
@@ -29,7 +33,7 @@ const sections = [
       aria-orientation="vertical"
       class="flex gap-1 md:flex-col"
     >
-      <Tooltip v-for="section in sections" :key="section.id">
+      <Tooltip v-for="section in visibleSections" :key="section.id">
         <TooltipTrigger as-child>
           <Button
             type="button"

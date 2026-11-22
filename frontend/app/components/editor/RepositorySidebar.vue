@@ -4,12 +4,10 @@ import {
   BookMarked,
   ChevronsUpDown,
   LogOut,
-  Monitor,
-  Moon,
   Plus,
-  Sun,
 } from "@lucide/vue";
 import AppWordmark from "@/components/AppWordmark.vue";
+import ThemeOptions from "@/components/ThemeOptions.vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -17,8 +15,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -57,6 +53,7 @@ const props = withDefaults(
     /** El texto del botón +: «Agregar repositorio» cuando suma repos al proyecto abierto. */
     connectLabel?: string;
     disabled?: boolean;
+    embedded?: boolean;
     variant?: "sidebar" | "inset" | "floating";
   }>(),
   {
@@ -76,12 +73,6 @@ const emit = defineEmits<{
 }>();
 
 const { isMobile } = useSidebar();
-const colorMode = useColorMode();
-const themes = [
-  { value: "system", label: "Sistema", icon: Monitor },
-  { value: "light", label: "Claro", icon: Sun },
-  { value: "dark", label: "Oscuro", icon: Moon },
-] as const;
 
 const initials = computed(() =>
   (props.user?.name ?? "")
@@ -93,7 +84,11 @@ const initials = computed(() =>
 </script>
 
 <template>
-  <Sidebar collapsible="icon" :variant="variant">
+  <Sidebar
+    collapsible="icon"
+    :variant="variant"
+    :class="embedded ? 'absolute h-full' : undefined"
+  >
     <SidebarHeader>
       <div class="flex items-center gap-1">
         <SidebarMenu class="min-w-0 flex-1">
@@ -113,9 +108,6 @@ const initials = computed(() =>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <div class="group-data-[collapsible=icon]:hidden">
-          <ThemeSwitcher />
-        </div>
       </div>
     </SidebarHeader>
 
@@ -250,26 +242,14 @@ const initials = computed(() =>
                 </DropdownMenuSub>
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
-                    <component
-                      :is="
-                        themes.find(
-                          (theme) => theme.value === colorMode.preference,
-                        )?.icon ?? Monitor
-                      "
+                    <span
+                      class="size-4 rounded-full border border-border bg-background"
                       aria-hidden="true"
                     />
                     Tema
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                    <DropdownMenuRadioGroup v-model="colorMode.preference">
-                      <DropdownMenuRadioItem
-                        v-for="theme in themes"
-                        :key="theme.value"
-                        :value="theme.value"
-                      >
-                        {{ theme.label }}
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
+                    <ThemeOptions />
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               </DropdownMenuGroup>

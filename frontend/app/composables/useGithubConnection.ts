@@ -44,7 +44,10 @@ export function githubErrorMessage(cause: unknown): string {
  * `immediate: false` no pide nada a GitHub hasta llamar `loadRepos()`: así una página que quizá
  * no use la conexión (el sheet de Nuevo proyecto, el onboarding que redirige) no gasta rate limit.
  */
-export function useGithubConnection({ immediate = true } = {}) {
+export function useGithubConnection({
+  immediate = true,
+  detectInstallation = false,
+} = {}) {
   const route = useRoute();
   const auth = useSupabaseAuth();
   const baseURL = useRuntimeConfig().public.apiBase.trim();
@@ -156,15 +159,54 @@ export function useGithubConnection({ immediate = true } = {}) {
     extras.value = extras.value.filter((extra) => extra.key !== key);
   }
 
-  async function loadRepos(quiet = false) {
-    if (!api) return;
+  const installationCheck = ref<"unknown" | "unavailable" | "empty" | "found">(
+    "unknown",
+  );
+
+  async function syncInstallations() {
+    if (!api) return false;
+    try {
+      const token = await auth.getGitHubProviderToken();
+      if (token) {
+        const found = (await api.syncInstallations(token)).length > 0;
+        installationCheck.value = found ? "found" : "empty";
+        return found;
+      }
+    } catch {
+      // Si venció el token de GitHub, se puede volver a iniciar sesión.
+    }
+    installationCheck.value = "unavailable";
+    return false;
+  }
+
+  let loadingRepos: Promise<void> | undefined;
+
+  function loadRepos(quiet = false) {
+    if (!api) return Promise.resolve();
+    loadingRepos ??= refreshRepos(api, quiet).finally(() => {
+      loadingRepos = undefined;
+    });
+    return loadingRepos;
+  }
+
+  async function refreshRepos(
+    api: ReturnType<typeof createGithubApi>,
+    quiet: boolean,
+  ) {
     if (!quiet) loading.value = true;
     error.value = "";
     try {
-      const snapshot = await api.connection();
+      let snapshot = await api.connection();
+      if (
+        detectInstallation &&
+        !snapshot.installations.length &&
+        (await syncInstallations())
+      )
+        snapshot = await api.connection();
       repos.value = snapshot.repos;
       installations.value = snapshot.installations;
       revoked.value = snapshot.revoked;
+      if (installations.value.length) awaitingGithub.value = false;
       if (!repos.value.some((item) => item.full_name === repo.value))
         repo.value = repos.value[0]?.full_name ?? "";
       if (installations.value.length && !installHref.value)
@@ -208,9 +250,27 @@ export function useGithubConnection({ immediate = true } = {}) {
     }
   }
 
+  async function continueConnection() {
+    if (!detectInstallation) return authorize();
+    await loadRepos();
+    if (installations.value.length || error.value) return;
+    if (installationCheck.value === "empty") {
+      error.value =
+        "Aún no encontramos una instalación autorizada. Revisa que diste acceso a Branchpoint en GitHub.";
+      return;
+    }
+    connecting.value = true;
+    try {
+      await auth.signInWithGitHub();
+    } catch (cause) {
+      error.value = githubErrorMessage(cause);
+      connecting.value = false;
+    }
+  }
+
   /** `connect()` instala la app en otra pestaña; `connect(true)` la liga a la cuenta. */
   function connect(alreadyInstalled = false) {
-    return alreadyInstalled ? authorize() : install();
+    return alreadyInstalled ? continueConnection() : install();
   }
 
   useEventListener(

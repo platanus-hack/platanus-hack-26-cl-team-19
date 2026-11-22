@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import IndexPage from "../../app/pages/index.vue";
 
 describe("index page", () => {
-  it("links to projects from the home page", async () => {
+  it("shows the public animation and keeps project access gated", async () => {
     const wrapper = await mountSuspended(IndexPage);
 
-    expect(wrapper.get("h1").text()).toBe("branchpoint.");
-    expect(wrapper.get('a[href="/projects"]').text()).toBe("Ver proyectos");
+    expect(wrapper.get("h1").text()).toBe(
+      "Simula cómo responde tu arquitectura.",
+    );
+    expect(wrapper.find('a[href="/projects"]').exists()).toBe(false);
+    expect(wrapper.find("#editor-en-vivo").exists()).toBe(true);
+    expect(wrapper.get("button[disabled]").text()).toBe("Probar editor");
   });
 });
