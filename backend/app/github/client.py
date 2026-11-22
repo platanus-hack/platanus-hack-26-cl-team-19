@@ -166,8 +166,16 @@ class GitHubApp:
 
     def list_branches(self, installation_id: int, full_name: str) -> list[str]:
         token = self.installation_token(installation_id, full_name.split("/", 1)[1])
-        data = self._request("GET", f"/repos/{full_name}/branches?per_page=100", token, what="branches")
-        return [b["name"] for b in data]
+        branches: list[str] = []
+        page = 1
+        while True:
+            batch = self._request(
+                "GET", f"/repos/{full_name}/branches?per_page=100&page={page}", token, what="branches"
+            )
+            branches.extend(branch["name"] for branch in batch)
+            if len(batch) < 100:
+                return branches
+            page += 1
 
     def fetch(self, installation_id: int, full_name: str, ref: str) -> tuple[str, bytes]:
         """El SHA del commit de ``ref`` y su tarball. Pide el SHA primero para analizar y guardar
