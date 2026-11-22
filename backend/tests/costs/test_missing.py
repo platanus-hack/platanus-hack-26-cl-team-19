@@ -41,8 +41,8 @@ def test_local_api_and_db_are_flagged_first(template):
     est = estimate_cost(raw)
     assert est.missing == ["api", "db"]
     w = est.warnings[0]
-    assert w.startswith("Sin precio para la API (local) ni la DB (local): el total no las incluye")
-    assert "la API en fargate, fly o render y la DB en neon, rds_postgres o supabase" in w
+    assert w.startswith("Sin precio para la API (Local) ni la DB (Local): el total no las incluye")
+    assert "la API en AWS Fargate, Fly.io o Render y la DB en Amazon RDS (PostgreSQL), Neon o Supabase" in w
 
 
 def test_provider_without_prices_is_flagged(template):
@@ -50,7 +50,7 @@ def test_provider_without_prices_is_flagged(template):
     assert est.missing == ["api"]
     w = est.warnings[0]
     assert "la API (heroku): el total no la incluye" in w  # singular
-    assert w.endswith("indica dónde se desplegaría: la API en fargate, fly o render.")
+    assert w.endswith("indica dónde se desplegaría: la API en AWS Fargate, Fly.io o Render.")
 
 
 def test_local_replicas_do_not_change_cost_and_summary_says_why(template):

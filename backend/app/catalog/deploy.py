@@ -44,6 +44,19 @@ APP_TARGETS = {
 }
 FRONTEND_TARGETS = {"vercel": "vercel", "cloudfront": "cloudfront"}
 
+# Nombres visibles de los proveedores: los ids (rds_postgres, fly…) no se le muestran al usuario (JAJ-151)
+PROVIDER_LABELS = {
+    "supabase": "Supabase",
+    "neon": "Neon",
+    "rds_postgres": "Amazon RDS (PostgreSQL)",
+    "fargate": "AWS Fargate",
+    "fly": "Fly.io",
+    "render": "Render",
+    "vercel": "Vercel",
+    "cloudfront": "Amazon CloudFront",
+    "local": "Local",
+}
+
 
 class UnknownPlan(ValueError):
     """El proveedor o el plan no están en el catálogo. El mensaje dice cuáles hay."""
