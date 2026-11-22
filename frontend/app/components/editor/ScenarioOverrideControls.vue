@@ -44,13 +44,21 @@ const visible = computed(() => {
     );
   return ranked.value.slice(0, TOP);
 });
+
+/** «GET /articles/{slug}» → método aparte y la ruta, que se corta con el nombre completo en el título. */
+function endpointParts(endpointId: string) {
+  const [method, ...rest] = endpointId.split(" ");
+  return rest.length && /^[A-Z]+$/.test(method ?? "")
+    ? { method, path: rest.join(" ") }
+    : { method: "", path: endpointId };
+}
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
     <fieldset
       v-if="endpoints.length"
-      class="flex flex-col gap-2 border-t border-border pt-3"
+      class="flex min-w-0 flex-col gap-2 border-t border-border pt-3"
     >
       <legend class="mb-1 pe-2 text-xs font-semibold">
         Mezcla de endpoints
@@ -76,9 +84,17 @@ const visible = computed(() => {
       >
         <Label
           :for="`${id}-endpoint-${endpoints.indexOf(endpoint)}`"
-          class="min-w-0 text-xs wrap-anywhere"
+          class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs"
+          :title="endpoint.id"
         >
-          {{ endpoint.id }}
+          <span
+            v-if="endpointParts(endpoint.id).method"
+            class="shrink-0 rounded-sm border border-border px-1 font-mono text-[0.625rem] leading-4 font-normal text-muted-foreground"
+            >{{ endpointParts(endpoint.id).method }}</span
+          >
+          <span class="truncate font-mono">{{
+            endpointParts(endpoint.id).path
+          }}</span>
         </Label>
         <div class="relative w-20 shrink-0">
           <Input
@@ -133,7 +149,7 @@ const visible = computed(() => {
 
     <fieldset
       v-if="dependencies.length"
-      class="flex flex-col gap-2 border-t border-border pt-3"
+      class="flex min-w-0 flex-col gap-2 border-t border-border pt-3"
     >
       <legend class="mb-1 pe-2 text-xs font-semibold">
         Demora de dependencias
@@ -163,8 +179,12 @@ const visible = computed(() => {
       </div>
     </fieldset>
 
-    <fieldset class="flex flex-col gap-2 border-t border-border pt-3">
+    <fieldset class="flex min-w-0 flex-col gap-2 border-t border-border pt-3">
       <legend class="mb-1 pe-2 text-xs font-semibold">Datos de negocio</legend>
+      <p class="text-xs text-muted-foreground">
+        Opcional. Con estos datos se estiman las ventas en juego cuando el
+        sistema falla.
+      </p>
       <div class="flex flex-col gap-1.5">
         <Label :for="`${id}-conversion`" class="text-xs">Conversión (%)</Label>
         <Input
@@ -174,6 +194,7 @@ const visible = computed(() => {
           min="0"
           max="100"
           step="any"
+          placeholder="Ej. 3"
           :disabled="disabled"
           class="h-8"
         />
@@ -188,6 +209,7 @@ const visible = computed(() => {
           type="number"
           min="0"
           step="any"
+          placeholder="Ej. 40"
           :disabled="disabled"
           class="h-8"
         />

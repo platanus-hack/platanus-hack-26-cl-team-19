@@ -26,6 +26,10 @@ const barColor = computed(() => {
       return "bg-foreground";
   }
 });
+
+/** El motor nombra los recursos en minúscula para usarlos en frases («hilos de la API»); como rótulo van con mayúscula. */
+const sentenceCase = (text: string) =>
+  text.charAt(0).toLocaleUpperCase("es") + text.slice(1);
 </script>
 
 <template>
@@ -60,7 +64,7 @@ const barColor = computed(() => {
         <div class="flex flex-col gap-2">
           <div class="flex items-baseline justify-between gap-3">
             <dt class="truncate text-muted-foreground">
-              {{ node.capacity.label }}
+              {{ sentenceCase(node.capacity.label) }}
             </dt>
             <dd class="font-mono whitespace-nowrap tabular-nums">
               <template v-if="node.capacity.unit === '%'"
@@ -93,7 +97,9 @@ const barColor = computed(() => {
           class="flex flex-col gap-0.5"
         >
           <div class="flex items-center justify-between gap-3">
-            <dt class="truncate text-muted-foreground">{{ metric.label }}</dt>
+            <dt class="truncate text-muted-foreground">
+              {{ sentenceCase(metric.label) }}
+            </dt>
             <dd class="flex items-center gap-1 whitespace-nowrap">
               <span
                 v-if="metric.reading.kind === 'value'"
