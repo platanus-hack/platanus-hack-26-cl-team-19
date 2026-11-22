@@ -54,6 +54,7 @@ from app.costs import (
 from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
+from app.reports import es
 from app.storage.attachments import StorageError
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -461,10 +462,7 @@ def compare_summary(
     return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b) + _overrides_sentence(run_a)
 
 
-def _usd(x: float, decimals: int = 2) -> str:
-    """Un monto en US$ con el formato del editor (es-CL): punto de miles y coma decimal, 'US$1.234,50'."""
-    s = f"{abs(x):,.{decimals}f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    return f"US${s}"
+_usd = es.usd  # 'US$1.234,50', el formato del editor (JAJ-156)
 
 
 def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:

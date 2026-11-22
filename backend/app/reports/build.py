@@ -19,6 +19,7 @@ from typing import Any
 from app.costs import CostEstimate, FailureCost
 from app.models.compare import model_changes
 from app.models.run import Run
+from app.reports import es
 
 REPORT_SCHEMA = "branchpoint.report/v1"
 OVERLOADED = 0.8
@@ -41,7 +42,14 @@ _THRESHOLDS = {
         "source": "Umbral elegido por el equipo: un componente pagado que no llega a 30 % ni en su pico está holgado",
     },
 }
-_COMPONENT_NAMES = {"api": "API", "db": "Base de datos"}
+_COMPONENT_NAMES = {"api": "API", "db": "Base de datos", "cache": "Caché", "frontend": "Frontend"}
+# el nombre en una frase, con su artículo, y si es femenino (para "sobrecargada" o "sobrecargado")
+_IN_SENTENCE = {
+    "api": ("la API", True),
+    "db": ("la base de datos", True),
+    "cache": ("la caché", True),
+    "frontend": ("el frontend", False),
+}
 
 
 def _now() -> str:
@@ -86,7 +94,8 @@ def _components(run: Run, cost: CostEstimate) -> list[dict[str, Any]]:
                     saturates,
                     "req/s",
                     "ESTIMADO",
-                    f"req/s de la corrida ({offered:g}) ÷ uso promedio ({r.utilization:.1%}): aproximación lineal",
+                    f"req/s de la corrida ({es.num(offered, 2)}) ÷ uso promedio ({es.pct(r.utilization)}): "
+                    "aproximación lineal",
                 )
                 if saturates is not None
                 else None,
@@ -108,14 +117,14 @@ def _components(run: Run, cost: CostEstimate) -> list[dict[str, Any]]:
             status, why = (
                 "overloaded",
                 (
-                    f"{busiest['label']} al {busiest['utilization']:.0%} de uso promedio"
+                    f"{busiest['label']} al {es.pct(busiest['utilization'], 0)} de uso promedio"
                     + (" y quedaron requests sin atender" if unanswered and node == bottleneck_node else "")
                 ),
             )
         elif priced and peak < IDLE:
-            status, why = "idle", f"no pasa del {peak:.0%} de uso ni en su pico y cuesta US${usd:,.2f}/mes"
+            status, why = "idle", f"no pasa del {es.pct(peak, 0)} de uso ni en su pico y cuesta {es.usd(usd)}/mes"
         else:
-            status, why = "ok", f"{busiest['label']} al {busiest['utilization']:.0%} de uso promedio"
+            status, why = "ok", f"{busiest['label']} al {es.pct(busiest['utilization'], 0)} de uso promedio"
         # ya saturado (uso promedio cerca del 100 %): no hay margen que estimar
         saturating = [r["saturates_at_rps"] for r in resources if r["saturates_at_rps"] and r["utilization"] < 0.95]
         first = min(saturating, key=lambda s: s["value"]) if saturating else None
@@ -134,8 +143,43 @@ def _components(run: Run, cost: CostEstimate) -> list[dict[str, Any]]:
                 "resources": resources,
             }
         )
+    out += _cost_only_components(run, cost, cost_by_node, set(by_node))
     order = {"overloaded": 0, "idle": 1, "ok": 2}
-    return sorted(out, key=lambda c: (order[c["status"]], -c["utilization"]))
+    return sorted(out, key=lambda c: (order[c["status"]], -(c["utilization"] or 0.0)))
+
+
+def _cost_only_components(
+    run: Run, cost: CostEstimate, cost_by_node: dict[str, float], simulated: set[str]
+) -> list[dict[str, Any]]:
+    """Los componentes que cuestan pero no tienen un recurso en el motor, como la caché o el frontend (JAJ-164).
+
+    Sin esto, la tabla dejaba fuera a la caché aunque el diagrama y Costos la mostraran. Van con estado ``ok`` y
+    sin uso (``None``, que el editor muestra como «—»): el motor no simula su ocupación. La caché dice sus
+    aciertos, que sí salen de la corrida."""
+    out = []
+    for node, usd in cost_by_node.items():
+        if node in simulated:
+            continue
+        why = "El motor no simula su uso: aparece por su costo"
+        if node == "cache" and run.cache is not None and run.cache.hit_rate is not None:
+            total = run.cache.hits + run.cache.misses
+            why = f"Acertó {es.pct(run.cache.hit_rate)} de {es.num(total, 0)} consultas. {why}"
+        out.append(
+            {
+                "id": node,
+                "label": _component_label(node),
+                "status": "ok",
+                "why": why,
+                "utilization": None,
+                "peak_utilization": None,
+                "usd_month": round(usd, 2),
+                "priced": node not in cost.missing and usd > 0,
+                "saturates_at_rps": None,
+                "headroom_x": None,
+                "resources": [],
+            }
+        )
+    return out
 
 
 def _assumptions(model: dict[str, Any], scenario_source: str | None = None) -> dict[str, Any]:
@@ -153,38 +197,80 @@ def _assumptions(model: dict[str, Any], scenario_source: str | None = None) -> d
     return {"total": total, "by_source": kept[:TOP_ASSUMPTIONS]}
 
 
+def _in_sentence(node: str) -> tuple[str, bool]:
+    """'la API', 'la base de datos', 'la cola emails'…, y si es femenino."""
+    if node.startswith("queue:"):
+        return f"la cola {node.split(':', 1)[1]}", True
+    return _IN_SENTENCE.get(node, (f"el componente {node}", False))
+
+
+def _join(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " y " + names[-1]
+
+
+def _state_sentence(nodes: list[str], singular: tuple[str, str], plural: tuple[str, str]) -> str:
+    """'La API está sobrecargada.', 'La API y la base de datos tienen holgura para este tráfico.'"""
+    named = [_in_sentence(n) for n in nodes]
+    feminine = all(f for _, f in named)
+    verb, word = singular if len(named) == 1 else plural
+    word = word.format(a="a" if feminine else "o")
+    text = f"{_join([n for n, _ in named])} {verb}{word}."
+    return text[0].upper() + text[1:]
+
+
+def _throughput(res: dict[str, Any], sc: dict[str, Any]) -> str:
+    """'atiende 26,2 req/s' o, si atiende menos que la tasa del escenario, 'atiende en promedio 21,9 req/s (el
+    escenario llega a 26,2 req/s)' (JAJ-164). Sin la aclaración, una corrida sin errores parecía perder
+    requests; la diferencia sale de la forma del tráfico (subida y bajada) o, si el sistema no alcanza, de
+    las requests que quedaron en fila, que explica la frase de saturación."""
+    thr, rps = res["throughput_rps"], sc["rps"]
+    if rps and thr < rps * 0.95:
+        return f"atiende en promedio {es.num(thr)} req/s (el escenario llega a {es.num(rps)} req/s)"
+    return f"atiende {es.num(thr)} req/s"
+
+
 def _conclusion(r: dict[str, Any]) -> str:
+    """La conclusión del reporte, armada con una plantilla y con los números en formato es-CL (JAJ-164).
+
+    Ejemplo: 'En cyberday, v3 atiende en promedio 21,9 req/s (el escenario llega a 26,2 req/s), con p95 de
+    15 ms y sin errores. El recurso más ocupado es CPU de la API (40 %). La API tiene holgura para este
+    tráfico. Cuesta US$68,91/mes sin contar la base de datos, que no tiene precio.'"""
     res, sc = r["results"], r["scenario"]
     p95 = res["latency"]["p95_ms"]
-    where = sc["label"] if sc["custom"] else f"{sc['label']} ({sc['rps']:g} req/s)"
-    parts = [
-        f"En {where}, v{r['version']['number']} atiende {res['throughput_rps']:g} req/s"
-        + (f" con p95 de {p95:,.0f} ms" if p95 is not None else "")
-        + f" y {res['error_rate']:.1%} de errores."
-    ]
+    saturated = bool(res["saturation"] and res["saturation"].get("saturated"))
+    if saturated:  # la tasa de error no cuenta las que siguen en fila (JAJ-89): no decir "sin errores"
+        errors = f"{es.pct(res['error_rate'])} de errores entre las que terminaron"
+    else:
+        errors = "sin errores" if res["error_rate"] == 0 else f"{es.pct(res['error_rate'])} de errores"
+    head = f"En {sc['label']}, v{r['version']['number']} {_throughput(res, sc)}"
+    parts = [head + (f", con p95 de {es.num(p95, 0)} ms y {errors}." if p95 is not None else f", {errors}.")]
     b = r["bottleneck"]
     if b.get("resource"):
         parts.append(
-            f"El recurso más ocupado es {b['label']} ({b['utilization']:.0%})"
+            f"El recurso más ocupado es {b['label']} ({es.pct(b['utilization'], 0)})"
             + (f", sobre todo por {b['line']}" if b.get("line") else "")
             + "."
         )
-    if res["saturation"] and res["saturation"].get("saturated"):
-        parts.append(f"El sistema no alcanza a atender este tráfico: {res['saturation']['message']}")
-    over = [c["label"] for c in r["components"] if c["status"] == "overloaded"]
-    idle = [c["label"] for c in r["components"] if c["status"] == "idle"]
+    if saturated:  # el mensaje ya parte con "El sistema no alcanza a atender este tráfico: …"
+        parts.append(res["saturation"]["message"])
+    over = [c["id"] for c in r["components"] if c["status"] == "overloaded"]
+    idle = [c["id"] for c in r["components"] if c["status"] == "idle"]
     if over:
-        parts.append(f"Sobrecargado: {', '.join(over)}.")
+        parts.append(_state_sentence(over, ("está sobrecargad", "{a}"), ("están sobrecargad", "{a}s")))
     if idle:
-        parts.append(f"Holgado para este tráfico: {', '.join(idle)}.")
+        parts.append(
+            _state_sentence(idle, ("tiene holgura", " para este tráfico"), ("tienen holgura", " para este tráfico"))
+        )
     margins = [c["headroom_x"] for c in r["components"] if c["headroom_x"]]
     if margins and not over:
-        parts.append(f"El primer recurso se saturaría cerca de {min(margins):g}× este tráfico (estimado).")
+        parts.append(f"El primer recurso se saturaría cerca de {es.num(min(margins))}× este tráfico (estimado).")
     total = r["costs"]["total"]
     if total and total.get("value") is not None:
+        missing = [_in_sentence(c)[0] for c in r["costs"]["missing"]]
+        unpriced = f", que no {'tienen' if len(missing) > 1 else 'tiene'} precio" if missing else ""
         parts.append(
-            f"Cuesta US${total['value']:,.2f}/mes"
-            + (" sin contar " + ", ".join(r["costs"]["missing"]) + " (sin precio)" if r["costs"]["missing"] else "")
+            f"Cuesta {es.usd(total['value'])}/mes"
+            + (f" sin contar {' ni '.join(missing)}{unpriced}" if missing else "")
             + "."
         )
     return " ".join(parts)
@@ -217,7 +303,7 @@ def build_report(
         "version": version,
         "scenario": {
             "name": params.get("scenario"),
-            "label": f"personalizado ({run.rps:g} req/s)" if custom_rps else params.get("scenario"),
+            "label": f"personalizado ({es.num(run.rps, 2)} req/s)" if custom_rps else params.get("scenario"),
             "custom": custom_rps,
             "rps": round(run.rps, 2),
             "seed": run.seed,
@@ -370,13 +456,13 @@ def _comparison_conclusion(r: dict[str, Any]) -> str:
         f"{b['report_id'][:8]} (v{b['version']}, {b['scenario']['label']})."
     ]
     if d["p95_ms"]["diff"] is not None:
-        parts.append(f"p95: {d['p95_ms']['a']:,.0f} → {d['p95_ms']['b']:,.0f} ms.")
-    parts.append(f"Errores: {d['error_rate']['a']:.1%} → {d['error_rate']['b']:.1%}.")
+        parts.append(f"p95: {es.num(d['p95_ms']['a'], 0)} → {es.num(d['p95_ms']['b'], 0)} ms.")
+    parts.append(f"Errores: {es.pct(d['error_rate']['a'])} → {es.pct(d['error_rate']['b'])}.")
     if d["usd_month"]["diff"] is not None:
         sign = "+" if d["usd_month"]["diff"] >= 0 else "−"
         parts.append(
-            f"Costo: US${d['usd_month']['a']:,.2f} → US${d['usd_month']['b']:,.2f}/mes "
-            f"({sign}US${abs(d['usd_month']['diff']):,.2f})."
+            f"Costo: {es.usd(d['usd_month']['a'])} → {es.usd(d['usd_month']['b'])}/mes "
+            f"({sign}{es.usd(d['usd_month']['diff'])})."
         )
     if a["bottleneck"] != b["bottleneck"]:
         parts.append(f"El cuello de botella pasa de {a['bottleneck'] or 'ninguno'} a {b['bottleneck'] or 'ninguno'}.")
