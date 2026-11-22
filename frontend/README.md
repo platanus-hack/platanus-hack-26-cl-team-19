@@ -72,9 +72,10 @@ Tres colores de marca, fuera de la escala de grises:
 - `primary` (índigo): acción principal, foco y selección.
 - `highlight` (magenta): lo que bifurca o propone el agente, como "Aplicar" en
   una propuesta y el lado nuevo de un diff. Úsalo poco, para que se note.
-- `info` (cian): datos y aristas del diagrama. Acompaña el color de
-estado con una etiqueta visible y un icono. Los valores de las muestras son
-ilustrativos.
+- `info` (cian): datos y aristas del diagrama.
+
+Acompaña el color de estado con una etiqueta visible y un icono. Los valores de
+las muestras son ilustrativos.
 
 Tailwind 4 y el registro de shadcn-vue se configuran en este proyecto. La muestra
 de fundamentos corresponde a JAJ-36. El catálogo de componentes reutilizables
