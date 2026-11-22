@@ -34,6 +34,7 @@ from app.api.schemas import (
     RunParams,
     ScenarioIn,
     ScenarioOut,
+    ScenarioTrafficStep,
     VersionDetail,
     VersionResults,
     VersionResultsRequest,
@@ -293,6 +294,11 @@ def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, param
     except ValueError as e:
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from None
     update: dict = {"rps": rate}
+    # Un perfil explícito por tramos puede reemplazar el guardado. El preset "pico" del editor
+    # para cyberday cede al escenario elástico si el usuario editó ese escenario.
+    if scenario.traffic_step is not None and not isinstance(params.traffic_profile, list):
+        step = ScenarioTrafficStep.model_validate(scenario.traffic_step)
+        update.update(traffic_profile=step.profile(), duration_s=step.duration_s)
     for field, saved in scenario.overrides().items():
         if getattr(params, field) is None:
             update[field] = saved
@@ -306,6 +312,7 @@ def _scenario_out(s: ProjectScenario) -> ScenarioOut:
         multiplier=s.multiplier,
         rps=s.rps,
         description=s.description,
+        traffic_step=ScenarioTrafficStep.model_validate(s.traffic_step) if s.traffic_step is not None else None,
         endpoint_weights=s.endpoint_weights,
         slowdowns=s.slowdowns,
         business=s.business,
@@ -342,6 +349,8 @@ def put_scenario(project_id: str, name: str, req: ScenarioIn, store: ProjectStor
         )
     if (req.multiplier is None) == (req.rps is None):
         raise ApiError(422, INVALID_PARAMETERS, "Manda multiplier (× el pico) o rps (req/s fijas), uno de los dos.")
+    if req.traffic_step is not None and req.rps is None:
+        raise ApiError(422, INVALID_PARAMETERS, "Define la tasa base en req/s para un escenario elástico.")
     if req.business is not None and not req.business.model_dump(exclude_none=True):
         req = req.model_copy(update={"business": None})  # {} es lo mismo que no mandarlo
     scenario = ProjectScenario(
@@ -349,6 +358,7 @@ def put_scenario(project_id: str, name: str, req: ScenarioIn, store: ProjectStor
         req.multiplier,
         req.rps,
         req.description,
+        traffic_step=req.traffic_step.model_dump() if req.traffic_step is not None else None,
         endpoint_weights=req.endpoint_weights or None,
         slowdowns=req.slowdowns or None,
         business=req.business.model_dump(exclude_none=True) if req.business else None,

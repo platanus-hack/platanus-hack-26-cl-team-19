@@ -83,6 +83,7 @@ class ProjectScenario:
     endpoint_weights: dict[str, float] | None = None
     slowdowns: dict[str, float] | None = None
     business: dict[str, float] | None = None
+    traffic_step: dict[str, int | float] | None = None
 
     def overrides(self) -> dict[str, Any]:
         """Los reemplazos no vacíos, como se guardan en ``scenarios.overrides``."""

@@ -254,6 +254,7 @@ export interface NodeFrame {
 
 export interface SimulationSample {
   incoming: number;
+  targetRps?: number | null;
   successful: number;
   /** `null` cuando la carga está tan cerca del límite que el p95 no es fiable. */
   p95: number | null;

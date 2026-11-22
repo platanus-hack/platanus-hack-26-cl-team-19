@@ -3,6 +3,7 @@ export interface ChartSeries {
   id: string;
   label: string;
   values: (number | null)[];
+  stepped?: boolean;
   /** Serie secundaria: trazo punteado y tono atenuado. */
   secondary?: boolean;
 }
@@ -35,7 +36,7 @@ const x = (index: number) =>
 const y = (value: number) => 100 - (value / max.value) * 100;
 
 /** Segmentos separados donde falta valor fiable. */
-function pathOf(values: (number | null)[]) {
+function pathOf({ values, stepped }: ChartSeries) {
   let d = "";
   let open = false;
   values.forEach((value, index) => {
@@ -43,7 +44,10 @@ function pathOf(values: (number | null)[]) {
       open = false;
       return;
     }
-    d += `${open ? "L" : "M"} ${x(index)} ${y(value)} `;
+    d +=
+      open && stepped
+        ? `H ${x(index)} V ${y(value)} `
+        : `${open ? "L" : "M"} ${x(index)} ${y(value)} `;
     open = true;
   });
   return d.trim();
@@ -164,7 +168,7 @@ const valueText = (value: number | null | undefined) =>
           <path
             v-for="serie in [...series].reverse()"
             :key="serie.id"
-            :d="pathOf(serie.values)"
+            :d="pathOf(serie)"
             fill="none"
             stroke-width="2"
             stroke-linejoin="round"

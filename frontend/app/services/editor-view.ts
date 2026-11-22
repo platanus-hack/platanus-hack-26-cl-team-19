@@ -62,7 +62,9 @@ export function toScenarios(
       ...scenario,
       ...model.version_scenarios?.[scenario.name],
     };
-    const rate = rps ?? peak * (multiplier ?? 0);
+    const rate =
+      (rps ?? peak * (multiplier ?? 0)) *
+      (scenario.traffic_step?.multiplier ?? 1);
     return {
       id: name,
       label: scenarioLabel(name),
@@ -371,6 +373,7 @@ export function toPlayback(run: Run) {
     const completed = sample.ok + sample.errors;
     return {
       incoming: sample.arrivals,
+      targetRps: sample.target_rps,
       successful: sample.ok,
       p95:
         sample.latency.p95_ms === null
