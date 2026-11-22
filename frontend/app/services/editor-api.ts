@@ -97,7 +97,14 @@ export interface ScenarioOverrides {
   business?: { conversion?: number; ticket_usd?: number };
 }
 
+export interface ScenarioTrafficStep {
+  at_s: number;
+  multiplier: number;
+  duration_s: number;
+}
+
 export interface ProjectScenarioInput extends ScenarioOverrides {
+  traffic_step?: ScenarioTrafficStep | null;
   multiplier: number | null;
   rps: number | null;
   description: string | null;
@@ -159,6 +166,7 @@ export interface Run {
   };
   series: {
     arrivals: number;
+    target_rps?: number | null;
     ok: number;
     errors: number;
     latency: { p95_ms: number | null };

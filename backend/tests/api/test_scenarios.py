@@ -14,7 +14,7 @@ SAMPLE = "full-stack-fastapi-template"
 RUN = {"seed": 1, "duration_s": 5}
 PEAK = 13.12  # traffic.peak_rps del template
 # los reemplazos de JAJ-131 vienen en null cuando el escenario no los trae
-NO_OVERRIDES = {"endpoint_weights": None, "slowdowns": None, "business": None}
+NO_OVERRIDES = {"endpoint_weights": None, "slowdowns": None, "business": None, "traffic_step": None}
 
 
 @pytest.fixture(params=["memoria", "postgres"])
@@ -87,6 +87,31 @@ def test_fixed_rps_is_the_same_in_every_version(client, pid):
     assert cmp["run_a"]["rps"] == cmp["run_b"]["rps"] == 50
 
 
+def test_elastic_scenario_saves_and_runs_an_instant_jump(client, pid):
+    url = f"/projects/{pid}/scenarios/cyberday"
+    step = {"at_s": 30, "multiplier": 10, "duration_s": 60}
+    saved = client.put(url, json={"rps": 100, "traffic_step": step})
+    assert saved.status_code == 200, saved.text
+    assert client.get(url).json()["traffic_step"] == step
+    # El editor todavía envía el preset de cyberday, aun si se editó el escenario.
+    version = f"/projects/{pid}/versions/1"
+    params = {"scenario": "cyberday", "seed": 1, "arrivals": "uniform", "traffic_profile": "pico"}
+    report = client.post(f"{version}/reports", json=params)
+    assert report.status_code == 201, report.text
+    response = client.post(f"{version}/results", json=params)
+    assert response.status_code == 200, response.text
+    assert response.headers[RUN_CACHE_HEADER] == "hit"
+    run = response.json()["run"]
+    series = run["series"]
+    assert [sample["target_rps"] for sample in series] == [100] * 30 + [1000] * 30
+    assert series[29]["arrivals"] == pytest.approx(100, abs=1)
+    assert series[30]["arrivals"] == pytest.approx(1000, abs=1)
+    assert run["traffic_profile"] == [
+        {"start_s": 0, "end_s": 30, "from_rps": 100, "to_rps": 100},
+        {"start_s": 30, "end_s": 60, "from_rps": 1000, "to_rps": 1000},
+    ]
+
+
 def test_editing_a_scenario_does_not_return_the_old_run(client, pid):
     """La tasa final entra en la cache_key (JAJ-75): editar el escenario simula de nuevo."""
     first = client.post(f"/projects/{pid}/versions/1/runs", json={**RUN, "scenario": "cyberday"})
@@ -118,6 +143,9 @@ def test_put_replaces_and_switches_rate_kind(client, pid):
         ("x", {"multiplier": 2, "rps": 10}),
         ("x", {"multiplier": 0}),
         ("x", {"rps": -1}),
+        ("x", {"multiplier": 2, "traffic_step": {"at_s": 30}}),
+        ("x", {"rps": 100, "traffic_step": {"at_s": 30, "duration_s": 30}}),
+        ("x", {"rps": 100, "traffic_step": {"at_s": 30, "multiplier": 1}}),
         ("Con Espacios", {"multiplier": 2}),
         ("x", {"multiplier": 2, "otro": 1}),
     ],
@@ -157,10 +185,13 @@ def test_scenarios_survive_a_restart(database_url, clean_pg_store):
 
     client = TestClient(create_app(store=clean_pg_store))
     pid = client.post("/projects", json={"sample": SAMPLE}).json()["id"]
-    client.put(f"/projects/{pid}/scenarios/black_friday", json={"multiplier": 10})
+    step = {"at_s": 30, "duration_s": 60, "multiplier": 10}
+    response = client.put(f"/projects/{pid}/scenarios/black_friday", json={"rps": 100, "traffic_step": step})
+    assert response.status_code == 200, response.text
     restarted = PostgresProjectStore.from_url(database_url)
     try:
-        names = [s.name for s in restarted.list_scenarios(pid)]
-        assert names == ["black_friday", "cyberday", "pico_normal"]
+        scenarios = restarted.list_scenarios(pid)
+        assert [s.name for s in scenarios] == ["black_friday", "cyberday", "pico_normal"]
+        assert scenarios[0].rps == 100 and scenarios[0].traffic_step == step
     finally:
         restarted.close()

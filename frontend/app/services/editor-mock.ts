@@ -62,14 +62,26 @@ function mockSecond(arrivals: number, capacity: number): Run["series"][number] {
   };
 }
 
-function mockSeries(model: ArchitectureModel, scenario: string, peak: number) {
+function mockSeries(
+  model: ArchitectureModel,
+  scenario: string,
+  rate: number,
+  step?: ProjectScenario["traffic_step"],
+) {
   const params = editorRunParams(scenario);
   const capacity = model.deployment.api.replicas.value * 125;
-  return Array.from({ length: params.duration_s }, (_, index) => {
-    const progress = (index + 0.5) / params.duration_s;
-    const multiplier =
-      params.traffic_profile === "pico" ? peakMultiplier(progress) : 1;
-    return mockSecond(Math.round(peak * multiplier), capacity);
+  const duration = step?.duration_s ?? params.duration_s;
+  return Array.from({ length: duration }, (_, index) => {
+    const progress = (index + 0.5) / duration;
+    const multiplier = step
+      ? index < step.at_s
+        ? 1
+        : step.multiplier
+      : params.traffic_profile === "pico"
+        ? peakMultiplier(progress)
+        : 1;
+    const target = rate * multiplier;
+    return { ...mockSecond(Math.round(target), capacity), target_rps: target };
   });
 }
 
@@ -86,12 +98,7 @@ function summarizeMockSeries(series: Run["series"]) {
   };
 }
 
-function mockRun(
-  model: ArchitectureModel,
-  scenario: string,
-  peak: number,
-): Run {
-  const series = mockSeries(model, scenario, peak);
+function mockRun(series: Run["series"]): Run {
   const { utilization } = summarizeMockSeries(series);
   return {
     bottleneck: {
@@ -220,19 +227,15 @@ export function createMockEditorApi(
     return version;
   }
 
-  function scenarioRate(
-    id: string,
-    scenario: string,
-    model: ArchitectureModel,
-  ) {
+  function seriesFor(id: string, scenario: string, model: ArchitectureModel) {
     const saved = demoScenarios(getProject(id)).find(
       ({ name }) => name === scenario,
     );
     if (!saved) throw new Error("El escenario no existe.");
-    return (
+    const rate =
       saved.rps ??
-      (saved.multiplier ?? 0) * (model.traffic.peak_rps?.value ?? 13)
-    );
+      (saved.multiplier ?? 0) * (model.traffic.peak_rps?.value ?? 13);
+    return mockSeries(model, scenario, rate, saved.traffic_step);
   }
 
   return {
@@ -281,12 +284,12 @@ export function createMockEditorApi(
     },
     run: async (id, number, scenario) => {
       const { model } = getVersion(id, number);
-      return mockRun(model, scenario, scenarioRate(id, scenario, model));
+      return mockRun(seriesFor(id, scenario, model));
     },
     results: async (id, number, scenario) => {
       const { model } = getVersion(id, number);
       return {
-        run: mockRun(model, scenario, scenarioRate(id, scenario, model)),
+        run: mockRun(seriesFor(id, scenario, model)),
         cost: mockCosts(model),
         failure: null,
         failure_missing: demoFailureMissing,
@@ -297,12 +300,8 @@ export function createMockEditorApi(
     compare: async (id, base, target, scenario) => {
       const a = getVersion(id, base).model;
       const b = getVersion(id, target).model;
-      const before = summarizeMockSeries(
-        mockSeries(a, scenario, scenarioRate(id, scenario, a)),
-      );
-      const after = summarizeMockSeries(
-        mockSeries(b, scenario, scenarioRate(id, scenario, b)),
-      );
+      const before = summarizeMockSeries(seriesFor(id, scenario, a));
+      const after = summarizeMockSeries(seriesFor(id, scenario, b));
       const replicas = {
         path: "deployment.api.replicas",
         a: a.deployment.api.replicas.value,

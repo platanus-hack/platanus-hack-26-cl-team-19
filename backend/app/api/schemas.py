@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.costs import CostDelta, CostEstimate, FailureCost
 from app.models.compare import RunDelta
@@ -211,6 +211,32 @@ class ProjectDetail(BaseModel):
     )
 
 
+class ScenarioTrafficStep(BaseModel):
+    """Dos tramos constantes con un salto instantáneo en el medio (JAJ-142)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    at_s: int = Field(gt=0, lt=3600, strict=True)
+    multiplier: float = Field(10, gt=1, le=100)
+    duration_s: int = Field(60, gt=1, le=3600, strict=True)
+
+    @model_validator(mode="after")
+    def validate_jump_time(self) -> Self:
+        if self.at_s >= self.duration_s:
+            raise ValueError("El salto debe ocurrir antes del final de la simulación.")
+        return self
+
+    def profile(self) -> list[TrafficSegmentIn]:
+        return [
+            TrafficSegmentIn(duration_s=self.at_s, from_multiplier=1, to_multiplier=1),
+            TrafficSegmentIn(
+                duration_s=self.duration_s - self.at_s,
+                from_multiplier=self.multiplier,
+                to_multiplier=self.multiplier,
+            ),
+        ]
+
+
 class ScenarioIn(BaseModel):
     """Body de ``PUT /projects/{id}/scenarios/{name}`` (JAJ-76): una de las dos tasas."""
 
@@ -221,6 +247,7 @@ class ScenarioIn(BaseModel):
     )
     rps: float | None = Field(None, gt=0, description="O req/s fijas, iguales en todas las versiones.")
     description: str | None = Field(None, max_length=500, description="La situación en palabras del usuario.")
+    traffic_step: ScenarioTrafficStep | None = None
     # JAJ-131: los reemplazos que trae el escenario (los mismos campos de RunParams)
     endpoint_weights: dict[str, Annotated[float, Field(ge=0)]] | None = None
     slowdowns: dict[str, Annotated[float, Field(gt=0, le=100)]] | None = None
@@ -232,6 +259,7 @@ class ScenarioOut(BaseModel):
     multiplier: float | None
     rps: float | None
     description: str | None
+    traffic_step: ScenarioTrafficStep | None = None
     endpoint_weights: dict[str, float] | None = None
     slowdowns: dict[str, float] | None = None
     business: ScenarioBusiness | None = None
