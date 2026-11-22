@@ -36,6 +36,42 @@ def test_fifo_and_timeout():
     assert res.busy == 0 and res.waiting == 0
 
 
+def _five_waiting_for_one(timeout: float | None, until: float) -> Resource:
+    """Un recurso de capacidad 1, ocupado 10 s por cada uno, y 5 procesos que llegan en t=0."""
+    sim = Sim(seed=0)
+    res = Resource(sim, "pool", capacity=1)
+
+    def proc():
+        if (yield res.acquire(timeout=timeout)):
+            yield 10.0
+            res.release()
+
+    for _ in range(5):
+        sim.start(proc())
+    sim.run(until=until)
+    return res
+
+
+def test_mean_wait_counts_those_who_timed_out():
+    """JAJ-135. Con timeout de 15 s: el primero espera 0, el segundo 10, y los otros tres vencen a los 15.
+    La espera media es (0 + 10 + 15 + 15 + 15) / 5 = 11 s; antes salía 5 s, solo de los dos primeros."""
+    res = _five_waiting_for_one(timeout=15.0, until=60.0)
+    assert (res.grants, res.timeouts) == (2, 3)
+    assert res.mean_wait() == 11.0
+
+
+def test_mean_wait_counts_those_still_in_the_queue():
+    """JAJ-135. Sin timeout y cortando a los 25 s: obtienen el lugar en 0, 10 y 20, y dos siguen en la
+    cola desde t=0. La espera media es (0 + 10 + 20 + 25 + 25) / 5 = 16 s; antes salía 10 s."""
+    res = _five_waiting_for_one(timeout=None, until=25.0)
+    assert (res.grants, res.waiting) == (3, 2)
+    assert res.mean_wait() == 16.0
+
+
+def test_mean_wait_without_requests_is_zero():
+    assert Resource(Sim(), "libre", capacity=1).mean_wait() == 0.0
+
+
 def erlang_c_wait(lam: float, mu: float, c: int) -> float:
     """Espera media en cola (Wq) de una M/M/c."""
     a = lam / mu
