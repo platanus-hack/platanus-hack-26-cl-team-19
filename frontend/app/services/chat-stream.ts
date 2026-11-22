@@ -31,6 +31,8 @@ type ToolResult = {
   endpoints?: unknown[];
   version?: number;
   note?: string;
+  // propose_version, set_deployment, set_traffic (JAJ-141)
+  changes?: string[];
 };
 
 /** Lo que el backend calcula que falta respaldar con evidencia (IA-7). */

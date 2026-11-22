@@ -98,6 +98,8 @@ export type ChatMessage =
       status: ToolCallStatus;
       output?: string;
       detail?: string;
+      /** La versión que creó la herramienta (JAJ-141): se puede abrir y simular. */
+      version?: number;
     }
   | {
       id: string;
@@ -148,6 +150,12 @@ export interface DiagramNode {
   simulated?: boolean;
   /** Logos de su tecnología y de dónde corre (tech-stack.ts). */
   tech?: NodeTech;
+  /** Requests en espera en los recursos del nodo, en el segundo que se muestra. */
+  queue?: number;
+  /** El nodo dueño del recurso que es el cuello de botella de la corrida. */
+  bottleneck?: boolean;
+  /** Frente a la versión padre (JAJ-141): no estaba, o cambió de tamaño o de plan. */
+  change?: "new" | "changed";
 }
 
 export interface DiagramEdge {
@@ -156,10 +164,42 @@ export interface DiagramEdge {
   label?: string;
 }
 
+/**
+ * Flujo de un conector en un segundo de la corrida (JAJ-129). Es una estimación: el motor no entrega
+ * req/s por arista (JAJ-136), así que sale de las llegadas del segundo y de la mezcla de endpoints.
+ */
+export interface DiagramFlow {
+  from: string;
+  to: string;
+  /** req/s estimados que pasan por el conector. */
+  rps: number;
+  /** Fracción del flujo que termina en error (0 a 1). */
+  errorShare: number;
+  /** Fracción del pico de la corrida (0 a 1): define cuántas partículas se dibujan. */
+  intensity: number;
+}
+
 export interface Bottleneck {
   title: string;
   description: string;
   source?: SourceReference;
+  /** El nodo del diagrama dueño del recurso. */
+  nodeId?: string;
+}
+
+/** Qué se simuló en la corrida que se muestra (JAJ-129). */
+export interface RunContext {
+  version: string;
+  scenario: string;
+  rps?: number;
+  seed?: number;
+  at: Date;
+}
+
+export interface RunSummaryItem {
+  label: string;
+  value: string;
+  provenance: MetricProvenance;
 }
 
 export type VersionOrigin = "repo" | "manual" | "agent";
