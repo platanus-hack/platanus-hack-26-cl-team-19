@@ -68,6 +68,7 @@ import {
   toComparisonRows,
   toEdges,
   toFlows,
+  toHostedNode,
   toInspectedNode,
   toRunDelta,
   toRunSummary,
@@ -194,6 +195,7 @@ const inspected = computed(() => {
   )?.fullName;
   return (
     toUnsimulatedNode(node, primary) ??
+    toHostedNode(node) ??
     toInspectedNode(node, run.value, provenance, primaryRepository.value)
   );
 });

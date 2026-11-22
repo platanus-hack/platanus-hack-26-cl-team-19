@@ -135,6 +135,8 @@ class DbDeployment:
     sustained_vcpu: float | None = None
     # con pooler (``deployment.db.pooler``), conexiones de clientes que acepta; None = sin pooler
     pooler_connections: int | None = None
+    # ida y vuelta de red API ↔ DB por consulta (JAJ-143): la conexión queda tomada, la CPU de la DB no
+    network_rtt_ms: float = 0.0
     # JAJ-140: réplicas de lectura (``deployment.db.read_replicas``). Cada una tiene sus vCPU y un pool
     # de conexiones del mismo tamaño que el de la primaria (tope: sus conexiones máximas)
     read_replicas: int = 0
@@ -235,6 +237,7 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         processor=_processor(db_raw),
         plan=db_raw.get("plan"),
         sustained_vcpu=_opt_float(_number(credits.get("sustained_vcpu"), f"{w}.cpu_credits.sustained_vcpu")),
+        network_rtt_ms=float(_number(db_raw.get("network_rtt_ms"), f"{w}.network_rtt_ms", default=0.0, minimum=0)),
         pooler_connections=None
         if pooler is None
         else _number(pooler.get("client_connections"), f"{w}.pooler.client_connections", integer=True, minimum=1),

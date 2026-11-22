@@ -8,7 +8,9 @@ Recursos que se arman desde el ``deployment`` del modelo:
 * ``db_pool``: conexiones, ``pool por worker × workers × réplicas`` (tope: conexiones de la DB).
   Sin pooler, pasar el tope de la DB es un error al conectarse; con pooler, la request espera.
   Esperar más que el timeout del pool es un error.
-* ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo.
+* ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo. Si la DB está en otra
+  máquina (``network_rtt_ms``, JAJ-143), cada consulta además espera la ida y vuelta de red con la
+  conexión tomada.
 * ``replica_cpu:<i>`` y ``replica_pool:<i>`` (JAJ-140): vCPU y conexiones de cada réplica de lectura
   (``deployment.db.read_replicas``). Cada request elige una réplica en ronda; sus lecturas (formas de
   ``READ_SHAPES``) toman una conexión de esa réplica en la primera lectura, la retienen hasta el final
@@ -269,6 +271,7 @@ def simulate(
     in_flight: dict[int, tuple[Endpoint, float]] = {}
     api_latency_s = model.api.latency_ms / 1000
     pool_timeout_s = model.db.pool_timeout_s
+    db_rtt_s = model.db.network_rtt_ms / 1000
 
     def hold(res: Resource, scale: float, ms: float, owner: str, at: str | None) -> Generator[Any, Any, None]:
         yield res.acquire()
@@ -293,6 +296,8 @@ def simulate(
                         conn[3] = take(r_pool, owner, step.at)
                     if ms > 0:
                         yield from hold(r_cpu, r_scale, ms, owner, step.at)
+                    if db_rtt_s:
+                        yield db_rtt_s  # la réplica también está al otro lado de la red (JAJ-143)
                 elif res == RESOURCE_DB_CONNECTION:
                     if conn is not None and not conn[0]:
                         if refuse_at is not None and pool.busy + pool.waiting >= refuse_at:
@@ -302,6 +307,8 @@ def simulate(
                         conn[0], conn[1] = True, take(pool, owner, step.at)
                     if ms > 0:
                         yield from hold(db_cpu, db_scale, ms, owner, step.at)
+                    if db_rtt_s:
+                        yield db_rtt_s  # la red hasta la DB: la conexión sigue tomada, la CPU de la DB no
                 elif res == RESOURCE_API_CPU and conn is not None:
                     if ms > 0:
                         yield from hold(api_cpu, api_scale, ms, owner, step.at)

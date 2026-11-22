@@ -14,10 +14,15 @@ def template():
     return copy.deepcopy(load_sample("full-stack-fastapi-template"))  # API en fargate, DB en supabase
 
 
-def with_api(raw, provider=None, replicas=None):
+PLAN_OF = {"fly": "performance-1x", "render": "starter"}  # en Fly y Render el plan fija la máquina (JAJ-143)
+
+
+def with_api(raw, provider=None, replicas=None, plan=None):
     out = copy.deepcopy(raw)
     if provider is not None:
         out["deployment"]["api"]["provider"] = provider
+        if plan or provider in PLAN_OF:
+            out["deployment"]["api"]["plan"] = plan or PLAN_OF[provider]
     if replicas is not None:
         out["deployment"]["api"]["replicas"]["value"] = replicas
     return out
@@ -36,15 +41,15 @@ def test_local_api_and_db_are_flagged_first(template):
     assert est.missing == ["api", "db"]
     w = est.warnings[0]
     assert w.startswith("Sin precio para la API (local) ni la DB (local): el total no las incluye")
-    assert "la API en fargate y la DB en rds_postgres o supabase" in w
+    assert "la API en fargate, fly o render y la DB en neon, rds_postgres o supabase" in w
 
 
 def test_provider_without_prices_is_flagged(template):
-    est = estimate_cost(with_api(template, "render"))
+    est = estimate_cost(with_api(template, "heroku"))
     assert est.missing == ["api"]
     w = est.warnings[0]
-    assert "la API (render): el total no la incluye" in w  # singular
-    assert w.endswith("indica dónde se desplegaría: la API en fargate.")
+    assert "la API (heroku): el total no la incluye" in w  # singular
+    assert w.endswith("indica dónde se desplegaría: la API en fargate, fly o render.")
 
 
 def test_local_replicas_do_not_change_cost_and_summary_says_why(template):
@@ -141,10 +146,12 @@ def test_priced_provider_sets_match_the_price_functions(template):
     for provider in PRICED_API:
         assert estimate_cost(with_api(template, provider)).missing == []
         assert not isinstance(_api_line(with_api(template, provider), "us-east-1"), str)
-    assert isinstance(_api_line(with_api(template, "render"), "us-east-1"), str)
+    assert isinstance(_api_line(with_api(template, "heroku"), "us-east-1"), str)
     rds = copy.deepcopy(template)
     rds["deployment"]["db"].update(provider="rds_postgres", plan="db.t4g.micro")
-    for provider, raw in (("supabase", template), ("rds_postgres", rds)):
+    neon = copy.deepcopy(template)
+    neon["deployment"]["db"].update(provider="neon", plan="1cu")
+    for provider, raw in (("supabase", template), ("rds_postgres", rds), ("neon", neon)):
         assert provider in PRICED_DB
         assert not isinstance(_db_line(raw, "us-east-1", 1000, None), str), provider
         assert "db" not in estimate_cost(raw).missing
