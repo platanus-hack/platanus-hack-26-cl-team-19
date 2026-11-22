@@ -105,6 +105,12 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       "Costo: US$77,38/mes",
     ]);
     expect(rows.every(({ spec }) => spec.source === "Neon")).toBe(true);
+    const factor = (value: number) =>
+      specRows({
+        cpu_core_factor: { value, unit: "×", label: "ESTIMADO", source: "t" },
+      })[0]!.text;
+    expect(factor(1)).toBe("igual al laptop");
+    expect(factor(1.95)).toBe("×1,95 más lenta");
     expect(
       deploymentNote("db", { provider: "neon", plan: "1cu" }, [neon]),
     ).toBe("Base de datos en Neon 1cu (elegido en el editor)");

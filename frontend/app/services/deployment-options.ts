@@ -139,7 +139,10 @@ function format(key: string, spec: PlanSpec) {
   if (key === "usd_month")
     return `US$${value.toLocaleString("es-CL", { maximumFractionDigits: 2 })}/mes`;
   if (key === "cpu_core_factor")
-    return `×${value.toLocaleString("es-CL")} más lenta`;
+    // 1 = el núcleo donde se calibraron los tiempos (local); más de 1 = la CPU del plan es más lenta
+    return value === 1
+      ? "igual al laptop"
+      : `×${value.toLocaleString("es-CL")} más lenta`;
   const unit = spec.unit === "conexiones" ? "" : ` ${spec.unit}`;
   return `${value.toLocaleString("es-CL")}${unit}`;
 }
