@@ -34,6 +34,8 @@ export interface DeploymentChoice {
   vcpu?: number | null;
   /** Solo la API: réplicas (máquinas separadas, cada una con sus vCPU). */
   replicas?: number | null;
+  /** Solo la API: procesos por réplica. El motor usa mín(workers, vCPU) × réplicas núcleos. */
+  workers?: number | null;
 }
 
 export const DEPLOYMENT_TITLES: Record<DeploymentKind, string> = {
@@ -55,6 +57,7 @@ type Deployed = {
   vcpu?: ModelNumber | number;
   memory_gb?: ModelNumber | number;
   replicas?: ModelNumber | number;
+  workers?: ModelNumber | number;
 };
 
 const numberOf = (x: ModelNumber | number | undefined) =>
@@ -73,18 +76,28 @@ export function currentDeployment(
     provider: raw.provider,
     plan: raw.plan ?? null,
     vcpu: numberOf(raw.vcpu) ?? null,
-    ...(kind === "api" ? { replicas: numberOf(raw.replicas) ?? 1 } : {}),
+    ...(kind === "api"
+      ? {
+          replicas: numberOf(raw.replicas) ?? 1,
+          workers: numberOf(raw.workers) ?? 1,
+        }
+      : {}),
   };
 }
 
 export interface ApiSize {
   memoryGb: number;
+  /** Los workers de la versión, con su procedencia (del repo, del usuario o por defecto). */
+  workers?: ModelNumber;
 }
 
 /** Memoria por réplica de la API en la versión abierta: entra en el costo de Fargate y local. */
 export function apiSize(model: ArchitectureModel | undefined): ApiSize {
   const api = (model?.deployment as Record<string, Deployed | undefined>)?.api;
-  return { memoryGb: numberOf(api?.memory_gb) ?? 2 };
+  return {
+    memoryGb: numberOf(api?.memory_gb) ?? 2,
+    ...(typeof api?.workers === "object" ? { workers: api.workers } : {}),
+  };
 }
 
 const HOURS_MONTH = 730;
@@ -148,6 +161,7 @@ export function deploymentOps(
       provider: choice.provider,
       ...(choice.plan ? { plan: choice.plan } : { vcpu: choice.vcpu ?? 1 }),
       ...(choice.replicas ? { replicas: choice.replicas } : {}),
+      ...(choice.workers ? { workers: choice.workers } : {}),
     },
   ];
 }
@@ -161,7 +175,8 @@ export function sameDeployment(
     a.provider === b.provider &&
     (a.plan ?? null) === (b.plan ?? null) &&
     (b.plan !== null || (a.vcpu ?? null) === (b.vcpu ?? null)) &&
-    (a.replicas ?? null) === (b.replicas ?? null)
+    (a.replicas ?? null) === (b.replicas ?? null) &&
+    (a.workers ?? null) === (b.workers ?? null)
   );
 }
 
@@ -173,7 +188,12 @@ export function deploymentNote(
   const provider =
     options.find(({ id }) => id === choice.provider)?.label ?? choice.provider;
   const machine = choice.plan ?? `${choice.vcpu ?? 1} vCPU`;
-  const size = choice.replicas ? `${choice.replicas} × ${machine}` : machine;
+  const replicas = choice.replicas
+    ? `${choice.replicas} × ${machine}`
+    : machine;
+  const size = choice.workers
+    ? `${replicas}, ${choice.workers} workers`
+    : replicas;
   return `${DEPLOYMENT_TITLES[kind]} en ${provider} ${size} (elegido en el editor)`;
 }
 
@@ -188,6 +208,12 @@ const SPEC_LABELS: [string, string][] = [
   ["network_rtt_ms", "Red hasta la DB"],
   ["usd_month", "Costo"],
 ];
+
+/** Aviso si la API tiene menos workers que vCPU: esos vCPU se pagan y el motor no los usa. */
+export function wastedVcpu(workers: number, vcpu: number | null | undefined) {
+  if (!vcpu || !(workers > 0) || workers >= vcpu) return null;
+  return `Con ${workers} ${workers === 1 ? "worker" : "workers"} por réplica se usan ${workers} de ${vcpu} vCPU: el resto se paga y no rinde.`;
+}
 
 export interface SpecRow {
   key: string;

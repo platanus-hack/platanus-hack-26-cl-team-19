@@ -46,11 +46,17 @@ class _Op(BaseModel):
 
 
 class ScaleApi(_Op):
-    """Cambia las réplicas de la API y, si se da, los vCPU por réplica. Recalcula el costo."""
+    """Cambia las réplicas de la API y, si se dan, los vCPU y los workers por réplica. Recalcula el costo."""
 
     op: Literal["scale_api"]
     replicas: int = Field(ge=1, le=50, description="Réplicas de la API.")
     vcpu: float | None = Field(None, gt=0, le=16, description="vCPU por réplica. Sin valor, se mantiene.")
+    workers: int | None = Field(
+        None,
+        ge=1,
+        le=64,
+        description="Procesos de la API por réplica (uvicorn/gunicorn --workers). Sin valor, se mantienen.",
+    )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió estos números.")
 
 
@@ -76,6 +82,12 @@ class ChangeApiHost(_Op):
     vcpu: float | None = Field(None, gt=0, le=16, description="Solo fargate y local: vCPU por réplica.")
     replicas: int | None = Field(
         None, ge=1, le=50, description="Réplicas de la API (máquinas separadas). Sin valor, se mantienen."
+    )
+    workers: int | None = Field(
+        None,
+        ge=1,
+        le=64,
+        description="Procesos de la API por réplica (uvicorn/gunicorn --workers). Sin valor, se mantienen.",
     )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió el cambio.")
 
@@ -273,8 +285,22 @@ def _scale_api(m: dict[str, Any], op: ScaleApi, catalog: dict[str, Any], warning
         deploy.app_profile, provider, plan, api["replicas"], api["vcpu"], mem, "plan actual de la versión", catalog
     )
     api["usd_month"] = profile["usd_month"]
+    _set_workers(api, op.workers, op.quote, warnings)
     usd = value(profile["usd_month"])
     return f"API: {before} → {op.replicas} × {value(api['vcpu']):g} vCPU (US${usd:,.2f}/mes)"
+
+
+def _set_workers(api: dict[str, Any], workers: int | None, quote: str | None, warnings: list[str]) -> None:
+    """Workers de la API por réplica (JAJ-148). No cambian el costo, pero sí los núcleos que usa el motor:
+    mín(workers, vCPU) × réplicas, porque cada worker es un proceso que usa un núcleo como máximo."""
+    if workers is not None:
+        api["workers"] = _design(workers, "procesos", f"{workers} workers por réplica", quote)
+    w, vcpu = value(api.get("workers"), 1), value(api.get("vcpu"), 1)
+    if w < vcpu:
+        warnings.append(
+            f"La API corre {w:g} worker(s) por réplica con {vcpu:g} vCPU: solo usa {w:g} núcleo(s) por réplica. "
+            "Sobran vCPU que se pagan y no rinden."
+        )
 
 
 # ---------- change_api_host ----------
@@ -302,9 +328,11 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
         api["plan"] = profile["plan"]
     else:
         api.pop("plan", None)
+    _set_workers(api, op.workers, op.quote, warnings)
     after = op.provider + (f" {op.plan}" if op.plan else "")
     return (
         f"API: {before} → {after} ({value(api['replicas'])} × {value(api['vcpu']):g} vCPU, "
+        f"{value(api['workers'])} workers, "
         f"US${value(api['usd_month']):,.2f}/mes)"
     )
 

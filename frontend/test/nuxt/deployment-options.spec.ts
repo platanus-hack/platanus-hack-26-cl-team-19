@@ -9,6 +9,7 @@ import {
   deploymentOps,
   sameDeployment,
   specRows,
+  wastedVcpu,
   type ProviderOption,
 } from "@/services/deployment-options";
 
@@ -69,6 +70,7 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       plan: null,
       vcpu: 1,
       replicas: 2,
+      workers: 1,
     });
     expect(currentDeployment(model, "frontend")).toBeNull();
   });
@@ -98,6 +100,7 @@ describe("dónde corre cada componente (JAJ-148)", () => {
         plan: null,
         vcpu: 1,
         replicas: 2,
+        workers: 1,
       }),
     ).toBe(true);
     expect(
@@ -106,6 +109,7 @@ describe("dónde corre cada componente (JAJ-148)", () => {
         plan: null,
         vcpu: 1,
         replicas: 3,
+        workers: 1,
       }),
     ).toBe(false);
   });
@@ -151,7 +155,7 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       },
     };
     const size = apiSize(model);
-    expect(size).toEqual({ memoryGb: 2 });
+    expect(size.memoryGb).toBe(2);
     const one = apiCost(fargate, undefined, 1, 2, size)!.value!;
     const four = apiCost(fargate, undefined, 4, 2, size)!.value!;
     const threeReplicas = apiCost(fargate, undefined, 1, 3, size)!.value!;
@@ -185,5 +189,30 @@ describe("dónde corre cada componente (JAJ-148)", () => {
     ).toEqual([
       { op: "change_api_host", provider: "render", plan: "pro", replicas: 3 },
     ]);
+  });
+
+  it("los workers van en la operación y avisan si sobran vCPU", () => {
+    expect(
+      deploymentOps("api", {
+        provider: "fargate",
+        plan: null,
+        vcpu: 4,
+        replicas: 2,
+        workers: 4,
+      }),
+    ).toEqual([
+      {
+        op: "change_api_host",
+        provider: "fargate",
+        vcpu: 4,
+        replicas: 2,
+        workers: 4,
+      },
+    ]);
+    expect(wastedVcpu(1, 4)).toBe(
+      "Con 1 worker por réplica se usan 1 de 4 vCPU: el resto se paga y no rinde.",
+    );
+    expect(wastedVcpu(4, 4)).toBeNull();
+    expect(wastedVcpu(2, null)).toBeNull();
   });
 });

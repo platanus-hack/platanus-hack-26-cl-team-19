@@ -216,6 +216,18 @@ def test_change_api_host_sets_replicas_and_the_cost_follows(model):
     assert load_model(three).api.cores == 3 * load_model(one).api.cores
 
 
+def test_workers_set_the_cores_and_warn_when_vcpu_are_wasted(model):
+    """JAJ-148: los workers no cambian el costo, pero el motor usa mín(workers, vCPU) × réplicas núcleos."""
+    full = apply_ops(model, [{"op": "change_api_host", "provider": "fargate", "vcpu": 4, "workers": 4, "replicas": 2}])
+    short = apply_ops(model, [{"op": "scale_api", "replicas": 2, "vcpu": 4, "workers": 1}])
+    assert full.model["deployment"]["api"]["workers"]["value"] == 4 and not full.warnings
+    assert load_model(full.model).api.cores == 8
+    assert load_model(short.model).api.cores == 2
+    assert any("Sobran vCPU" in w for w in short.warnings)
+    same_cost = full.model["deployment"]["api"]["usd_month"]["value"]
+    assert short.model["deployment"]["api"]["usd_month"]["value"] == same_cost
+
+
 def test_neon_pooler_is_pgbouncer(model):
     r = apply_ops(model, [{"op": "change_db_plan", "provider": "neon", "plan": "1cu"}, {"op": "add_pooler"}])
     pooler = r.model["deployment"]["db"]["pooler"]
