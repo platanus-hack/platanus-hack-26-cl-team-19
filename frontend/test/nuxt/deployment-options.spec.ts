@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { ArchitectureModel } from "@/services/editor-api";
 import {
+  apiCost,
+  apiSize,
   currentDeployment,
   deploymentKind,
   deploymentNote,
   deploymentOps,
   sameDeployment,
   specRows,
+  wastedVcpu,
   type ProviderOption,
 } from "@/services/deployment-options";
 
@@ -66,6 +69,8 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       provider: "fargate",
       plan: null,
       vcpu: 1,
+      replicas: 2,
+      workers: 1,
     });
     expect(currentDeployment(model, "frontend")).toBeNull();
   });
@@ -90,10 +95,22 @@ describe("dónde corre cada componente (JAJ-148)", () => {
   it("no ofrece crear una versión igual a la actual", () => {
     const current = currentDeployment(model, "api");
     expect(
-      sameDeployment(current, { provider: "fargate", plan: null, vcpu: 1 }),
+      sameDeployment(current, {
+        provider: "fargate",
+        plan: null,
+        vcpu: 1,
+        replicas: 2,
+        workers: 1,
+      }),
     ).toBe(true);
     expect(
-      sameDeployment(current, { provider: "fargate", plan: null, vcpu: 2 }),
+      sameDeployment(current, {
+        provider: "fargate",
+        plan: null,
+        vcpu: 1,
+        replicas: 3,
+        workers: 1,
+      }),
     ).toBe(false);
   });
 
@@ -105,8 +122,97 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       "Costo: US$77,38/mes",
     ]);
     expect(rows.every(({ spec }) => spec.source === "Neon")).toBe(true);
+    const factor = (value: number) =>
+      specRows({
+        cpu_core_factor: { value, unit: "×", label: "ESTIMADO", source: "t" },
+      })[0]!.text;
+    expect(factor(1)).toBe("igual al laptop");
+    expect(factor(1.95)).toBe("×1,95 más lenta");
     expect(
       deploymentNote("db", { provider: "neon", plan: "1cu" }, [neon]),
     ).toBe("Base de datos en Neon 1cu (elegido en el editor)");
+  });
+
+  it("el costo de la API cambia con los vCPU, la memoria y las réplicas", () => {
+    const fargate: ProviderOption = {
+      id: "fargate",
+      label: "AWS Fargate",
+      plans: [],
+      sized_by_vcpu: true,
+      example: {
+        usd_vcpu_hour: {
+          value: 0.04,
+          unit: "US$/vCPU-h",
+          label: "ESTIMADO",
+          source: "AWS",
+        },
+        usd_gb_hour: {
+          value: 0.005,
+          unit: "US$/GB-h",
+          label: "ESTIMADO",
+          source: "AWS",
+        },
+      },
+    };
+    const size = apiSize(model);
+    expect(size.memoryGb).toBe(2);
+    const one = apiCost(fargate, undefined, 1, 2, size)!.value!;
+    const four = apiCost(fargate, undefined, 4, 2, size)!.value!;
+    const threeReplicas = apiCost(fargate, undefined, 1, 3, size)!.value!;
+    expect(one).toBeCloseTo(2 * (1 * 0.04 + 2 * 0.005) * 730, 2);
+    expect(four).toBeGreaterThan(one);
+    expect(threeReplicas).toBeCloseTo((one / 2) * 3, 2);
+    const render: ProviderOption = {
+      id: "render",
+      label: "Render",
+      plans: [
+        {
+          id: "pro",
+          specs: {
+            usd_month: {
+              value: 85,
+              unit: "US$/mes",
+              label: "ESTIMADO",
+              source: "Render",
+            },
+          },
+        },
+      ],
+    };
+    expect(apiCost(render, render.plans[0], 0, 2, size)!.value).toBe(170);
+    expect(
+      deploymentOps("api", {
+        provider: "render",
+        plan: "pro",
+        replicas: 3,
+      }),
+    ).toEqual([
+      { op: "change_api_host", provider: "render", plan: "pro", replicas: 3 },
+    ]);
+  });
+
+  it("los workers van en la operación y avisan si sobran vCPU", () => {
+    expect(
+      deploymentOps("api", {
+        provider: "fargate",
+        plan: null,
+        vcpu: 4,
+        replicas: 2,
+        workers: 4,
+      }),
+    ).toEqual([
+      {
+        op: "change_api_host",
+        provider: "fargate",
+        vcpu: 4,
+        replicas: 2,
+        workers: 4,
+      },
+    ]);
+    expect(wastedVcpu(1, 4)).toBe(
+      "Con 1 worker por réplica se usan 1 de 4 vCPU: el resto se paga y no rinde.",
+    );
+    expect(wastedVcpu(4, 4)).toBeNull();
+    expect(wastedVcpu(2, null)).toBeNull();
   });
 });

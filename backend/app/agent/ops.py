@@ -46,11 +46,17 @@ class _Op(BaseModel):
 
 
 class ScaleApi(_Op):
-    """Cambia las réplicas de la API y, si se da, los vCPU por réplica. Recalcula el costo."""
+    """Cambia las réplicas de la API y, si se dan, los vCPU y los workers por réplica. Recalcula el costo."""
 
     op: Literal["scale_api"]
     replicas: int = Field(ge=1, le=50, description="Réplicas de la API.")
     vcpu: float | None = Field(None, gt=0, le=16, description="vCPU por réplica. Sin valor, se mantiene.")
+    workers: int | None = Field(
+        None,
+        ge=1,
+        le=64,
+        description="Procesos de la API por réplica (uvicorn/gunicorn --workers). Sin valor, se mantienen.",
+    )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió estos números.")
 
 
@@ -74,6 +80,15 @@ class ChangeApiHost(_Op):
         description="Plan en fly (performance-1x...) o render (starter, standard, pro...). En fargate y local, nada.",
     )
     vcpu: float | None = Field(None, gt=0, le=16, description="Solo fargate y local: vCPU por réplica.")
+    replicas: int | None = Field(
+        None, ge=1, le=50, description="Réplicas de la API (máquinas separadas). Sin valor, se mantienen."
+    )
+    workers: int | None = Field(
+        None,
+        ge=1,
+        le=64,
+        description="Procesos de la API por réplica (uvicorn/gunicorn --workers). Sin valor, se mantienen.",
+    )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió el cambio.")
 
 
@@ -270,8 +285,22 @@ def _scale_api(m: dict[str, Any], op: ScaleApi, catalog: dict[str, Any], warning
         deploy.app_profile, provider, plan, api["replicas"], api["vcpu"], mem, "plan actual de la versión", catalog
     )
     api["usd_month"] = profile["usd_month"]
+    _set_workers(api, op.workers, op.quote, warnings)
     usd = value(profile["usd_month"])
     return f"API: {before} → {op.replicas} × {value(api['vcpu']):g} vCPU (US${usd:,.2f}/mes)"
+
+
+def _set_workers(api: dict[str, Any], workers: int | None, quote: str | None, warnings: list[str]) -> None:
+    """Workers de la API por réplica (JAJ-148). No cambian el costo, pero sí los núcleos que usa el motor:
+    mín(workers, vCPU) × réplicas, porque cada worker es un proceso que usa un núcleo como máximo."""
+    if workers is not None:
+        api["workers"] = _design(workers, "procesos", f"{workers} workers por réplica", quote)
+    w, vcpu = value(api.get("workers"), 1), value(api.get("vcpu"), 1)
+    if w < vcpu:
+        warnings.append(
+            f"La API corre {w:g} worker(s) por réplica con {vcpu:g} vCPU: solo usa {w:g} núcleo(s) por réplica. "
+            "Sobran vCPU que se pagan y no rinden."
+        )
 
 
 # ---------- change_api_host ----------
@@ -279,11 +308,17 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
     api = m["deployment"]["api"]
     before = f"{api.get('provider', 'local')}" + (f" {api['plan']}" if api.get("plan") else "")
     vcpu = api["vcpu"] if op.vcpu is None else _design(op.vcpu, "vCPU", f"{op.vcpu:g} vCPU por réplica", op.quote)
+    replicas = (
+        api["replicas"]
+        if op.replicas is None
+        else _design(op.replicas, "réplicas", f"{op.replicas} réplicas de la API", op.quote)
+    )
     mem = api.get("memory_gb") or _num(2, "GB", "SUPUESTO", "Valor por defecto", needs_review=True)
     why = f"«{op.quote}»" if op.quote else "propuesto por el agente"
-    profile = _profile(deploy.app_profile, op.provider, op.plan, api["replicas"], vcpu, mem, why, catalog)
+    profile = _profile(deploy.app_profile, op.provider, op.plan, replicas, vcpu, mem, why, catalog)
     api.update(
         provider=op.provider,
+        replicas=replicas,
         vcpu=profile.get("vcpu", vcpu),
         memory_gb=profile.get("memory_gb", mem),
         usd_month=profile["usd_month"],
@@ -293,8 +328,13 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
         api["plan"] = profile["plan"]
     else:
         api.pop("plan", None)
+    _set_workers(api, op.workers, op.quote, warnings)
     after = op.provider + (f" {op.plan}" if op.plan else "")
-    return f"API: {before} → {after} ({value(api['vcpu']):g} vCPU por réplica, US${value(api['usd_month']):,.2f}/mes)"
+    return (
+        f"API: {before} → {after} ({value(api['replicas'])} × {value(api['vcpu']):g} vCPU, "
+        f"{value(api['workers'])} workers, "
+        f"US${value(api['usd_month']):,.2f}/mes)"
+    )
 
 
 # ---------- change_db_plan ----------
