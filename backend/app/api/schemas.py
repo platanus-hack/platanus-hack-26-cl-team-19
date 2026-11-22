@@ -41,7 +41,7 @@ class RunParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    scenario: str = Field("cyberday", description="Escenario del modelo (traffic.scenarios).")
+    scenario: str = Field("actual", description="Escenario del proyecto. Todo proyecto nace con 'actual'.")
     rps: float | None = Field(
         None, gt=0, description="Reemplaza las req/s del escenario. Con rps, el escenario es solo un nombre."
     )
@@ -109,6 +109,8 @@ class RunParams(BaseModel):
 
 
 class RunRequest(RunParams):
+    # Sin proyecto, el escenario es uno de traffic.scenarios del modelo
+    scenario: str = Field("cyberday", description="Escenario del modelo (traffic.scenarios).")
     model: dict[str, Any] = Field(
         description="Modelo branchpoint.model/v1 completo (la salida de build_model.py, JAJ-45)."
     )

@@ -117,6 +117,7 @@ export function useEditorProject(embeddedDemo = false) {
     const available = scenarios.value.filter(({ disabled }) => !disabled);
     if (!available.some(({ id }) => id === scenario.value)) {
       scenario.value =
+        available.find(({ id }) => id === "actual")?.id ??
         available.find(({ id }) => id === "cyberday")?.id ??
         available[0]?.id ??
         "";

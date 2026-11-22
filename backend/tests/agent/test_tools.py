@@ -186,6 +186,7 @@ def test_read_tools(tools, project):
     assert m["version"] == 1 and m["endpoints"][0]["at"] and m["assumptions"] > 0
     assert tools.call("list_assumptions", {"project_id": project.id})["total"] == m["assumptions"]
     assert {s["name"] for s in tools.call("list_scenarios", {"project_id": project.id})["scenarios"]} == {
+        "actual",
         "cyberday",
         "pico_normal",
     }

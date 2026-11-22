@@ -49,7 +49,9 @@ def test_compare_shows_sales_at_stake(client):
     pid = client.post("/projects", json={"sample": "full-stack-fastapi-template"}).json()["id"]
     ops = [{"op": "scale_api", "replicas": 3}, {"op": "add_pooler"}]
     client.post(f"/projects/{pid}/versions/1/ops", json={"ops": ops})
-    cmp = client.post(f"/projects/{pid}/compare", json={"a": 1, "b": 2, "duration_s": 120, "seed": 1}).json()
+    cmp = client.post(
+        f"/projects/{pid}/compare", json={"a": 1, "b": 2, "scenario": "cyberday", "duration_s": 120, "seed": 1}
+    ).json()
     fa, fb = cmp["failure_a"], cmp["failure_b"]
     assert fa["lost_sales_per_hour"]["low"]["value"] > fb["lost_sales_per_hour"]["low"]["value"]
     assert cmp["summary"].startswith("v2 cuesta +US$57")
@@ -59,7 +61,9 @@ def test_compare_shows_sales_at_stake(client):
 def test_compare_too_short_says_so(client):
     pid = client.post("/projects", json={"sample": "full-stack-fastapi-template"}).json()["id"]
     client.post(f"/projects/{pid}/versions/1/ops", json={"ops": [{"op": "scale_api", "replicas": 3}]})
-    cmp = client.post(f"/projects/{pid}/compare", json={"a": 1, "b": 2, "duration_s": 20}).json()
+    cmp = client.post(
+        f"/projects/{pid}/compare", json={"a": 1, "b": 2, "scenario": "cyberday", "duration_s": 20}
+    ).json()
     assert "muy corta" in cmp["summary"]
 
 
