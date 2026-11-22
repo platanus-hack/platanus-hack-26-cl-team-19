@@ -69,3 +69,37 @@ def test_get_and_list_bring_the_repo_and_branch(store):
     assert (got.repo_full_name, got.branch) == ("acme/tienda", "dev")
     listed = {p.id: (p.repo_full_name, p.branch) for p in store.list(None)}
     assert listed == {from_repo.id: ("acme/tienda", "dev"), from_sample.id: (None, None)}
+
+
+def test_add_repositories_keeps_the_primary_and_saves_a_version(database_url, store):
+    """Sumar un repo a un proyecto de uno solo guarda también al principal en project_repositories."""
+    model = load_sample("full-stack-fastapi-template")
+    api = store.connect_repo(None, 42, 7, "acme/tienda", "main")
+    worker = store.connect_repo(None, 42, 8, "acme/worker", "main")
+    jobs = store.connect_repo(None, 42, 9, "acme/jobs", "main")
+    project = store.create("tienda", model, None, None, RepoSource(api, "acme/tienda", "dev", SHA))
+
+    v2 = store.add_repositories(
+        project.id, model, 1, "Agrega acme/worker", [RepoSource(worker, "acme/worker", "main", SHA)]
+    )
+    v3 = store.add_repositories(project.id, model, 2, "Agrega acme/jobs", [RepoSource(jobs, "acme/jobs", "main", SHA)])
+
+    assert (v2.number, v2.origin, v2.parent, v3.number, v3.parent) == (2, "repo", 1, 3, 2)
+    got = store.get(project.id)
+    assert [(r.full_name, r.branch, r.primary) for r in got.repos()] == [
+        ("acme/tienda", "dev", True),
+        ("acme/worker", "main", False),
+        ("acme/jobs", "main", False),
+    ]
+    with psycopg.connect(database_url) as conn:
+        count = conn.execute("select count(*) from ingestions where project_id = %s", (project.id,)).fetchone()[0]
+    assert count == 3  # la v1 y una por cada repo sumado
+
+
+def test_add_repositories_to_a_sample_fails(store):
+    model = load_sample("full-stack-fastapi-template")
+    sample = store.create("ejemplo", model, "full-stack-fastapi-template", None)
+    worker = store.connect_repo(None, 42, 8, "acme/worker", "main")
+    with pytest.raises(ValueError):
+        store.add_repositories(sample.id, model, 1, "x", [RepoSource(worker, "acme/worker", "main", SHA)])
+    assert len(store.get(sample.id).versions) == 1  # la transacción se deshizo

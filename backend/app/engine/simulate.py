@@ -609,7 +609,7 @@ def _build_run(
             max_queue=r.max_waiting,
             final_queue=r.waiting,
             timeouts=r.timeouts,
-            mean_wait_ms=round(r.wait_total / r.grants * 1000, 3) if r.grants else 0.0,
+            mean_wait_ms=round(r.mean_wait() * 1000, 3),
             by_endpoint=usage.by_endpoint(r.name),
             by_line=usage.by_line(r.name),
         )

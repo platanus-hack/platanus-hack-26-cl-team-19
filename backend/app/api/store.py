@@ -29,6 +29,7 @@ class Version:
     created_at: str
     # el modelo completo pesa ~100 KB: get() trae las versiones sin él y get_version() con él
     model: dict[str, Any] | None
+    proposal_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -239,8 +240,31 @@ class ProjectStore(Protocol):
         ...
 
     def add_version(
-        self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
+        self,
+        project_id: str,
+        model: dict[str, Any],
+        origin: Origin,
+        parent: int | None,
+        note: str | None,
+        *,
+        proposal_id: uuid.UUID | None = None,
     ) -> Version: ...
+
+    def add_repositories(
+        self, project_id: str, model: dict[str, Any], parent: int, note: str, sources: list[RepoSource]
+    ) -> Version:
+        """Suma repos secundarios a un proyecto que salió de un repo y guarda, en la misma transacción, la
+        versión con su análisis (``origin`` repo). Un proyecto de un solo repo pasa a guardar su principal
+        en ``project_repositories``."""
+        ...
+
+    def get_chat(self, project_id: str) -> list[dict[str, Any]]:
+        """Los mensajes del chat del proyecto, tal como los muestra el panel, del más viejo al más nuevo."""
+        ...
+
+    def save_chat(self, project_id: str, messages: list[dict[str, Any]]) -> None:
+        """Reemplaza los mensajes del chat del proyecto (una conversación por proyecto)."""
+        ...
 
     def list_scenarios(self, project_id: str) -> list[ProjectScenario]:
         """Los escenarios del proyecto, por nombre (JAJ-76)."""
@@ -393,6 +417,7 @@ class InMemoryProjectStore:
         self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
         self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
         self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
+        self._chats: dict[str, list[dict[str, Any]]] = {}  # proyecto → mensajes del chat
         self._reports: dict[str, tuple[str, dict[str, Any]]] = {}  # id → (proyecto, reporte) (JAJ-127)
 
     def create(
@@ -436,11 +461,47 @@ class InMemoryProjectStore:
         return sorted(mine, key=lambda p: p.created_at, reverse=True)
 
     def add_version(
-        self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
+        self,
+        project_id: str,
+        model: dict[str, Any],
+        origin: Origin,
+        parent: int | None,
+        note: str | None,
+        *,
+        proposal_id: uuid.UUID | None = None,
     ) -> Version:
         with self._lock:
             project = self._projects[project_id]
-            version = Version(len(project.versions) + 1, origin, parent, note, _now(), copy.deepcopy(model))
+            if proposal_id is not None:
+                prior = next((item for item in project.versions if item.proposal_id == proposal_id), None)
+                if prior is not None:
+                    return prior
+            version = Version(
+                len(project.versions) + 1, origin, parent, note, _now(), copy.deepcopy(model), proposal_id
+            )
+            project.versions.append(version)
+        return version
+
+    def get_chat(self, project_id: str) -> list[dict[str, Any]]:
+        return copy.deepcopy(self._chats.get(project_id, []))
+
+    def save_chat(self, project_id: str, messages: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self._chats[project_id] = copy.deepcopy(messages)
+
+    def add_repositories(
+        self, project_id: str, model: dict[str, Any], parent: int, note: str, sources: list[RepoSource]
+    ) -> Version:
+        with self._lock:
+            project = self._projects[project_id]
+            repos = project.repos()
+            if not repos:
+                raise ValueError("el proyecto no salió de un repo")
+            project.repositories = [
+                *repos,
+                *(ProjectRepo(s.repo_full_name, s.branch, False) for s in sources),
+            ]
+            version = Version(len(project.versions) + 1, "repo", parent, note, _now(), copy.deepcopy(model))
             project.versions.append(version)
         return version
 

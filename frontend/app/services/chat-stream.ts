@@ -1,7 +1,4 @@
 export type ChatProvider = "anthropic" | "openai";
-
-/** Lo que el usuario mira en el editor (JAJ-141): el agente parte de esa versión. */
-export type ChatContext = { version: number; scenario?: string };
 export type ChatKeySource = "team" | "personal";
 
 export type ChatTurn = {
@@ -11,7 +8,20 @@ export type ChatTurn = {
   attachments?: string[];
 };
 
+export interface ChatProposal {
+  id: string;
+  draft: {
+    base: number;
+    note?: string;
+    scenario?: { name: string };
+    ops?: Record<string, unknown>[];
+  };
+  changes: string[];
+  warnings: string[];
+}
+
 type ToolResult = {
+  proposal?: ChatProposal;
   error?: unknown;
   p95_ms?: number;
   scenario?: string;

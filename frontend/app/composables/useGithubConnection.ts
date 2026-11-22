@@ -246,7 +246,49 @@ export function useGithubConnection({ immediate = true } = {}) {
     alive = false;
   });
 
-  async function analyze({ useBranchpointKey = false } = {}) {
+  function startJob(
+    useBranchpointKey: boolean,
+    projectId?: string,
+    parent?: number,
+  ) {
+    if (!api) throw new Error("No hay backend configurado.");
+    if (projectId)
+      return api.addRepositories(
+        projectId,
+        selection.value,
+        parent,
+        provider.value,
+        useBranchpointKey,
+      );
+    // varios repos (IA-10): el principal lo simula el motor; los demás quedan como dependencias
+    if (extras.value.length)
+      return api.startMultiIngestion(
+        selection.value,
+        primaryRepo.value,
+        provider.value,
+        useBranchpointKey,
+      );
+    return api.startIngestion(
+      repo.value,
+      branch.value,
+      provider.value,
+      useBranchpointKey,
+    );
+  }
+
+  /**
+   * Analiza la selección. Con `projectId`, los repos se suman a ese proyecto en una versión nueva hija de
+   * `parent`, en vez de crear un proyecto.
+   */
+  async function analyze({
+    useBranchpointKey = false,
+    projectId,
+    parent,
+  }: {
+    useBranchpointKey?: boolean;
+    projectId?: string;
+    parent?: number;
+  } = {}) {
     if (!api || selectionError.value || running.value) return;
     error.value = "";
     keyProblem.value = false;
@@ -255,20 +297,7 @@ export function useGithubConnection({ immediate = true } = {}) {
     try {
       let job: Ingestion;
       try {
-        // varios repos (IA-10): el principal lo simula el motor; los demás quedan como dependencias
-        job = extras.value.length
-          ? await api.startMultiIngestion(
-              selection.value,
-              primaryRepo.value,
-              provider.value,
-              useBranchpointKey,
-            )
-          : await api.startIngestion(
-              repo.value,
-              branch.value,
-              provider.value,
-              useBranchpointKey,
-            );
+        job = await startJob(useBranchpointKey, projectId, parent);
       } catch (cause) {
         const status = (cause as { statusCode?: number }).statusCode;
         keyProblem.value = status === 422 || status === 429;
@@ -282,8 +311,9 @@ export function useGithubConnection({ immediate = true } = {}) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (!alive) return;
         if (Date.now() > deadline) {
-          error.value =
-            "El análisis está tardando más de lo esperado. Vuelve más tarde: el proyecto aparecerá en Mis proyectos al terminar.";
+          error.value = projectId
+            ? "El análisis está tardando más de lo esperado. Vuelve más tarde: la versión nueva aparecerá en el historial al terminar."
+            : "El análisis está tardando más de lo esperado. Vuelve más tarde: el proyecto aparecerá en Mis proyectos al terminar.";
           ingestion.value = null;
           return;
         }

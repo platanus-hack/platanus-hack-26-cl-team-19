@@ -13,6 +13,7 @@ import type { SaturationStatus } from "@/components/design/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { componentKinds } from "./component-kinds";
+import TechIcon from "./TechIcon.vue";
 import type {
   Bottleneck,
   DiagramEdge,
@@ -368,7 +369,7 @@ const alertOf = (status?: SaturationStatus) =>
               <path
                 :d="path.d"
                 fill="none"
-                class="stroke-input"
+                class="stroke-info/60"
                 stroke-width="1"
               />
               <circle
@@ -475,7 +476,7 @@ const alertOf = (status?: SaturationStatus) =>
             >
               <button
                 type="button"
-                class="flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
+                class="relative flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
                 :class="
                   node.simulated === false
                     ? 'border-dashed bg-muted/40 text-muted-foreground'
@@ -490,6 +491,8 @@ const alertOf = (status?: SaturationStatus) =>
                   [
                     node.name,
                     componentKinds[node.kind].label,
+                    node.tech?.main?.label,
+                    ...(node.tech?.platforms ?? []).map(({ label }) => label),
                     node.detail,
                     node.simulated === false ? 'No simulado' : undefined,
                   ]
@@ -498,8 +501,15 @@ const alertOf = (status?: SaturationStatus) =>
                 "
                 @click="emit('select', node.id === selectedId ? null : node.id)"
               >
+                <TechIcon
+                  v-if="node.tech?.main"
+                  :name="node.tech.main.icon"
+                  class="size-4 shrink-0"
+                  :class="{ 'opacity-60': node.simulated === false }"
+                />
                 <component
                   :is="componentKinds[node.kind].icon"
+                  v-else
                   class="size-4 shrink-0 text-muted-foreground"
                   aria-hidden="true"
                 />
@@ -518,8 +528,28 @@ const alertOf = (status?: SaturationStatus) =>
                     >{{ node.detail }}</span
                   >
                 </span>
+                <span
+                  v-if="node.tech?.platforms.length"
+                  class="pointer-events-none absolute end-1.5 top-1 flex items-center gap-1 opacity-70"
+                >
+                  <TechIcon
+                    v-for="platform in node.tech.platforms"
+                    :key="platform.icon"
+                    :name="platform.icon"
+                    class="h-2.5 w-auto max-w-4"
+                    :class="{
+                      'opacity-60': node.simulated === false,
+                    }"
+                  />
+                </span>
                 <span class="sr-only">{{
-                  componentKinds[node.kind].label
+                  [
+                    componentKinds[node.kind].label,
+                    node.tech?.main?.label,
+                    ...(node.tech?.platforms ?? []).map(({ label }) => label),
+                  ]
+                    .filter(Boolean)
+                    .join(", ")
                 }}</span>
                 <template v-if="alertOf(node.status)">
                   <component

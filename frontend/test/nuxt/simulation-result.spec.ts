@@ -101,8 +101,8 @@ const run: Run = {
 
 describe("toNodes por segundo", () => {
   it("toma el estado y la cola del segundo que se reproduce", () => {
-    const calm = toNodes(graph, run, 0);
-    const peak = toNodes(graph, run, 1);
+    const calm = toNodes(graph, run, undefined, { second: 0 });
+    const peak = toNodes(graph, run, undefined, { second: 1 });
 
     expect(calm.find((node) => node.id === "db")?.status).toBe("healthy");
     expect(peak.find((node) => node.id === "db")?.status).toBe("saturated");
@@ -116,7 +116,7 @@ describe("toNodes por segundo", () => {
   });
 
   it("marca el nodo dueño del cuello de botella", () => {
-    const nodes = toNodes(graph, run, 0);
+    const nodes = toNodes(graph, run, undefined, { second: 0 });
     expect(
       nodes.filter((node) => node.bottleneck).map((node) => node.id),
     ).toEqual(["db"]);
@@ -251,7 +251,7 @@ describe("SimulationRunStatus", () => {
 
 describe("ArchitectureDiagram con una corrida", () => {
   const props = {
-    nodes: toNodes(graph, run, 1),
+    nodes: toNodes(graph, run, undefined, { second: 1 }),
     edges: graph.edges.map((edge) => ({ from: edge.source, to: edge.target })),
     flows: toFlows(graph, run, 1),
     bottleneck: toBottleneck(run, graph, { fullName: "acme/api" }),

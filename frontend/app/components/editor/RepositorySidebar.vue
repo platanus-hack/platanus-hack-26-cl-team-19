@@ -54,6 +54,8 @@ const props = withDefaults(
     user?: SessionUser;
     projectsLink?: string;
     canConnect?: boolean;
+    /** El texto del botón +: «Agregar repositorio» cuando suma repos al proyecto abierto. */
+    connectLabel?: string;
     disabled?: boolean;
     variant?: "sidebar" | "inset" | "floating";
   }>(),
@@ -62,6 +64,7 @@ const props = withDefaults(
     user: undefined,
     projectsLink: undefined,
     canConnect: true,
+    connectLabel: "Conectar repositorio",
     variant: "inset",
   },
 );
@@ -92,23 +95,28 @@ const initials = computed(() =>
 <template>
   <Sidebar collapsible="icon" :variant="variant">
     <SidebarHeader>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            size="lg"
-            as-child
-            class="group-data-[collapsible=icon]:justify-center"
-          >
-            <NuxtLink to="/" aria-label="branchpoint">
-              <AppWordmark class="group-data-[collapsible=icon]:hidden" />
-              <AppWordmark
-                compact
-                class="hidden group-data-[collapsible=icon]:inline"
-              />
-            </NuxtLink>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      <div class="flex items-center gap-1">
+        <SidebarMenu class="min-w-0 flex-1">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              as-child
+              class="group-data-[collapsible=icon]:justify-center"
+            >
+              <NuxtLink to="/" aria-label="branchpoint">
+                <AppWordmark class="group-data-[collapsible=icon]:hidden" />
+                <AppWordmark
+                  compact
+                  class="hidden group-data-[collapsible=icon]:inline"
+                />
+              </NuxtLink>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <div class="group-data-[collapsible=icon]:hidden">
+          <ThemeSwitcher />
+        </div>
+      </div>
     </SidebarHeader>
 
     <SidebarContent>
@@ -116,11 +124,13 @@ const initials = computed(() =>
         <SidebarGroupLabel>Repositorios</SidebarGroupLabel>
         <SidebarGroupAction
           v-if="canConnect"
-          title="Conectar repositorio"
+          as="button"
+          type="button"
+          :title="connectLabel"
           @click="emit('connect')"
         >
           <Plus aria-hidden="true" />
-          <span class="sr-only">Conectar repositorio</span>
+          <span class="sr-only">{{ connectLabel }}</span>
         </SidebarGroupAction>
         <SidebarGroupContent>
           <SidebarMenu>
@@ -147,14 +157,15 @@ const initials = computed(() =>
                   >principal</span
                 >
               </SidebarMenuButton>
+              <slot name="repository-children" :repository="repository" />
             </SidebarMenuItem>
             <SidebarMenuItem v-if="canConnect && !repositories.length">
               <SidebarMenuButton
-                tooltip="Conectar repositorio"
+                :tooltip="connectLabel"
                 @click="emit('connect')"
               >
                 <Plus aria-hidden="true" />
-                <span>Conectar repositorio</span>
+                <span>{{ connectLabel }}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -233,7 +244,7 @@ const initials = computed(() =>
                       @select="emit('connect')"
                     >
                       <Plus aria-hidden="true" />
-                      Conectar repositorio
+                      {{ connectLabel }}
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>

@@ -4,10 +4,13 @@ import type {
   Graph,
   ModelSummary,
   Project,
+  ProjectScenario,
+  ProjectScenarioInput,
   ScenarioOverrides,
   VersionResults,
   VersionDetail,
 } from "@/services/editor-api";
+import type { ChatProposal } from "@/services/chat-stream";
 import { editorRunParams } from "@/services/editor-api";
 import { toScenarios, toVersionEntry } from "@/services/editor-view";
 import type { RunReport } from "@/services/reports-api";
@@ -58,6 +61,7 @@ export function useEditorProject() {
   const costsError = ref("");
   const comparison = shallowRef<Comparison | null>(null);
   const scenario = ref("");
+  const savedScenarios = shallowRef<ProjectScenario[]>([]);
   const pending = ref("");
   const error = ref("");
   // JAJ-129: la simulación tiene su propio error (se muestra en el panel con Reintentar) y recuerda
@@ -70,20 +74,22 @@ export function useEditorProject() {
   } | null>(null);
 
   const scenarios = computed(() =>
-    version.value ? toScenarios(version.value.model) : [],
+    version.value ? toScenarios(version.value.model, savedScenarios.value) : [],
   );
   const versions = computed(() =>
     (project.value?.versions ?? []).toReversed().map(toVersionEntry),
   );
 
   async function request(label: string, action: () => Promise<void>) {
-    if (pending.value) return;
+    if (pending.value) return false;
     pending.value = label;
     error.value = "";
     try {
       await action();
+      return true;
     } catch (cause) {
       error.value = errorMessage(cause);
+      return false;
     } finally {
       pending.value = "";
     }
@@ -101,10 +107,11 @@ export function useEditorProject() {
     version.value = detail;
     graph.value = null;
     resetResults();
-    if (!scenarios.value.some((item) => item.id === scenario.value)) {
+    const available = scenarios.value.filter(({ disabled }) => !disabled);
+    if (!available.some(({ id }) => id === scenario.value)) {
       scenario.value =
-        scenarios.value.find((item) => item.id === "cyberday")?.id ??
-        scenarios.value[0]?.id ??
+        available.find(({ id }) => id === "cyberday")?.id ??
+        available[0]?.id ??
         "";
     }
     parentGraph.value = null;
@@ -182,9 +189,12 @@ export function useEditorProject() {
           : group;
       const latest = versions.value[0];
       if (!latest) throw new Error("El proyecto todavía no tiene una versión.");
-      await displayVersion(
-        await api.getVersion(project.value.id, Number(latest.id)),
-      );
+      const [detail, projectScenarios] = await Promise.all([
+        api.getVersion(project.value.id, Number(latest.id)),
+        api.listScenarios(project.value.id),
+      ]);
+      savedScenarios.value = projectScenarios;
+      await displayVersion(detail);
     });
   }
 
@@ -196,7 +206,22 @@ export function useEditorProject() {
     });
   }
 
-  async function saveReplicas(replicas: number) {
+  async function saveScenario(name: string, input: ProjectScenarioInput) {
+    const id = project.value?.id;
+    if (!id) return false;
+    return request("Guardando escenario…", async () => {
+      const saved = await api.saveScenario(id, name, input);
+      savedScenarios.value = [
+        ...savedScenarios.value.filter((item) => item.name !== saved.name),
+        saved,
+      ].sort((a, b) => a.name.localeCompare(b.name));
+      scenario.value = saved.name;
+      results.value = null;
+      comparison.value = null;
+    });
+  }
+
+  async function createVersion(replicas: number, note: string) {
     const current = project.value;
     const parent = version.value;
     if (
@@ -206,20 +231,47 @@ export function useEditorProject() {
       replicas < 1 ||
       replicas > 50
     )
-      return;
-    const previous = parent.model.deployment.api.replicas.value;
-    if (replicas === previous) return;
-    await request("Guardando versión…", async () => {
-      const model = changeReplicas(parent, replicas);
+      return false;
+    return request("Guardando versión…", async () => {
+      const previous = parent.model.deployment.api.replicas.value;
+      const model =
+        replicas === previous ? parent.model : changeReplicas(parent, replicas);
+      const summary =
+        note.trim() ||
+        (replicas === previous
+          ? `Copia de ${parent.label}`
+          : `Réplicas de la API: ${previous} → ${replicas}`);
       const saved = await api.saveVersion(
         current.id,
         parent.number,
         model,
-        `Réplicas de la API: ${previous} → ${replicas}`,
+        summary,
       );
       project.value = { ...current, versions: [...current.versions, saved] };
       await displayVersion(saved);
     });
+  }
+
+  async function acceptChatProposal(proposal: ChatProposal) {
+    const current = project.value;
+    if (!current || isMock || version.value?.number !== proposal.draft.base)
+      return null;
+    let accepted: VersionDetail | null = null;
+    await request("Aplicando propuesta…", async () => {
+      const saved = await api.acceptChatProposal(current.id, proposal);
+      accepted = saved;
+      project.value = {
+        ...current,
+        versions: [
+          ...current.versions.filter(({ number }) => number !== saved.number),
+          saved,
+        ],
+      };
+      const scenarioName = proposal.draft.scenario?.name;
+      if (scenarioName) scenario.value = scenarioName;
+      await displayVersion(saved);
+    });
+    return accepted as VersionDetail | null;
   }
 
   async function simulate(overrides?: ScenarioOverrides) {
@@ -324,6 +376,7 @@ export function useEditorProject() {
     comparison,
     scenario,
     scenarios,
+    savedScenarios,
     versions,
     pending,
     error,
@@ -334,7 +387,9 @@ export function useEditorProject() {
     openSample,
     openVersion,
     reloadVersions,
-    saveReplicas,
+    saveScenario,
+    createVersion,
+    acceptChatProposal,
     simulate,
     loadCosts,
     compare,

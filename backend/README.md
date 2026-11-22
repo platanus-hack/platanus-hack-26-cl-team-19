@@ -67,6 +67,13 @@ Los recursos se arman desde el `deployment` del modelo:
 | CPU de la DB (`db_cpu`) | vCPU de la DB | cada consulta, durante su tiempo (también las de los workers de las colas) |
 | Workers de una cola (`queue:<nombre>`) | `workers` de la cola | cada trabajo encolado, durante sus `job_steps` |
 
+En el `Run`, cada recurso trae su uso, la cola máxima y final, los timeouts y `mean_wait_ms`. Ese campo es la espera media de **todos** los que pidieron el recurso (JAJ-135):
+- quienes lo obtuvieron, hasta obtenerlo;
+- quienes vencieron, hasta vencer;
+- quienes seguían en la cola al terminar, hasta el final.
+
+Antes solo contaba a quienes lo obtuvieron. En saturación quedaba muy por debajo de la espera real: en un pool donde vence el 82 %, daba 18,7 ms cuando la espera real es 44,4 ms.
+
 - Cada request recorre los `steps` de su endpoint en orden. Respeta `repeat` (N+1).
 - Esperar una conexión más que el timeout del pool es un error (`pool_timeout`).
 - **Límite de conexiones de la DB.** Sin pooler, si la app puede abrir más conexiones que las que acepta la DB, la que pasa el límite falla al conectarse (`db_refused`), como el `too many clients` de Postgres. Con un pooler en modo transacción (`deployment.db.pooler`, por ejemplo Supavisor de Supabase), la app se conecta al pooler, que acepta `client_connections` y los reparte en las `max_connections` de la DB: los que no tienen una, esperan. Si la app pasa también el límite del pooler, vuelve a ser `db_refused`.

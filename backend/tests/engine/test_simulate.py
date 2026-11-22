@@ -84,7 +84,12 @@ def test_pool_timeout(raw):
     pool["pool_size"]["value"], pool["max_overflow"]["value"], pool["pool_timeout_s"]["value"] = 1, 0, 0.05
     run = simulate(load_model(small), rps=300, duration_s=10)
     assert run.errors["pool_timeout"] > 0
-    assert next(r for r in run.resources if r.name == "db_pool").timeouts == run.errors["pool_timeout"]
+    db_pool = next(r for r in run.resources if r.name == "db_pool")
+    assert db_pool.timeouts == run.errors["pool_timeout"]
+    # JAJ-135: la espera media cuenta a quienes vencieron, que esperaron los 50 ms del pool_timeout. Aquí
+    # vence más de la mitad (1.312 de 2.497), así que no puede bajar de ~26 ms. Contando solo a quienes
+    # obtuvieron conexión, como antes, salía 21,2 ms; ahora sale 36,3 ms.
+    assert db_pool.mean_wait_ms > 30
 
 
 def test_cyberday_60s_matches_checks(model, raw):

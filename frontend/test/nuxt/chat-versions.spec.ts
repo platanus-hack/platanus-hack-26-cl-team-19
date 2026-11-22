@@ -126,7 +126,7 @@ describe("lo nuevo frente a la versión padre (JAJ-141)", () => {
 
   it("marca los nodos nuevos y los que cambiaron", () => {
     const changes = Object.fromEntries(
-      toNodes(child, null, undefined, parent).map((node) => [
+      toNodes(child, null, undefined, { parent }).map((node) => [
         node.id,
         node.change,
       ]),

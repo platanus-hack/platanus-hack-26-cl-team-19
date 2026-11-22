@@ -21,9 +21,11 @@ import type {
   Graph,
   GraphNode,
   ModelNumber,
+  ProjectScenario,
   ProjectVersion,
   Run,
 } from "./editor-api";
+import { nodeTech } from "./tech-stack";
 
 export const simulationProvenance: MetricProvenance = {
   origin: "estimated",
@@ -40,19 +42,35 @@ export function toProvenance(metric: ModelNumber): MetricProvenance {
   return { origin: origins[metric.label], source: metric.source };
 }
 
-export function toScenarios(model: ArchitectureModel): Scenario[] {
-  const labels: Record<string, string> = {
-    cyberday: "CyberDay",
-    pico_normal: "Pico normal",
-  };
-  return Object.entries(model.traffic.scenarios).map(([id, { rps }]) => ({
-    id,
-    label: labels[id] ?? id,
-    traffic: {
-      value: typeof rps === "number" ? rps : rps.value,
-      unit: "req/s",
-    },
-  }));
+const SCENARIO_LABELS: Record<string, string> = {
+  cyberday: "CyberDay",
+  pico_normal: "Pico normal",
+};
+
+/** El nombre para mostrar de un escenario: los de ejemplo tienen uno propio. */
+export function scenarioLabel(name: string) {
+  return SCENARIO_LABELS[name] ?? name;
+}
+
+export function toScenarios(
+  model: ArchitectureModel,
+  saved: ProjectScenario[],
+): Scenario[] {
+  const peak = model.traffic.peak_rps?.value ?? 0;
+  return saved.map((scenario) => {
+    const { name, rps, multiplier, description } = {
+      ...scenario,
+      ...model.version_scenarios?.[scenario.name],
+    };
+    const rate = rps ?? peak * (multiplier ?? 0);
+    return {
+      id: name,
+      label: scenarioLabel(name),
+      description: description ?? undefined,
+      traffic: { value: Number(rate.toFixed(2)), unit: "req/s" },
+      disabled: rate <= 0,
+    };
+  });
 }
 
 export function toVersionEntry(version: ProjectVersion): VersionEntry {
@@ -109,13 +127,14 @@ function utilizationAt(run: Run, second?: number): Record<string, number> {
 
 /**
  * Los nodos del diagrama. Con ``second``, el estado y la cola salen de ese segundo de la corrida, así
- * el diagrama sigue la reproducción (JAJ-129); sin él, del promedio de la corrida.
+ * el diagrama sigue la reproducción (JAJ-129); sin él, del promedio de la corrida. Con ``parent``, marca
+ * lo nuevo y lo que cambió frente a la versión padre (JAJ-141).
  */
 export function toNodes(
   graph: Graph,
   run: Run | null,
-  second?: number,
-  parent?: Graph | null,
+  model?: ArchitectureModel,
+  { second, parent }: { second?: number; parent?: Graph | null } = {},
 ) {
   const multi = isMultiRepo(graph);
   const before = parent
@@ -145,6 +164,7 @@ export function toNodes(
       detail: multi && node.repo ? repoName(node.repo) : size,
       repo: node.repo ?? undefined,
       simulated,
+      tech: nodeTech(node, model),
       status: utilization.length
         ? saturation(Math.max(...utilization))
         : undefined,
@@ -199,7 +219,7 @@ export function toFlows(graph: Graph, run: Run, second: number): DiagramFlow[] {
   const peak = Math.max(1, ...run.series.map((item) => item.arrivals));
   const completed = sample.ok + sample.errors;
   const failing = completed ? sample.errors / completed : 0;
-  const nodes = toNodes(graph, run, second);
+  const nodes = toNodes(graph, run, undefined, { second });
   const pressured = new Set(
     nodes
       .filter((node) => node.status && node.status !== "healthy")

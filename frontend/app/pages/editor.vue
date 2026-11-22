@@ -3,6 +3,7 @@ import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
 import { Ellipsis, GitCompare, Loader2, Pause, Play } from "@lucide/vue";
 import { until } from "@vueuse/core";
+import AddRepositoryDialog from "@/components/editor/AddRepositoryDialog.vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
@@ -13,9 +14,11 @@ import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
 import EditorReportsPanel from "@/components/editor/EditorReportsPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
+import ProjectScenarioActions from "@/components/editor/ProjectScenarioActions.vue";
+import ScenarioTreePrototype from "@/components/editor/ScenarioTreePrototype.vue";
 import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
 import ScenarioOverrideControls from "@/components/editor/ScenarioOverrideControls.vue";
-import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
+import ScenarioHeader from "@/components/editor/ScenarioHeader.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import SimulationRunStatus from "@/components/editor/SimulationRunStatus.vue";
 import SimulationRunSummary from "@/components/editor/SimulationRunSummary.vue";
@@ -33,6 +36,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import type { ProjectScenarioInput } from "@/services/editor-api";
+import { MAX_REPOS } from "@/services/github-api";
 import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
@@ -45,6 +51,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportPath } from "@/services/reports-api";
 import {
@@ -64,7 +78,8 @@ import {
 } from "@/services/editor-view";
 
 import {
-  emptyScenarioOverrideDraft,
+  draftFromScenario,
+  effectiveScenario,
   toScenarioOverrides,
 } from "@/services/scenario-overrides";
 
@@ -89,6 +104,7 @@ const {
   costsError,
   comparison,
   scenarios,
+  savedScenarios,
   versions,
   pending,
   error,
@@ -99,7 +115,9 @@ const {
   openProject,
   openVersion,
   reloadVersions,
-  saveReplicas,
+  saveScenario,
+  createVersion,
+  acceptChatProposal,
   simulate,
   loadCosts,
   compare,
@@ -121,18 +139,19 @@ const cursor = ref(0);
 const playing = ref(false);
 const base = ref("");
 const target = ref("");
-const replicas = ref<string | number>("");
-const currentReplicas = computed(
-  () => version.value?.model.deployment.api.replicas.value,
+
+const activeScenario = computed(() =>
+  savedScenarios.value.find(({ name }) => name === scenario.value),
 );
-const canSave = computed(() => {
+const hasPeak = computed(
+  () => (version.value?.model.traffic.peak_rps?.value ?? 0) > 0,
+);
+const versionForm = ref(false);
+const versionNote = ref("");
+const replicas = ref<string | number>("");
+const canSaveVersion = computed(() => {
   const count = Number(replicas.value);
-  return (
-    Number.isInteger(count) &&
-    count >= 1 &&
-    count <= 50 &&
-    count !== currentReplicas.value
-  );
+  return Number.isInteger(count) && count >= 1 && count <= 50;
 });
 const busy = computed(() => !!pending.value);
 const provenance = isMock
@@ -150,12 +169,10 @@ const primaryRepository = computed(() => {
 // El diagrama sigue el segundo que se reproduce (JAJ-129).
 const nodes = computed(() =>
   graph.value
-    ? toNodes(
-        graph.value,
-        run.value,
-        run.value ? cursor.value : undefined,
-        parentGraph.value,
-      )
+    ? toNodes(graph.value, run.value, version.value?.model, {
+        second: run.value ? cursor.value : undefined,
+        parent: parentGraph.value,
+      })
     : [],
 );
 const edges = computed(() => (graph.value ? toEdges(graph.value) : []));
@@ -180,8 +197,23 @@ const inspected = computed(() => {
     toInspectedNode(node, run.value, provenance, primaryRepository.value)
   );
 });
-const overrideDraft = ref(emptyScenarioOverrideDraft());
-const runOverrides = computed(() => toScenarioOverrides(overrideDraft.value));
+// Los campos muestran los valores que el escenario tiene en la versión abierta (con lo aceptado en el chat).
+const versionScenario = computed(() =>
+  effectiveScenario(activeScenario.value, version.value?.model),
+);
+const baseDraft = computed(() =>
+  draftFromScenario(versionScenario.value, version.value?.model),
+);
+const overrideDraft = ref(structuredClone(toRaw(baseDraft.value)));
+watch(baseDraft, (value) => {
+  overrideDraft.value = structuredClone(toRaw(value));
+});
+const runOverrides = computed(() =>
+  toScenarioOverrides(
+    overrideDraft.value,
+    baseDraft.value.weights as Record<string, number>,
+  ),
+);
 const dependencies = computed(() =>
   (graph.value?.nodes ?? []).filter(({ id }) =>
     graph.value?.slowdown_targets?.includes(id),
@@ -266,6 +298,12 @@ const changes = computed(() =>
 );
 
 const route = useRoute();
+const scenarioTreePreview = computed(
+  () =>
+    import.meta.dev &&
+    route.query.escenarios !== "selector" &&
+    !!projectId.value,
+);
 const projectId = computed(() =>
   typeof route.query.project === "string" ? route.query.project : "",
 );
@@ -285,11 +323,38 @@ const repositories = computed(() => {
   }));
 });
 
+// Sumar repos (JAJ-125): solo a un proyecto que salió de un repo, hasta MAX_REPOS, con la API real.
+const addingRepository = ref(false);
+const projectRepoNames = computed(() =>
+  (projectGroup.value?.repositories ?? []).map((repo) => repo.fullName),
+);
+const canAddRepository = computed(
+  () =>
+    !isMock &&
+    !!projectId.value &&
+    projectRepoNames.value.length > 0 &&
+    projectRepoNames.value.length < MAX_REPOS,
+);
+const primaryRepoName = computed(
+  () =>
+    projectGroup.value?.repositories?.find((repo) => repo.primary)?.fullName,
+);
+
+async function repositoryAdded() {
+  if (projectId.value) await openProject(projectId.value, repoId.value);
+}
+
 function selectRepository(id: string) {
   if (id === project.value?.id || !projectId.value) return;
   return navigateTo({
     path: "/editor",
-    query: { project: projectId.value, repo: id },
+    query: {
+      project: projectId.value,
+      repo: id,
+      ...(route.query.escenarios === "selector"
+        ? { escenarios: "selector" }
+        : {}),
+    },
   });
 }
 
@@ -312,7 +377,8 @@ watch(run, (value) => {
     : undefined;
 });
 watch(version, (detail) => {
-  overrideDraft.value = emptyScenarioOverrideDraft();
+  versionForm.value = false;
+  versionNote.value = "";
   selectedNode.value = null;
   replicas.value = detail?.model.deployment.api.replicas.value ?? "";
 });
@@ -328,29 +394,47 @@ function showCompare(baseId?: string) {
   view.value = "compare";
 }
 
+/** Lo que estaba en pantalla antes de abrir una versión del chat: la corrida y los ajustes. */
+function snapshotRun() {
+  return {
+    before:
+      version.value && run.value
+        ? {
+            version: version.value.number,
+            label: version.value.label,
+            run: run.value,
+          }
+        : null,
+    draft: structuredClone(toRaw(overrideDraft.value)),
+  };
+}
+
+/**
+ * JAJ-141: con la versión nueva ya abierta, se simula con los mismos ajustes (abrir una versión los
+ * limpia) y se recuerda la corrida anterior para el antes y después.
+ */
+async function simulateOpened(
+  snapshot: ReturnType<typeof snapshotRun>,
+  keepOverrides = true,
+) {
+  if (keepOverrides) overrideDraft.value = snapshot.draft;
+  baseline.value = snapshot.before;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (runOverrides.value) await simulate(runOverrides.value);
+}
+
 /**
  * El agente creó una versión (JAJ-141): se abre y se simula con el mismo escenario y ajustes, para
  * ver el efecto en el diagrama. También lo usa el botón «Abrir y simular» de cada versión del chat.
  */
 async function openAndSimulate(number: number) {
-  const before =
-    version.value && run.value
-      ? {
-          version: version.value.number,
-          label: version.value.label,
-          run: run.value,
-        }
-      : null;
-  const draft = structuredClone(toRaw(overrideDraft.value));
+  const snapshot = snapshotRun();
   await until(busy).toBe(false);
   await reloadVersions();
   await openVersion(number);
   if (version.value?.number !== number) return;
-  overrideDraft.value = draft; // abrir la versión limpia los ajustes: se conservan
-  baseline.value = before;
-  view.value = "editor";
-  panel.value = "simulation";
-  if (runOverrides.value) await simulate(runOverrides.value);
+  await simulateOpened(snapshot);
 }
 
 function retrySimulation() {
@@ -396,18 +480,12 @@ const {
   evidence,
   send,
   reset,
+  persist: persistChat,
   dismissEvidence,
 } = useEditorChat(
   computed(() => project.value?.id),
   {
-    // JAJ-141: el agente parte de lo que el usuario está mirando
-    context: () =>
-      version.value
-        ? {
-            version: version.value.number,
-            scenario: scenario.value || undefined,
-          }
-        : undefined,
+    // JAJ-141: una herramienta que guarda una versión (ej. apply_log_traffic) la abre y la simula
     onVersion: (number) => void openAndSimulate(number),
   },
 );
@@ -450,16 +528,71 @@ async function sendChat(text: string) {
   }));
   chatAttachments.clear();
   attachNotice.value = "";
-  await send(text, usingPersonalKey.value ? "personal" : "team", attached);
+  await send(text, usingPersonalKey.value ? "personal" : "team", attached, {
+    version: version.value?.number,
+    scenario: scenario.value || undefined,
+  });
   await refreshChatSettings();
 }
-async function saveVersion() {
-  if (canSave.value) await saveReplicas(Number(replicas.value));
+async function applyChatProposal(id: string) {
+  const message = messages.value.find((item) => item.id === id);
+  if (
+    message?.role !== "chat-proposal" ||
+    message.state !== "idle" ||
+    busy.value
+  )
+    return;
+  if (version.value?.number !== message.proposal.draft.base) {
+    message.error =
+      "La versión base cambió. Abre esa versión o pide una propuesta actualizada.";
+    return;
+  }
+  message.error = undefined;
+  message.state = "pending";
+  const snapshot = snapshotRun();
+  const accepted = await acceptChatProposal(message.proposal);
+  message.state = accepted ? "applied" : "idle";
+  message.version = accepted?.label;
+  if (!accepted)
+    message.error = error.value || "No se pudo aplicar la propuesta.";
+  await persistChat();
+  // JAJ-141: la versión aceptada se simula sola; si la propuesta cambió el escenario, sin los ajustes
+  // anteriores, que eran del escenario de antes
+  if (accepted)
+    await simulateOpened(snapshot, !message.proposal.draft.scenario);
+}
+
+function discardChatProposal(id: string) {
+  const message = messages.value.find((item) => item.id === id);
+  if (message?.role === "chat-proposal" && message.state === "idle") {
+    message.error = undefined;
+    message.state = "discarded";
+    void persistChat();
+  }
+}
+
+async function submitScenario(name: string, input: ProjectScenarioInput) {
+  if (!(await saveScenario(name, input)))
+    return error.value || "No se pudo guardar el escenario.";
+}
+async function submitVersion() {
+  if (
+    canSaveVersion.value &&
+    (await createVersion(Number(replicas.value), versionNote.value))
+  ) {
+    versionForm.value = false;
+  }
+}
+function openVersionDraft() {
+  replicas.value = version.value?.model.deployment.api.replicas.value ?? "";
+  versionNote.value = "";
+  versionForm.value = true;
 }
 </script>
 
 <template>
   <EditorShell
+    :sidebar-default-open="scenarioTreePreview ? true : undefined"
     :repository-name="
       repositories.find((repo) => repo.id === project?.id)?.name ??
       project?.name
@@ -467,6 +600,40 @@ async function saveVersion() {
     :version="version?.label"
     title="Editores"
   >
+    <template v-if="project && version" #version>
+      <Select
+        :model-value="String(version.number)"
+        :disabled="busy"
+        @update:model-value="openVersion(Number($event))"
+      >
+        <SelectTrigger
+          aria-label="Versión"
+          size="sm"
+          class="gap-1 border-0 bg-transparent! px-1.5 font-mono text-sm text-muted-foreground shadow-none hover:text-foreground dark:bg-transparent!"
+        >
+          <SelectValue>{{ version.label }}</SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end" class="max-w-80">
+          <SelectGroup>
+            <SelectItem
+              v-for="entry in versions"
+              :key="entry.id"
+              :value="entry.id"
+              :text-value="entry.label"
+            >
+              <span class="flex min-w-0 flex-col items-start">
+                <span class="font-mono">{{ entry.label }}</span>
+                <span
+                  v-if="entry.summary"
+                  class="max-w-64 truncate text-xs text-muted-foreground"
+                  >{{ entry.summary }}</span
+                >
+              </span>
+            </SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </template>
     <template v-if="project" #nav>
       <Tabs :model-value="view" @update:model-value="changeView">
         <TabsList variant="line" aria-label="Vista">
@@ -503,9 +670,33 @@ async function saveVersion() {
         :repositories="repositories"
         :active-id="project?.id"
         :disabled="busy"
-        :can-connect="false"
+        :can-connect="canAddRepository"
+        connect-label="Agregar repositorio"
         projects-link="/projects"
         @select="selectRepository"
+        @connect="addingRepository = true"
+      >
+        <template
+          v-if="scenarioTreePreview"
+          #repository-children="{ repository }"
+        >
+          <!-- los escenarios son del proyecto: cuelgan solo del repo principal -->
+          <ScenarioTreePrototype
+            v-if="repository.id === project?.id && repository.primary !== false"
+            v-model="scenario"
+            :scenarios="scenarios"
+            :disabled="busy"
+          />
+        </template>
+      </RepositorySidebar>
+      <AddRepositoryDialog
+        v-if="canAddRepository"
+        v-model:open="addingRepository"
+        :project-id="projectId"
+        :parent="version ?? undefined"
+        :existing="projectRepoNames"
+        :primary="primaryRepoName"
+        @added="repositoryAdded"
       />
     </template>
 
@@ -660,14 +851,27 @@ async function saveVersion() {
     </template>
 
     <template #panel>
-      <EditorToolPanel :title="sectionTitles[section]">
+      <EditorToolPanel
+        :title="sectionTitles[section]"
+        :hide-title="section === 'scenarios'"
+      >
         <template v-if="section === 'scenarios'">
-          <ScenarioSelect
+          <ScenarioHeader
             v-model="scenario"
             :options="scenarios"
             :disabled="busy"
-            hide-label
-          />
+          >
+            <template #actions>
+              <ProjectScenarioActions
+                v-if="version"
+                :active="activeScenario"
+                :names="savedScenarios.map(({ name }) => name)"
+                :has-peak="hasPeak"
+                :busy="busy"
+                :save="submitScenario"
+              />
+            </template>
+          </ScenarioHeader>
           <ScenarioOverrideControls
             v-if="!isMock && graph"
             v-model="overrideDraft"
@@ -699,11 +903,22 @@ async function saveVersion() {
             @open="openVersion(Number($event))"
             @compare="showCompare"
           />
-          <form
-            v-if="version"
-            class="flex flex-col gap-2 border-t border-border pt-4"
-            @submit.prevent="saveVersion"
+          <Button
+            v-if="version && !versionForm"
+            variant="outline"
+            :disabled="busy"
+            @click="openVersionDraft"
           >
+            Nueva versión
+          </Button>
+          <form
+            v-if="version && versionForm"
+            class="flex flex-col gap-2 border-t border-border pt-4"
+            @submit.prevent="submitVersion"
+          >
+            <p class="text-xs text-muted-foreground">
+              Versión base {{ version.label }}
+            </p>
             <Label for="api-replicas">Réplicas de la API</Label>
             <Input
               id="api-replicas"
@@ -715,9 +930,29 @@ async function saveVersion() {
               required
               :disabled="busy"
             />
-            <Button type="submit" variant="outline" :disabled="busy || !canSave"
-              >Guardar versión</Button
-            >
+            <Label for="version-note">Nota de la versión</Label>
+            <Textarea
+              id="version-note"
+              v-model="versionNote"
+              maxlength="500"
+              :disabled="busy"
+            />
+            <div class="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                :disabled="busy"
+                @click="versionForm = false"
+                >Cancelar</Button
+              >
+              <Button
+                type="submit"
+                size="sm"
+                :disabled="busy || !canSaveVersion"
+                >Crear versión</Button
+              >
+            </div>
           </form>
         </template>
       </EditorToolPanel>
@@ -871,6 +1106,7 @@ async function saveVersion() {
         <EditorAgentPanel
           :messages="messages"
           :thinking="thinking"
+          :proposal-busy="busy"
           :disabled="chatDisabled"
           :attachments="chatAttachments.drafts.value"
           :can-attach="chatAttachments.enabled"
@@ -880,6 +1116,8 @@ async function saveVersion() {
           @remove-attachment="chatAttachments.remove"
           @dismiss-evidence="dismissRequest"
           @send="sendChat"
+          @apply="applyChatProposal"
+          @discard="discardChatProposal"
           @open-version="openAndSimulate"
           @reset="reset"
         >

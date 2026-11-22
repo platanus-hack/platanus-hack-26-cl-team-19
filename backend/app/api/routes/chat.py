@@ -9,6 +9,10 @@ hasta 5). En el último mensaje, cada imagen va al modelo como bloque de imagen 
 id: el log no se manda, lo leen las tools. Las imágenes de mensajes anteriores no se reenvían. El evento ``done``
 trae ``evidence``: lo que falta respaldar en la última versión del proyecto (``pending_evidence``).
 
+**Persistencia.** ``GET`` y ``PUT /projects/{id}/chat`` guardan la conversación del panel (una por proyecto), con
+cada mensaje tal como se muestra: texto, tool calls y propuestas con su estado. La escribe el editor al terminar
+cada turno y al aceptar o descartar una propuesta.
+
 **Credencial.**
 * **Del usuario:** su API key en ``X-Anthropic-Api-Key`` o ``X-OpenAI-Api-Key``, según el proveedor. Se usa solo en esta
   request: no se guarda, no se escribe en logs y no vuelve en la respuesta.
@@ -23,12 +27,13 @@ import json
 from collections.abc import Iterator
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agent.chat_tools import ChatAgentTools
 from app.agent.loop import IMAGE_MEDIA_TYPES, LLM, AnthropicLLM, image_block, run_agent
-from app.agent.tools import AgentTools, pending_evidence
+from app.agent.tools import pending_evidence
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, UNAUTHORIZED, ApiError
 from app.api.routes.credentials import ChatKeySource, Provider, llm_key
@@ -51,24 +56,16 @@ class ChatMessage(BaseModel):
         return self
 
 
-class ChatContext(BaseModel):
-    """Lo que el usuario está mirando en el editor (JAJ-141): el agente parte de esa versión."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    version: int = Field(ge=1, description="La versión abierta en el editor.")
-    scenario: str | None = Field(default=None, max_length=64, pattern=r"^[\w-]+$", description="El escenario elegido.")
-
-
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Provider = "anthropic"
     expected_source: ChatKeySource | None = None
+    version: int | None = Field(None, ge=1)
+    scenario: str | None = Field(None, max_length=60)
     messages: list[ChatMessage] = Field(
         min_length=1, max_length=40, description="La conversación, la última del usuario."
     )
-    context: ChatContext | None = None
 
 
 @router.post("/{project_id}/chat", summary="Chat con el agente: transmite cada tool call (NDJSON)")
@@ -82,10 +79,14 @@ def chat(
 ) -> StreamingResponse:
     owner = owner_of(user)
     store = request.app.state.store
-    if store.get(project_id, owner) is None:
+    project = store.get(project_id, owner)
+    if project is None:
         raise ApiError(404, NOT_FOUND, f"No existe el proyecto '{project_id}'.", resource="project")
     if req.messages[-1].role != "user":
         raise ApiError(422, INVALID_PARAMETERS, "El último mensaje tiene que ser del usuario.")
+    base = req.version or len(project.versions)
+    if project.version(base) is None:
+        raise ApiError(404, NOT_FOUND, f"No existe la versión v{base}.", resource="version")
     storage = request.app.state.attachments
     if any(m.attachments for m in req.messages) and (user is None or storage is None):
         raise ApiError(401, UNAUTHORIZED, "Inicia sesión para mandar adjuntos al chat.")
@@ -95,16 +96,61 @@ def chat(
     key = llm_key(request, user, req.provider, header, req.expected_source).key
     factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
     llm: LLM = factory(key)
-    tools = AgentTools(store, owner, limiter, storage if user is not None else None)
+    tools = ChatAgentTools(
+        store, owner, limiter, storage if user is not None else None, project_id=project_id, base_version=base
+    )
 
     def events() -> Iterator[bytes]:
-        context = req.context.model_dump() if req.context else None
-        for event in run_agent(tools, llm, project_id, messages, context=context):
+        for event in run_agent(tools, llm, project_id, messages, editor_version=base, editor_scenario=req.scenario):
             if event["type"] == "done":
                 event["evidence"] = _evidence(store, project_id, owner)
             yield (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode()
 
     return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
+MAX_SAVED_MESSAGES = 400
+MAX_SAVED_BYTES = 2 * 1024 * 1024
+
+
+class SavedChatMessage(BaseModel):
+    """Un mensaje del panel. El backend no interpreta su forma: la define el editor."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(min_length=1, max_length=200)
+    role: Literal["user", "agent", "tool", "chat-proposal", "proposal"]
+
+
+class SavedChat(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[SavedChatMessage] = Field(max_length=MAX_SAVED_MESSAGES)
+
+
+def _owned_project(request: Request, project_id: str, user: User | None) -> Any:
+    store = request.app.state.store
+    if store.get(project_id, owner_of(user)) is None:
+        raise ApiError(404, NOT_FOUND, f"No existe el proyecto '{project_id}'.", resource="project")
+    return store
+
+
+@router.get("/{project_id}/chat", response_model=SavedChat, summary="La conversación guardada del proyecto")
+def get_chat(project_id: str, request: Request, user: User | None = Depends(current_user)) -> SavedChat:
+    store = _owned_project(request, project_id, user)
+    return SavedChat(messages=[SavedChatMessage.model_validate(m) for m in store.get_chat(project_id)])
+
+
+@router.put("/{project_id}/chat", status_code=204, summary="Guardar la conversación del proyecto")
+def save_chat(
+    project_id: str, body: SavedChat, request: Request, user: User | None = Depends(current_user)
+) -> Response:
+    store = _owned_project(request, project_id, user)
+    messages = [m.model_dump() for m in body.messages]
+    if len(json.dumps(messages, ensure_ascii=False, default=str)) > MAX_SAVED_BYTES:
+        raise ApiError(422, INVALID_PARAMETERS, "La conversación es demasiado larga para guardarla. Empieza una nueva.")
+    store.save_chat(project_id, messages)
+    return Response(status_code=204)
 
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
