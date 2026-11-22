@@ -317,6 +317,7 @@ const railTitles: Record<EditorSection, string> = {
   components: "Componentes",
   versions: "Versiones",
   reports: "Reportes",
+  traffic: "Tráfico real",
 };
 const scenarioValue = ref("habitual");
 const listSelected = ref<string | null>("orders");

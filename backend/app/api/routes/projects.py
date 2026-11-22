@@ -180,7 +180,7 @@ def apply_version_ops(
 ) -> OpsVersionDetail:
     base = _version(store, _project(store, project_id), number)
     try:
-        result = apply_ops(base.model, req.ops)
+        result = apply_ops(base.model, req.ops, by_user=req.origin == "manual")
     except OpError as e:
         raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
     note = req.note or "; ".join(result.changes)

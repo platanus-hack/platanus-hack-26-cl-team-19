@@ -46,11 +46,17 @@ class _Op(BaseModel):
 
 
 class ScaleApi(_Op):
-    """Cambia las réplicas de la API y, si se da, los vCPU por réplica. Recalcula el costo."""
+    """Cambia las réplicas de la API y, si se dan, los vCPU y los workers por réplica. Recalcula el costo."""
 
     op: Literal["scale_api"]
     replicas: int = Field(ge=1, le=50, description="Réplicas de la API.")
     vcpu: float | None = Field(None, gt=0, le=16, description="vCPU por réplica. Sin valor, se mantiene.")
+    workers: int | None = Field(
+        None,
+        ge=1,
+        le=64,
+        description="Procesos de la API por réplica (uvicorn/gunicorn --workers). Sin valor, se mantienen.",
+    )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió estos números.")
 
 
@@ -74,6 +80,15 @@ class ChangeApiHost(_Op):
         description="Plan en fly (performance-1x...) o render (starter, standard, pro...). En fargate y local, nada.",
     )
     vcpu: float | None = Field(None, gt=0, le=16, description="Solo fargate y local: vCPU por réplica.")
+    replicas: int | None = Field(
+        None, ge=1, le=50, description="Réplicas de la API (máquinas separadas). Sin valor, se mantienen."
+    )
+    workers: int | None = Field(
+        None,
+        ge=1,
+        le=64,
+        description="Procesos de la API por réplica (uvicorn/gunicorn --workers). Sin valor, se mantienen.",
+    )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió el cambio.")
 
 
@@ -84,6 +99,17 @@ class ChangeFrontendHost(_Op):
     provider: str = Field(description="vercel, cloudfront o local.")
     plan: str = Field(description="vercel: hobby o pro. cloudfront: free, pro, business o premium. local: local.")
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él lo dijo.")
+
+
+class SetTrafficBase(_Op):
+    """Solo desde el editor: el pico de req/s global que escribió el usuario (JAJ-170).
+
+    Queda SUPUESTO declarado por el usuario y los escenarios se recalculan como pico × multiplicador. El
+    reparto entre endpoints se ajusta por escenario, en la mezcla de endpoints."""
+
+    op: Literal["set_traffic_base"]
+    peak_rps: float = Field(gt=0, le=1_000_000, description="Requests por segundo en la hora pico.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si la dijo en el chat.")
 
 
 class AddPooler(_Op):
@@ -170,6 +196,7 @@ Op = Annotated[
     | ChangeDbPlan
     | ChangeApiHost
     | ChangeFrontendHost
+    | SetTrafficBase
     | AddPooler
     | AddCache
     | MoveToQueue
@@ -204,11 +231,18 @@ def parse_ops(raw: list[Any]) -> list[Op]:
         raise OpError(f"Operaciones inválidas: {problems}") from None
 
 
-def apply_ops(model: dict[str, Any], ops: list[Any]) -> OpsResult:
-    """Aplica las operaciones en orden sobre una copia del modelo. No modifica ``model``."""
+def apply_ops(model: dict[str, Any], ops: list[Any], *, by_user: bool = False) -> OpsResult:
+    """Aplica las operaciones en orden sobre una copia del modelo. No modifica ``model``.
+
+    ``by_user``: las pidió el usuario en el editor (``origin: manual``). Solo así vale ``set_traffic_base``:
+    el agente declara tráfico con ``set_traffic``, que exige la frase del usuario (ADR 0001)."""
     parsed = parse_ops(list(ops))
     if not parsed:
         raise OpError("No hay operaciones que aplicar.")
+    if not by_user and any(isinstance(op, SetTrafficBase) for op in parsed):
+        raise OpError(
+            "set_traffic_base es solo para el editor. Para el tráfico que dijo el usuario, usa set_traffic con su frase."
+        )
     m = copy.deepcopy(model)
     # ``steps`` es opcional en el modelo (un endpoint sin pasos no consulta nada); las operaciones lo
     # recorren, así que se completa con [] en la copia (antes, add_cache respondía 500, JAJ-101)
@@ -270,8 +304,22 @@ def _scale_api(m: dict[str, Any], op: ScaleApi, catalog: dict[str, Any], warning
         deploy.app_profile, provider, plan, api["replicas"], api["vcpu"], mem, "plan actual de la versión", catalog
     )
     api["usd_month"] = profile["usd_month"]
+    _set_workers(api, op.workers, op.quote, warnings)
     usd = value(profile["usd_month"])
     return f"API: {before} → {op.replicas} × {value(api['vcpu']):g} vCPU (US${usd:,.2f}/mes)"
+
+
+def _set_workers(api: dict[str, Any], workers: int | None, quote: str | None, warnings: list[str]) -> None:
+    """Workers de la API por réplica (JAJ-148). No cambian el costo, pero sí los núcleos que usa el motor:
+    mín(workers, vCPU) × réplicas, porque cada worker es un proceso que usa un núcleo como máximo."""
+    if workers is not None:
+        api["workers"] = _design(workers, "procesos", f"{workers} workers por réplica", quote)
+    w, vcpu = value(api.get("workers"), 1), value(api.get("vcpu"), 1)
+    if w < vcpu:
+        warnings.append(
+            f"La API corre {w:g} worker(s) por réplica con {vcpu:g} vCPU: solo usa {w:g} núcleo(s) por réplica. "
+            "Sobran vCPU que se pagan y no rinden."
+        )
 
 
 # ---------- change_api_host ----------
@@ -279,11 +327,17 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
     api = m["deployment"]["api"]
     before = f"{api.get('provider', 'local')}" + (f" {api['plan']}" if api.get("plan") else "")
     vcpu = api["vcpu"] if op.vcpu is None else _design(op.vcpu, "vCPU", f"{op.vcpu:g} vCPU por réplica", op.quote)
+    replicas = (
+        api["replicas"]
+        if op.replicas is None
+        else _design(op.replicas, "réplicas", f"{op.replicas} réplicas de la API", op.quote)
+    )
     mem = api.get("memory_gb") or _num(2, "GB", "SUPUESTO", "Valor por defecto", needs_review=True)
     why = f"«{op.quote}»" if op.quote else "propuesto por el agente"
-    profile = _profile(deploy.app_profile, op.provider, op.plan, api["replicas"], vcpu, mem, why, catalog)
+    profile = _profile(deploy.app_profile, op.provider, op.plan, replicas, vcpu, mem, why, catalog)
     api.update(
         provider=op.provider,
+        replicas=replicas,
         vcpu=profile.get("vcpu", vcpu),
         memory_gb=profile.get("memory_gb", mem),
         usd_month=profile["usd_month"],
@@ -293,8 +347,13 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
         api["plan"] = profile["plan"]
     else:
         api.pop("plan", None)
+    _set_workers(api, op.workers, op.quote, warnings)
     after = op.provider + (f" {op.plan}" if op.plan else "")
-    return f"API: {before} → {after} ({value(api['vcpu']):g} vCPU por réplica, US${value(api['usd_month']):,.2f}/mes)"
+    return (
+        f"API: {before} → {after} ({value(api['replicas'])} × {value(api['vcpu']):g} vCPU, "
+        f"{value(api['workers'])} workers, "
+        f"US${value(api['usd_month']):,.2f}/mes)"
+    )
 
 
 # ---------- change_db_plan ----------
@@ -338,6 +397,24 @@ def _change_frontend_host(
     warnings.append("El frontend no cambia la simulación: solo su costo.")
     was = f"{before['provider']} {before['plan']}" if before else "sin frontend"
     return f"Frontend: {was} → {op.provider} {op.plan} (US${value(dep['frontend']['usd_month']):,.2f}/mes)"
+
+
+# ---------- set_traffic_base (JAJ-170) ----------
+def _declared_by_user(quote: str | None) -> str:
+    return f"Declarado por el usuario: «{quote}»" if quote else "Declarado por el usuario en el editor"
+
+
+def _set_traffic_base(m: dict[str, Any], op: SetTrafficBase, catalog: dict[str, Any], warnings: list[str]) -> str:
+    traffic = m.setdefault("traffic", {})
+    before = value(traffic.get("peak_rps"), None)
+    traffic["peak_rps"] = _num(op.peak_rps, "req/s", "SUPUESTO", _declared_by_user(op.quote))
+    # todos los escenarios: pico × multiplicador, como set_traffic (JAJ-103)
+    for sc in (traffic.get("scenarios") or {}).values():
+        mult = sc.get("multiplier")
+        mult = mult.get("value") if isinstance(mult, dict) else mult
+        if mult:
+            sc["rps"] = _num(round(op.peak_rps * mult, 2), "req/s", "SUPUESTO", "pico × multiplicador", derived=True)
+    return f"Tráfico declarado: pico {before if before is not None else '—'} → {op.peak_rps:g} req/s"
 
 
 # ---------- add_pooler ----------
@@ -641,6 +718,7 @@ _APPLY = {
     ChangeDbPlan: _change_db_plan,
     ChangeApiHost: _change_api_host,
     ChangeFrontendHost: _change_frontend_host,
+    SetTrafficBase: _set_traffic_base,
     AddPooler: _add_pooler,
     AddCache: _add_cache,
     MoveToQueue: _move_to_queue,

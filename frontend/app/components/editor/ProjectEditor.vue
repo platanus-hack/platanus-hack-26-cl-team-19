@@ -13,6 +13,7 @@ import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
 import EditorReportsPanel from "@/components/editor/EditorReportsPanel.vue";
+import EditorTrafficPanel from "@/components/editor/EditorTrafficPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
 import ProjectScenarioActions from "@/components/editor/ProjectScenarioActions.vue";
@@ -41,6 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ProjectScenarioInput } from "@/services/editor-api";
 import { MAX_REPOS } from "@/services/github-api";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -63,6 +65,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportPath } from "@/services/reports-api";
 import {
+  apiSize,
   currentDeployment,
   deploymentKind,
 } from "@/services/deployment-options";
@@ -176,6 +179,7 @@ const sectionTitles = {
   components: "Componentes",
   versions: "Versiones",
   reports: "Reportes",
+  traffic: "Tráfico real",
 };
 const view = ref<"editor" | "compare">("editor");
 const selectedNode = ref<string | null>(null);
@@ -1004,6 +1008,14 @@ function openVersionDraft() {
             <ComponentList :nodes="nodes" />
           </section>
         </template>
+        <EditorTrafficPanel
+          v-else-if="section === 'traffic'"
+          :model="version?.model"
+          :version-label="version ? `v${version.number}` : undefined"
+          :busy="busy"
+          :readonly="isMock"
+          @apply="onChangeDeployment"
+        />
         <EditorReportsPanel
           v-else-if="section === 'reports'"
           :project-id="project?.id ?? null"
@@ -1095,6 +1107,7 @@ function openVersionDraft() {
           :kind="selectedDeployment"
           :options="deploymentOptions?.[selectedDeployment] ?? null"
           :current="currentDeployment(version?.model, selectedDeployment)"
+          :size="apiSize(version?.model)"
           :busy="busy"
           :version-label="version ? `v${version.number}` : undefined"
           @apply="onChangeDeployment"
@@ -1134,6 +1147,17 @@ function openVersionDraft() {
         :selected-id="selectedNode"
         @select="selectedNode = $event"
       />
+      <div
+        v-else-if="pending"
+        role="status"
+        aria-live="polite"
+        class="m-auto flex flex-col items-center gap-3 text-sm text-muted-foreground"
+      >
+        <Spinner class="size-6" />
+        <span>{{
+          pending.startsWith("Abriendo") ? pending : "Cargando diagrama…"
+        }}</span>
+      </div>
       <Button
         v-else-if="error"
         variant="outline"

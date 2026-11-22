@@ -32,6 +32,9 @@ def test_options_cover_each_component_with_provenance(client):
                     if spec is not None:
                         assert spec["label"] in LABELS and spec["source"], (provider["id"], plan["id"], name)
     assert providers["api"]["fargate"]["sized_by_vcpu"] and not providers["api"]["fargate"]["plans"]
+    # el editor calcula el costo de Fargate con los vCPU elegidos: necesita los precios unitarios
+    example = providers["api"]["fargate"]["example"]
+    assert example["usd_vcpu_hour"]["value"] > 0 and example["usd_gb_hour"]["value"] > 0
 
 
 def test_choosing_a_plan_in_the_editor_creates_a_manual_version_that_simulates_with_it(client):
