@@ -159,11 +159,15 @@ class ApplyOpsRequest(BaseModel):
         min_length=1,
         max_length=20,
         description=(
-            "Operaciones en orden: scale_api, change_db_plan, add_pooler, add_cache, move_to_queue "
-            "(ver app/agent/ops.py)."
+            "Operaciones en orden: scale_api, change_db_plan, change_api_host, change_frontend_host, add_pooler, "
+            "add_cache, move_to_queue... (ver app/agent/ops.py)."
         ),
     )
     note: str | None = Field(None, max_length=500, description="Por qué se propone. Por defecto, los cambios.")
+    origin: Literal["agente", "manual"] = Field(
+        "agente",
+        description="manual: el usuario eligió el cambio en el editor (JAJ-148). agente: lo propuso el agente.",
+    )
 
 
 class VersionSummary(BaseModel):

@@ -1,3 +1,4 @@
+import type { DeploymentOptions } from "@/services/deployment-options";
 import type {
   Comparison,
   CostEstimate,
@@ -274,6 +275,33 @@ export function useEditorProject() {
     return accepted as VersionDetail | null;
   }
 
+  // JAJ-148: los proveedores y planes del catálogo, una vez por sesión (no cambian)
+  const deploymentOptions = shallowRef<DeploymentOptions | null>(null);
+  async function loadDeploymentOptions() {
+    if (isMock || deploymentOptions.value || !("deploymentOptions" in api))
+      return;
+    try {
+      deploymentOptions.value = await api.deploymentOptions();
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
+  }
+
+  // JAJ-148: el plan elegido en el inspector crea una versión nueva con la operación del catálogo
+  async function changeDeployment(
+    ops: Record<string, unknown>[],
+    note: string,
+  ) {
+    const current = project.value;
+    const parent = version.value;
+    if (!current || !parent || isMock || !("applyOps" in api)) return false;
+    return request("Creando versión…", async () => {
+      const saved = await api.applyOps(current.id, parent.number, ops, note);
+      project.value = { ...current, versions: [...current.versions, saved] };
+      await displayVersion(saved);
+    });
+  }
+
   async function simulate(overrides?: ScenarioOverrides) {
     const id = project.value?.id;
     const number = version.value?.number;
@@ -390,6 +418,9 @@ export function useEditorProject() {
     saveScenario,
     createVersion,
     acceptChatProposal,
+    changeDeployment,
+    deploymentOptions,
+    loadDeploymentOptions,
     simulate,
     loadCosts,
     compare,

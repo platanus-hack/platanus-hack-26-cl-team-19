@@ -156,7 +156,7 @@ def apply_version_ops(
     except OpError as e:
         raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
     note = req.note or "; ".join(result.changes)
-    version = store.add_version(project_id, result.model, "agente", number, note[:500])
+    version = store.add_version(project_id, result.model, req.origin, number, note[:500])
     return OpsVersionDetail(
         **_summary(version).model_dump(), model=version.model, changes=result.changes, warnings=result.warnings
     )

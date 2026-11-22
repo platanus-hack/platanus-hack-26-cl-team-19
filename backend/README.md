@@ -152,6 +152,7 @@ Cada componente corre en un proveedor y un plan del catálogo. El perfil del pla
 - **Tecnología (JAJ-87):** la DB, la API y cada servicio traen un bloque `technology` (`name`, `version`, `label`, `source`, `at`).
   - **`OBSERVADO`:** la imagen de la IaC (`postgres:16`) o el manifiesto del repo (`express` en `package.json:3`).
   - **`ESTIMADO`:** el framework que reconoció la IA, o el motor que implica el proveedor (Neon solo ofrece PostgreSQL).
+- **Editor (JAJ-148):** `GET /catalog/deployment` lista los proveedores y planes de la DB, la API y el frontend, con sus especificaciones y procedencia. El inspector los ofrece al hacer clic en esos nodos; elegir uno llama a `POST /projects/{id}/versions/{n}/ops` con `origin: "manual"` y crea la versión nueva.
 - **Agente:** `change_db_plan` acepta Neon. `change_api_host` mueve la API a otro proveedor o plan. `change_frontend_host` dice dónde se sirve el frontend. `set_deployment` con `db.plan` deduce el proveedor del plan, por ejemplo «Neon 1 CU» → `neon 1cu`.
 
 ### Quién causa el cuello de botella (JAJ-69)
