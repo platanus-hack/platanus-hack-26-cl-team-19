@@ -61,6 +61,7 @@ class ChatAgentTools(AgentTools):
                 "draft": draft.model_dump(exclude_none=True),
                 "changes": prepared.changes,
                 "warnings": prepared.warnings,
+                "new_scenario": prepared.new_scenario is not None,
             }
         }
 

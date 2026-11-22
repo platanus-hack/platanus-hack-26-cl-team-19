@@ -9,6 +9,7 @@ implementaciones: ``InMemoryProjectStore`` (se pierde al reiniciar; la usan los 
 from __future__ import annotations
 
 import copy
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field, replace
@@ -171,6 +172,8 @@ class CachedAnalysis:
 
 
 INITIAL_SCENARIO = "actual"
+# Nombre válido de un escenario del proyecto (ej. black_friday)
+SCENARIO_NAME = re.compile(r"[a-z0-9_-]{1,60}")
 
 
 def initial_scenarios(model: dict[str, Any]) -> list[ProjectScenario]:

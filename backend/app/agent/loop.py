@@ -258,7 +258,8 @@ def run_agent(
     if editor_version is not None:
         prompt += (
             f"\nLa versión abierta es v{editor_version}, el escenario seleccionado es {editor_scenario!r}. "
-            "Usa esa versión en herramientas de lectura. Para cambiar un escenario, usa propose_scenario. "
+            "Usa esa versión en herramientas de lectura. Para cambiar un escenario o crear uno que el proyecto no "
+            "tiene (ej. cyberday ×20), usa propose_scenario; no le pidas al usuario que lo cree a mano. "
             "Para cambios de arquitectura, usa propose_version. Las propuestas quedan pendientes: "
             "pide al usuario que las acepte en la tarjeta antes de afirmar que se aplicaron. "
             "Para el tráfico en req/s usa rps, para multiplicar el pico usa multiplier y para conversión usa una fracción."

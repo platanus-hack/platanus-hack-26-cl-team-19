@@ -384,7 +384,11 @@ def _version_label(v: Version) -> dict[str, Any]:
 # ---------- las tools ----------
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
-    "propose_scenario": "Prepara un cambio de escenario para aprobar en el chat. Usa una fracción para la conversión.",
+    "propose_scenario": (
+        "Prepara un escenario para aprobar en el chat: cambia uno del proyecto o crea uno nuevo "
+        "(nombre en minúsculas, ej. cyberday, con rps o multiplier y una descripción). "
+        "Usa una fracción para la conversión."
+    ),
     "list_projects": "Lista los proyectos del usuario con sus versiones. Empieza por aquí para obtener project_id.",
     "get_model": "Resumen de una versión: despliegue, tráfico, escenarios, endpoints con archivo:línea, metas y "
     "cuántos SUPUESTO tiene. No incluye el JSON completo.",
