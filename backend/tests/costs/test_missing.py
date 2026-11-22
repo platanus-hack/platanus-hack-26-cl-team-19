@@ -4,8 +4,9 @@ import copy
 
 import pytest
 
-from app.api.routes.projects import compare_summary
+from app.api.routes.projects import _usd, compare_summary
 from app.costs import cost_delta, estimate_cost
+from app.models.architecture import value
 from app.samples import load_sample
 
 
@@ -58,7 +59,7 @@ def test_local_replicas_do_not_change_cost_and_summary_says_why(template):
     delta = cost_delta(estimate_cost(a), estimate_cost(b))
     assert delta.diff == 0 and delta.missing == ["api"]
     text = compare_summary(1, 2, delta, None, None)
-    assert text.startswith("v2 cuesta +US$0.00/mes respecto de v1 sin contar la API, que no tiene precio")
+    assert text.startswith("v2 cuesta lo mismo que v1 sin contar la API, que no tiene precio")
     # con la DB también en local, el caso plural pasa de verdad por estimate_cost y cost_delta
     for raw in (a, b):
         raw["deployment"]["db"]["provider"] = "local"
@@ -112,10 +113,13 @@ def test_only_one_version_priced_is_not_counted_as_difference(template):
     assert delta.diff == pytest.approx(0, abs=0.01)  # el resto (DB, transferencia) es igual
     assert delta.b - delta.a == pytest.approx(delta.diff, abs=0.01)
     assert value_of(b) > value_of(a)  # los totales completos siguen en cada CostEstimate
+    # JAJ-156: la API se dice aparte con su monto, y la diferencia comparable no se presenta como "+US$0"
+    api = sum(value(line.usd_month) for line in b.lines if line.id in ("api", "alb"))
+    assert delta.priced_in_one == {"api": pytest.approx(api, abs=0.01)} and delta.comparable is False
     text = compare_summary(1, 2, delta, None, None)
-    assert "sin contar la API (con precio solo en v2)" in text
+    assert text == f"v2 suma {_usd(api)}/mes en la API (v1 no tiene precio); el resto cuesta lo mismo."
     reverse = compare_summary(1, 2, cost_delta(b, a), None, None)
-    assert "sin contar la API (con precio solo en v1)" in reverse
+    assert reverse.startswith(f"v1 suma {_usd(api)}/mes en la API (v2 no tiene precio)")
 
 
 def test_mixed_missing_reads_well(template):
@@ -124,15 +128,14 @@ def test_mixed_missing_reads_well(template):
     for raw in (v1, v2):
         raw["deployment"]["db"]["provider"] = "local"
     text = compare_summary(1, 2, cost_delta(estimate_cost(v1), estimate_cost(v2)), None, None)
-    assert (
-        "sin contar la DB, que no tiene precio (despliegue local o proveedor sin precios), "
-        "ni la API (con precio solo en v2)"
-    ) in text
+    assert text.startswith("v2 suma US$")
+    assert "/mes en la API (v1 no tiene precio)" in text
+    assert text.endswith("sin contar la DB, que no tiene precio (despliegue local o proveedor sin precios).")
     # cada componente con precio en una sola versión distinta
     db_only_v1 = copy.deepcopy(v2)
     db_only_v1["deployment"]["db"]["provider"] = "supabase"
     cross = compare_summary(1, 2, cost_delta(estimate_cost(db_only_v1), estimate_cost(v1)), None, None)
-    assert "sin contar la API (con precio solo en v1) ni la DB (con precio solo en v1)" in cross
+    assert "en la API (v2 no tiene precio); v1 suma US$" in cross and "en la DB (v2 no tiene precio)" in cross
 
 
 def value_of(est):

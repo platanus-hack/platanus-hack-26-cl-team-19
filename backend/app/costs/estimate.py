@@ -480,6 +480,10 @@ class CostDelta:
     las dos versiones. Si la API tiene precio solo en v2 (v1 en local), sumarla haría que todo el
     "+US$X" fuera la API de v2, presentado como una diferencia. Los totales completos de cada versión
     siguen en su ``CostEstimate``.
+
+    JAJ-156: ``priced_in_one`` dice cuánto cuesta cada componente que tiene precio en una sola versión
+    (en la que lo tiene), y ``comparable`` es False si hay alguno. Así el editor no muestra
+    "US$0 → US$0 = Igual" cuando los totales de las dos versiones son distintos.
     """
 
     a: float
@@ -491,6 +495,9 @@ class CostDelta:
     missing: list[str] = field(default_factory=list)
     missing_a: list[str] = field(default_factory=list)
     missing_b: list[str] = field(default_factory=list)
+    # componente con precio en una sola versión → su US$/mes en esa versión (con sus líneas, ej. el ALB)
+    priced_in_one: dict[str, float] = field(default_factory=dict)
+    comparable: bool = True  # False si algún componente tiene precio en una sola versión
 
 
 def cost_delta(a: CostEstimate, b: CostEstimate) -> CostDelta:
@@ -500,6 +507,14 @@ def cost_delta(a: CostEstimate, b: CostEstimate) -> CostDelta:
     lb = {line.id: value(line.usd_month) for line in b.lines if line.id not in skip}
     va, vb = round(sum(la.values()), 2), round(sum(lb.values()), 2)
     by_line = {k: round(lb.get(k, 0.0) - la.get(k, 0.0), 2) for k in sorted(set(la) | set(lb))}
+    priced_in_one = {
+        c: round(
+            sum(value(line.usd_month) for line in (b if c in a.missing else a).lines if line.id in COMPONENT_LINES[c]),
+            2,
+        )
+        for c in missing
+        if (c in a.missing) != (c in b.missing)
+    }
     return CostDelta(
         va,
         vb,
@@ -509,4 +524,6 @@ def cost_delta(a: CostEstimate, b: CostEstimate) -> CostDelta:
         missing,
         list(a.missing),
         list(b.missing),
+        priced_in_one,
+        not priced_in_one,
     )

@@ -461,41 +461,53 @@ def compare_summary(
     return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b) + _overrides_sentence(run_a)
 
 
+def _usd(x: float, decimals: int = 2) -> str:
+    """Un monto en US$ con el formato del editor (es-CL): punto de miles y coma decimal, 'US$1.234,50'."""
+    s = f"{abs(x):,.{decimals}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"US${s}"
+
+
 def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
+    """La parte de costo del resumen de una comparación. Ejemplos:
+
+    * 'v2 cuesta +US$57,66/mes respecto de v1 y evita entre US$120 y US$480 por hora en ventas en juego.'
+    * 'v2 suma US$7,00/mes en la API (v1 no tiene precio); el resto cuesta lo mismo.' (JAJ-156)
+    * 'v2 cuesta lo mismo que v1 sin contar la DB, que no tiene precio (…).' (JAJ-88)
+
+    Un componente con precio en una sola versión se dice aparte, con su monto: sumarlo a la diferencia la
+    inflaría, y dejarlo fuera sin decirlo hacía leer "+US$0,00" con totales distintos. Las ventas en juego
+    se omiten si la diferencia es US$0 en las dos cotas (ninguna versión falla, o fallan igual).
+    """
+    parts = []
+    for c, usd in cost.priced_in_one.items():
+        priced, other = (b, a) if c in cost.missing_a else (a, b)
+        parts.append(f"v{priced} suma {_usd(usd)}/mes en {COMPONENT_NAMES[c]} (v{other} no tiene precio)")
     sign = "+" if cost.diff >= 0 else "−"
-    text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
-    if cost.missing:  # JAJ-88: sin esto, "+US$0.00" con la API en local se lee como "no cambia el costo"
-        text += " sin contar " + _missing_clause(a, b, cost)
+    if not parts:
+        parts.append(
+            f"v{b} cuesta lo mismo que v{a}"
+            if cost.diff == 0
+            else f"v{b} cuesta {sign}{_usd(cost.diff)}/mes respecto de v{a}"
+        )
+    elif cost.by_line:  # el resto: lo que tiene precio en las dos
+        parts.append("el resto cuesta lo mismo" if cost.diff == 0 else f"el resto cuesta {sign}{_usd(cost.diff)}/mes")
+    text = "; ".join(parts)
+    both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
+    if both:  # JAJ-88: sin esto, "lo mismo" con la DB en local se lee como "no cambia el costo"
+        text += f" sin contar {describe_missing(both)} (despliegue local o proveedor sin precios)"
     if fa is None or fb is None:
         return text + "."
     if fa.too_short or fb.too_short:
         return text + ". La simulación es muy corta para ver los timeouts: simula más tiempo para comparar las ventas."
     lo, hi = sorted(fa.lost_sales_per_hour[k]["value"] - fb.lost_sales_per_hour[k]["value"] for k in ("low", "high"))
+    if round(lo) == 0 and round(hi) == 0:
+        return text + "."
     floor = " (al menos)" if fa.is_floor or fb.is_floor else ""
     if lo >= 0:
-        return text + f" y evita entre US${lo:,.0f} y US${hi:,.0f} por hora en ventas en juego{floor}."
+        return text + f" y evita entre {_usd(lo, 0)} y {_usd(hi, 0)} por hora en ventas en juego{floor}."
     if hi <= 0:
-        return text + f" y suma entre US${-hi:,.0f} y US${-lo:,.0f} por hora en ventas en juego{floor}."
-    return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
-
-
-def _missing_clause(a: int, b: int, cost: CostDelta) -> str:
-    """Qué no cuenta la diferencia y por qué (JAJ-88). Ejemplos:
-
-    * 'la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)'
-    * 'la API (con precio solo en v2)'
-    * 'la DB, que no tiene precio (…), ni la API (con precio solo en v2)'
-    """
-    both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
-    only = [
-        f"{COMPONENT_NAMES[c]} (con precio solo en v{b if c in cost.missing_a else a})"
-        for c in cost.missing
-        if c not in both
-    ]
-    if not both:
-        return " ni ".join(only)
-    head = f"{describe_missing(both)} (despliegue local o proveedor sin precios)"
-    return head + (", ni " + " ni ".join(only) if only else "")
+        return text + f" y suma entre {_usd(hi, 0)} y {_usd(lo, 0)} por hora en ventas en juego{floor}."
+    return text + f"; las ventas en juego cambian entre −{_usd(lo, 0)} y +{_usd(hi, 0)} por hora{floor}."
 
 
 def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -> str:
