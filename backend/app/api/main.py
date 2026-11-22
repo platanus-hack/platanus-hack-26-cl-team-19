@@ -37,7 +37,19 @@ from app.agent.openai_llm import OpenAILLM
 from app.agent.tools import Limiter
 from app.api.auth import SupabaseAuth, auth_from_env
 from app.api.errors import install_error_handlers
-from app.api.routes import attachments, chat, costs, credentials, github, health, models, projects, reports, runs
+from app.api.routes import (
+    attachments,
+    catalog,
+    chat,
+    costs,
+    credentials,
+    github,
+    health,
+    models,
+    projects,
+    reports,
+    runs,
+)
 from app.api.run_cache import RUN_CACHE_HEADER
 from app.api.store import InMemoryProjectStore, ProjectStore
 from app.github import GitHubApp, GitHubAppConfig
@@ -126,6 +138,7 @@ def create_app(
     app.include_router(credentials.router)
     app.include_router(attachments.router)
     app.include_router(reports.router)  # JAJ-127
+    app.include_router(catalog.router)  # JAJ-148
 
     app.mount("/", mcp_app)  # /mcp: el servidor MCP del agente (al final: las rutas de arriba tienen prioridad)
     return app
