@@ -10,6 +10,7 @@ import pytest
 
 from app.engine import simulate
 from app.models import load_model
+from app.models.graph import build_graph
 
 # JAJ-44, prueba de caché (results/jaj44/cal_cache.json y real_cache.csv del spike):
 # pool de 5 conexiones, consulta de 20,8 ms, 50 % de aciertos, API con 0,79 ms de CPU y 0,37 ms de red.
@@ -81,6 +82,28 @@ def test_cache_always_hits_skips_db():
     run = simulate(load_model(model_dict([cached_query(1.0)])), rps=200, duration_s=10)
     assert run.cache.misses == 0 and run.cache.hits == run.requests - run.in_flight
     assert resource(run, "db_pool").utilization == 0
+    assert run.measured_edges == ["api->cache", "api->db"]
+    assert all("api->db" not in (second.edge_calls or {}) for second in run.series)
+    assert sum((second.edge_calls or {}).get("api->cache", 0) for second in run.series) == run.cache.hits
+
+
+def test_repeated_external_calls_match_graph_and_count_each_step():
+    step = {"kind": "external", "resource": "external", "time": 0, "repeat": 3, "service": "Pagos"}
+    raw = model_dict([step])
+    raw["deployment"]["services"] = [
+        {"name": "Pagos", "role": "service", "origin": "ia", "repo": "acme/pagos", "simulated": False}
+    ]
+    raw["deployment"]["frontend"] = {"provider": "vercel"}
+    model = load_model(raw)
+    graph = build_graph(model, raw)
+    run = simulate(model, rps=10, duration_s=5, arrivals="uniform")
+
+    assert {edge.id for edge in graph.edges} == {"api->service:pagos", "frontend->api"}
+    assert run.measured_edges == ["api->service:pagos"]
+    assert [second.t for second in run.series] == [1, 2, 3, 4, 5]
+    calls = [(second.edge_calls or {}).get("api->service:pagos", 0) for second in run.series]
+    assert sum(calls) == run.ok * 3
+    assert calls[1] == 30
 
 
 def test_cache_hit_ratio_override():
@@ -130,6 +153,9 @@ def test_queue_under_capacity():
     assert q.processed >= q.enqueued - 2
     assert q.job_latency.p95_ms == pytest.approx(100.0, abs=0.01)
     assert run.latency.p95_ms < 2  # encolar es casi instantáneo
+    assert run.measured_edges == ["api->queue:emails", "queue:emails->worker:emails"]
+    assert all((s.edge_calls or {}).get("api->queue:emails", 0) == 10 for s in run.series[1:-1])
+    assert all((s.edge_calls or {}).get("queue:emails->worker:emails", 0) == 10 for s in run.series[1:-1])
 
 
 def test_queue_over_capacity_fills_and_rejects():
@@ -155,6 +181,8 @@ def test_queue_jobs_use_db_cpu():
     run = simulate(load_model(raw), rps=10, duration_s=30, arrivals="uniform")
     assert resource(run, "db_cpu").utilization == pytest.approx(0.5, rel=0.05)
     assert resource(run, "db_pool").utilization == 0  # el worker no usa el pool de la API
+    assert run.measured_edges == ["api->queue:emails", "queue:emails->worker:emails", "worker:emails->db"]
+    assert all((s.edge_calls or {}).get("worker:emails->db", 0) == 10 for s in run.series[1:-1])
 
 
 def test_background_without_queue_config_warns():

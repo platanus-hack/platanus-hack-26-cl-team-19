@@ -205,6 +205,12 @@ Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`
 - **`series[].target_rps`:** las req/s que pide el perfil en cada segundo, para dibujar la curva pedida contra lo que se atiende (`ok`). Sin perfil es la tasa constante.
 - **`traffic_profile`:** los tramos en req/s, con su segundo de inicio y de fin. Sin perfil es `null`.
 
+### Flujo por arista (JAJ-136)
+
+`measured_edges` enumera los ID de `POST /graph` que instrumenta la simulación. Cada `series[].edge_calls` guarda por ID las llamadas iniciadas en ese segundo. Si falta una arista incluida en `measured_edges`, su contador es cero. En corridas anteriores a esta métrica, `measured_edges` puede estar ausente o ser `null`.
+
+Cada repetición de un paso cuenta por separado y los pasos condicionales solo cuentan al ejecutarse. El conector de la cola al worker mide el inicio del trabajo al adquirir un worker. La espera sigue saliendo en `series[].queue` por recurso.
+
 **El tope de requests por llamada** (300.000) usa el multiplicador medio del perfil.
 
 **La forma de `"pico"`** es la que usa el editor en sus datos de ejemplo. Es una elección de diseño para mostrar un evento, no una medición: en JAJ-59, el usuario la va a poder dar en el chat.

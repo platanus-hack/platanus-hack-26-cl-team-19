@@ -67,6 +67,7 @@ class Step:
     # solo background: cola donde se encola el trabajo (None = no se simula el worker)
     queue: str | None = None
     infer_queue: bool = True  # compatibilidad con modelos que omiten el nombre cuando solo hay una cola
+    service: str | None = None  # nombre del destino de un paso externo
 
 
 def walk_steps(steps: tuple[Step, ...]) -> Iterator[Step]:
@@ -161,6 +162,7 @@ class ArchitectureModel:
     scenarios: dict[str, Scenario]
     warnings: tuple[str, ...] = field(default_factory=tuple)
     queues: dict[str, QueueDeployment] = field(default_factory=dict)
+    secondary_services: frozenset[str] = frozenset()
 
     @property
     def app_connections(self) -> int:
@@ -315,6 +317,12 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         rps = _number(sc.get("rps"), f"{w}.rps", gt=0)
         if rps is not None:
             scenarios[name] = Scenario(name, float(rps))
+    services = dep.get("services")
+    service_roles = {
+        s["name"].lower(): s.get("role")
+        for s in (services if isinstance(services, list) else [])
+        if isinstance(s, dict) and s.get("origin") and isinstance(s.get("name"), str)
+    }
     return ArchitectureModel(
         name=_obj(raw.get("repo", {}), "repo").get("path", "modelo"),
         api=api,
@@ -323,6 +331,7 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         scenarios=scenarios,
         warnings=tuple(warnings),
         queues=queues,
+        secondary_services=frozenset(name for name, role in service_roles.items() if role == "service"),
     )
 
 
@@ -350,6 +359,7 @@ def _load_step(s: Any, where: str, warnings: list[str], path: str) -> Step:
             hit_ratio = 0.0
         if not 0.0 <= hit_ratio <= 1.0:
             raise ValueError(f"{where}: hit_ratio debe estar entre 0 y 1 (es {hit_ratio})")
+    service = s.get("service")
     return Step(
         kind=s.get("kind", "?"),
         resource=resource,
@@ -362,6 +372,7 @@ def _load_step(s: Any, where: str, warnings: list[str], path: str) -> Step:
         on_miss=on_miss,
         queue=s.get("queue"),
         infer_queue=s.get("infer_queue", True),
+        service=service if isinstance(service, str) and service else None,
     )
 
 

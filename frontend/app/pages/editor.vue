@@ -67,6 +67,7 @@ import {
   toBottleneck,
   toComparisonRows,
   toEdges,
+  flowPeak,
   toFlows,
   toHostedNode,
   toInspectedNode,
@@ -177,8 +178,11 @@ const nodes = computed(() =>
     : [],
 );
 const edges = computed(() => (graph.value ? toEdges(graph.value) : []));
+const peakFlow = computed(() => (run.value ? flowPeak(run.value) : 1));
 const flows = computed(() =>
-  graph.value && run.value ? toFlows(graph.value, run.value, cursor.value) : [],
+  graph.value && run.value
+    ? toFlows(graph.value, run.value, cursor.value, peakFlow.value)
+    : [],
 );
 const bottleneck = computed(() =>
   run.value

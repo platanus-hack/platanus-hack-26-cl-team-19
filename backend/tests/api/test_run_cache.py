@@ -94,6 +94,15 @@ def test_run_round_trips_through_json(store, pid):
     data = run_to_json(run)
     assert data == r
     json.dumps(data, allow_nan=False)  # Postgres (jsonb) no acepta NaN ni infinito
+    assert "api->db" in data["measured_edges"]
+    assert any(sample["edge_calls"].get("api->db", 0) for sample in data["series"])
+
+    del data["measured_edges"]
+    for sample in data["series"]:
+        del sample["edge_calls"]
+    legacy = run_from_json(data)
+    assert legacy.measured_edges is None
+    assert all(sample.edge_calls is None for sample in legacy.series)
 
 
 def test_cache_key_depends_on_everything():
