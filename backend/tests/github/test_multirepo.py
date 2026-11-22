@@ -236,3 +236,102 @@ def test_the_key_never_reaches_the_job(store):
     job = run(client)
     assert KEY not in json.dumps(job)
     assert KEY not in json.dumps(store.get_version(job["project_id"], 1).model)
+
+
+# ---------- sumar repos a un proyecto que ya existe ----------
+
+
+def test_adding_a_repo_to_a_single_repo_project_creates_a_version(store):
+    client = make_client(store, RepoAnalyst())
+    project_id = run(client, {"repo_full_name": "acme/api"})["project_id"]
+    job = run(client, {"project_id": project_id, "repo_full_name": "acme/worker"})
+    assert job["status"] == "done", job["error_message"]
+    assert (job["project_id"], job["version"]) == (project_id, 2)
+    assert [(r["full_name"], r["primary"], r["status"]) for r in job["repos"]] == [("acme/worker", False, "done")]
+
+    detail = client.get(f"/projects/{project_id}").json()
+    assert [(r["fullName"], r["primary"]) for r in detail["repositories"]] == [
+        ("acme/api", True),
+        ("acme/worker", False),
+    ]
+    v2 = detail["versions"][1]
+    assert (v2["origin"], v2["parent"]) == ("repo", 1) and "acme/worker@main" in v2["note"]
+
+    model = store.get_version(project_id, 2).model
+    assert [e["id"] for e in model["endpoints"]] == ["GET /orders", "POST /orders"]  # sigue simulando el principal
+    worker = next(s for s in model["deployment"]["services"] if s.get("role") == "service")
+    assert worker["name"] == "worker" and worker["simulated"] is False and worker["repo"] == "acme/worker"
+    assert [(s["full_name"], s["primary"]) for s in model["repo"]["sources"]] == [
+        ("acme/api", True),
+        ("acme/worker", False),
+    ]
+    steps = {s["at"]: s for e in model["endpoints"] for s in e["steps"]}
+    assert steps["src/app.js:5"]["linked_repo"] == "acme/worker"
+    assert store.get_version(project_id, 1).model["repo"]["sources"][0]["full_name"] == "acme/api"  # v1 intacta
+
+
+def test_adding_keeps_the_previous_secondaries(store, monkeypatch):
+    client = make_client(store, RepoAnalyst())
+    project_id = run(client)["project_id"]  # api (principal) + worker
+    client.app.state.github.tarballs["acme/c"] = tarball({"main.py": WORKER}, root=f"acme-c-{SHA[:7]}")
+    monkeypatch.setitem(ARCH, "acme/c", ARCH["acme/worker"])
+    job = run(client, {"project_id": project_id, "repos": [{"full_name": "acme/c"}]})
+    assert job["status"] == "done", job["error_message"]
+    model = store.get_version(project_id, 2).model
+    assert [s["full_name"] for s in model["repo"]["sources"]] == ["acme/api", "acme/worker", "acme/c"]
+    names = {s["name"] for s in model["deployment"]["services"] if s.get("role") == "service"}
+    assert names == {"worker", "c"}
+    repos = client.get(f"/projects/{project_id}").json()["repositories"]
+    assert [r["fullName"] for r in repos] == ["acme/api", "acme/worker", "acme/c"]
+
+
+def test_a_failed_added_repo_saves_nothing(store):
+    client = make_client(store, RepoAnalyst(fail={"acme/worker"}))
+    project_id = run(client, {"repo_full_name": "acme/api"})["project_id"]
+    job = run(client, {"project_id": project_id, "repo_full_name": "acme/worker"})
+    assert job["status"] == "failed" and job["error_message"].startswith("acme/worker:")
+    assert len(client.get(f"/projects/{project_id}").json()["versions"]) == 1
+    assert store.get(project_id).repos()[0].full_name == "acme/api" and len(store.get(project_id).repos()) == 1
+
+
+def test_adding_from_an_older_version_keeps_its_parent(store):
+    client = make_client(store, RepoAnalyst())
+    project_id = run(client, {"repo_full_name": "acme/api"})["project_id"]
+    model = store.get_version(project_id, 1).model
+    assert client.post(f"/projects/{project_id}/versions", json={"model": model, "note": "copia"}).status_code == 201
+    job = run(client, {"project_id": project_id, "repo_full_name": "acme/worker", "parent": 1})
+    assert job["version"] == 3
+    assert client.get(f"/projects/{project_id}").json()["versions"][2]["parent"] == 1
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "message"),
+    [
+        ({"repo_full_name": "acme/api"}, 422, "ya es parte"),
+        ({"repo_full_name": "ACME/API"}, 422, "ya es parte"),
+        ({"repos": [{"full_name": f"acme/{n}"} for n in ("worker", "c", "d", "e")]}, 422, "hasta 4 repos"),
+        ({"repo_full_name": "acme/worker", "parent": 9}, 404, "v9"),
+        ({"repo_full_name": "acme/worker", "primary": "acme/worker"}, 422, None),
+    ],
+)
+def test_invalid_additions(store, body, status, message):
+    client = make_client(store, RepoAnalyst())
+    project_id = run(client, {"repo_full_name": "acme/api"})["project_id"]
+    r = client.post("/github/ingestions", json={**body, "project_id": project_id})
+    assert r.status_code == status, r.text
+    if message:
+        assert message in r.json()["error"]["message"]
+
+
+def test_adding_to_someone_elses_or_a_sample_project(store):
+    client = make_client(store, RepoAnalyst())
+    r = client.post("/github/ingestions", json={"project_id": "no-existe", "repo_full_name": "acme/worker"})
+    assert r.status_code == 404
+    sample = client.post("/projects", json={"sample": client.get("/models").json()[0]["id"]}).json()["id"]
+    r = client.post("/github/ingestions", json={"project_id": sample, "repo_full_name": "acme/worker"})
+    assert r.status_code == 422 and "ejemplo" in r.json()["error"]["message"]
+
+
+def test_parent_without_project_is_422(store):
+    client = make_client(store, RepoAnalyst())
+    assert client.post("/github/ingestions", json={"repo_full_name": "acme/api", "parent": 1}).status_code == 422

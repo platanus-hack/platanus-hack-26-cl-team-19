@@ -9,15 +9,18 @@ Todas las rutas piden sesión cuando la API tiene login (JAJ-78, ``get_store``).
 from __future__ import annotations
 
 import re
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
+from app.agent.proposals import ProposalDraft, prepare_proposal
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422, scenario_model
 from app.api.run_cache import RUN_CACHE_HEADER, cached_run
+from app.api.scenario_versions import version_scenario
 from app.api.schemas import (
     ApplyOpsRequest,
     CompareRequest,
@@ -158,6 +161,20 @@ def apply_version_ops(
     )
 
 
+@router.post("/{project_id}/chat/proposals/{proposal_id}/accept", response_model=VersionDetail, status_code=201)
+def accept_chat_proposal(
+    project_id: str, proposal_id: UUID, draft: ProposalDraft, store: ProjectStore = Depends(get_store)
+) -> VersionDetail:
+    base = _version(store, _project(store, project_id), draft.base)
+    try:
+        prepared = prepare_proposal(base.model, draft, store.list_scenarios(project_id))
+    except ValueError as e:
+        raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
+    note = draft.note or "; ".join(prepared.changes)
+    version = store.add_version(project_id, prepared.model, "agente", draft.base, note[:500], proposal_id=proposal_id)
+    return VersionDetail(**_summary(version).model_dump(), model=version.model)
+
+
 @router.get("/{project_id}/versions/{number}", response_model=VersionDetail, summary="Una versión con su modelo")
 def get_version(project_id: str, number: int, store: ProjectStore = Depends(get_store)) -> VersionDetail:
     version = _version(store, _project(store, project_id), number)
@@ -270,6 +287,7 @@ def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, param
             + (f"Hay: {', '.join(available)}." if available else "No tiene ninguno: créalo o manda rps."),
             available=available,
         )
+    scenario = version_scenario(scenario, model)
     try:
         rate = scenario.rate_for(model)
     except ValueError as e:

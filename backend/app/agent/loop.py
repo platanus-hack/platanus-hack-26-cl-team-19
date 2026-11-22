@@ -189,6 +189,9 @@ def run_agent(
     project_id: str,
     messages: list[dict[str, Any]],
     max_iterations: int = MAX_ITERATIONS,
+    *,
+    editor_version: int | None = None,
+    editor_scenario: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Corre el loop y emite eventos para el editor:
 
@@ -199,10 +202,19 @@ def run_agent(
     """
     history = [dict(m) for m in messages]
     schemas = tools.schemas(cli=False)  # el chat no ve el repo: sin submit_architecture
+    prompt = system_prompt(project_id)
+    if editor_version is not None:
+        prompt += (
+            f"\nLa versión abierta es v{editor_version}, el escenario seleccionado es {editor_scenario!r}. "
+            "Usa esa versión en herramientas de lectura. Para cambiar un escenario, usa propose_scenario. "
+            "Para cambios de arquitectura, usa propose_version. Las propuestas quedan pendientes: "
+            "pide al usuario que las acepte en la tarjeta antes de afirmar que se aplicaron. "
+            "Para el tráfico en req/s usa rps, para multiplicar el pico usa multiplier y para conversión usa una fracción."
+        )
     usage: dict[str, int] = {}
     for iteration in range(1, max_iterations + 1):
         try:
-            turn = llm.complete(system_prompt(project_id), history, schemas)
+            turn = llm.complete(prompt, history, schemas)
         except (anthropic.APIError, openai.APIError) as error:
             yield {"type": "error", "message": _provider_error(error, llm.model)}
             return

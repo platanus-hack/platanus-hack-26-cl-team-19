@@ -80,6 +80,33 @@ const phaseLabel = {
   down: "Colapso",
 } as const;
 const isSecond = computed(() => props.timeUnit === "second");
+const metrics = computed(() => {
+  const current = frame.value;
+  if (!current) return [];
+  return [
+    {
+      label: "Exitosas",
+      value: `${number.format(current.successful)} de ${number.format(current.incoming)}`,
+      unit: "req/s",
+    },
+    {
+      label: "Latencia p95",
+      value:
+        current.p95 === null ? "Sin valor fiable" : number.format(current.p95),
+      unit: current.p95 === null ? "" : "ms",
+      provenance: true,
+    },
+    {
+      label: "Fallos",
+      value:
+        current.failureRate === null
+          ? "—"
+          : percent.format(current.failureRate),
+      unit: "",
+    },
+    { label: "En cola", value: number.format(current.queue), unit: "req" },
+  ];
+});
 const formatTime = (index: number) =>
   `${isSecond.value ? "Segundo" : "Minuto"} ${index + 1}`;
 </script>
@@ -90,7 +117,7 @@ const formatTime = (index: number) =>
       <Button
         type="button"
         size="icon-sm"
-        variant="outline"
+        variant="ghost"
         class="shrink-0"
         :aria-label="
           playing
@@ -132,12 +159,6 @@ const formatTime = (index: number) =>
         </ol>
       </div>
 
-      <span
-        class="shrink-0 pt-1.5 font-mono text-xs tabular-nums text-muted-foreground"
-        >{{ minute + 1 }} / {{ frames.length }}
-        {{ isSecond ? "s" : "min" }}</span
-      >
-
       <div
         class="flex shrink-0 items-center rounded-md border border-border"
         role="group"
@@ -150,7 +171,7 @@ const formatTime = (index: number) =>
           size="xs"
           :variant="speed === option ? 'secondary' : 'ghost'"
           :aria-pressed="speed === option"
-          class="font-mono"
+          class="font-mono text-[0.6875rem]"
           @click="speed = option"
         >
           {{ option }}×
@@ -158,45 +179,41 @@ const formatTime = (index: number) =>
       </div>
     </div>
 
-    <div v-if="phase" class="-mt-1 flex items-center gap-2 text-xs">
+    <div
+      v-if="phase"
+      class="flex items-center justify-between gap-2 text-xs"
+      role="status"
+    >
       <SaturationBadge :status="phase.status" plain />
-      <span class="text-muted-foreground">{{ formatTime(minute) }}</span>
+      <span class="text-muted-foreground tabular-nums"
+        >{{ formatTime(minute) }} de {{ frames.length }}</span
+      >
     </div>
 
     <dl
       v-if="frame"
-      class="grid grid-cols-2 gap-x-6 gap-y-3 @xl/canvas:grid-cols-4"
+      class="-mt-1 grid grid-cols-2 gap-2 @xl/canvas:grid-cols-4"
     >
-      <div class="flex flex-col gap-0.5">
-        <dt class="text-xs text-muted-foreground">Entrantes / exitosas</dt>
-        <dd class="font-mono text-sm tabular-nums">
-          {{ frame.incoming }} / {{ frame.successful }}
-          <span class="text-muted-foreground">req/s</span>
-        </dd>
-      </div>
-      <div class="flex flex-col gap-0.5">
-        <dt class="text-xs text-muted-foreground">Latencia p95</dt>
-        <dd class="flex items-center gap-1 text-sm">
-          <span v-if="frame.p95 !== null" class="font-mono tabular-nums"
-            >{{ frame.p95 }} <span class="text-muted-foreground">ms</span></span
+      <div
+        v-for="metric in metrics"
+        :key="metric.label"
+        class="flex min-w-0 flex-col gap-0.5 rounded-md border border-border px-3 py-2"
+      >
+        <dt class="flex items-center gap-1 text-xs text-muted-foreground">
+          {{ metric.label }}
+          <ProvenanceBadge
+            v-if="metric.provenance"
+            :provenance="provenance"
+            compact
+          />
+        </dt>
+        <dd class="truncate text-sm font-medium tabular-nums">
+          {{ metric.value }}
+          <span
+            v-if="metric.unit"
+            class="text-xs font-normal text-muted-foreground"
+            >{{ metric.unit }}</span
           >
-          <span v-else>Sin valor fiable</span>
-          <ProvenanceBadge :provenance="provenance" compact />
-        </dd>
-      </div>
-      <div class="flex flex-col gap-0.5">
-        <dt class="text-xs text-muted-foreground">Fallos</dt>
-        <dd class="font-mono text-sm tabular-nums">
-          {{
-            frame.failureRate === null ? "—" : percent.format(frame.failureRate)
-          }}
-        </dd>
-      </div>
-      <div class="flex flex-col gap-0.5">
-        <dt class="text-xs text-muted-foreground">Cola en espera</dt>
-        <dd class="font-mono text-sm tabular-nums">
-          {{ number.format(frame.queue) }}
-          <span class="text-muted-foreground">req</span>
         </dd>
       </div>
     </dl>
