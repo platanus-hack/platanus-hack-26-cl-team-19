@@ -35,6 +35,10 @@ export default defineNuxtConfig({
           tagPriority: "critical",
         },
       ],
+      link: [
+        { rel: "icon", type: "image/svg+xml", href: "/logo.svg" },
+        { rel: "alternate icon", href: "/favicon.ico" },
+      ],
       script: [
         {
           id: "branchpoint-theme-init",
