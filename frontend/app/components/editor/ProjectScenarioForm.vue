@@ -2,6 +2,14 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   ProjectScenario,
@@ -110,18 +118,22 @@ function submit() {
     </div>
     <div class="flex flex-col gap-1.5">
       <Label :for="`${id}-mode`">Tipo de tráfico</Label>
-      <select
-        :id="`${id}-mode`"
-        v-model="mode"
-        :disabled="busy"
-        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
-      >
-        <option value="rps">Solicitudes por segundo</option>
-        <option value="elastic">Elástico · salto instantáneo</option>
-        <option value="multiplier" :disabled="!hasPeak">
-          Multiplicador del pico
-        </option>
-      </select>
+      <Select v-model="mode" :disabled="busy">
+        <SelectTrigger :id="`${id}-mode`" class="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="rps">Solicitudes por segundo</SelectItem>
+            <SelectItem value="elastic"
+              >Elástico, con salto instantáneo</SelectItem
+            >
+            <SelectItem value="multiplier" :disabled="!hasPeak">
+              Multiplicador del pico
+            </SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </div>
     <div class="flex flex-col gap-1.5">
       <Label :for="`${id}-rate`">{{

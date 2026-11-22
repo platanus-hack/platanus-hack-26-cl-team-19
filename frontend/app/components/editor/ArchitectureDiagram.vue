@@ -39,7 +39,7 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [id: string | null]; explain: [] }>();
 
 // Geometría en px del lienzo sin escalar.
-const NODE_WIDTH = 136;
+const NODE_WIDTH = 156;
 const NODE_HEIGHT = 48;
 const COLUMN_GAP = 104;
 const ROW_GAP = 16;

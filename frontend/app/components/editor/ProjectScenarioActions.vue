@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { Pencil, Plus } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
 import {
+  Dialog,
   DialogContent,
   DialogDescription,
-  DialogOverlay,
-  DialogPortal,
-  DialogRoot,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "reka-ui";
-import { Button } from "@/components/ui/button";
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -58,14 +57,15 @@ async function submit(name: string, input: ProjectScenarioInput) {
 </script>
 
 <template>
-  <DialogRoot
+  <Dialog
     v-for="action in actions"
     :key="action.mode"
     :open="open === action.mode"
     @update:open="updateOpen(action.mode, $event)"
   >
     <TooltipProvider :delay-duration="0">
-      <Tooltip>
+      <!-- Sin foco de teclado no se abre: al cerrar el diálogo el foco vuelve al botón y el tooltip quedaba pegado -->
+      <Tooltip ignore-non-keyboard-focus>
         <TooltipTrigger as-child>
           <DialogTrigger as-child>
             <Button
@@ -82,32 +82,28 @@ async function submit(name: string, input: ProjectScenarioInput) {
         <TooltipContent>{{ action.title }}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-black/40" />
-      <DialogContent
-        class="fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-lg border border-border bg-background p-5 shadow-lg"
-        @escape-key-down="busy && $event.preventDefault()"
-        @interact-outside="busy && $event.preventDefault()"
-      >
-        <header class="flex flex-col gap-1">
-          <DialogTitle class="text-base font-semibold">{{
-            action.title
-          }}</DialogTitle>
-          <DialogDescription class="text-sm text-muted-foreground">
-            Define el tráfico para simularlo en las versiones del proyecto.
-          </DialogDescription>
-        </header>
-        <ProjectScenarioForm
-          v-if="open === action.mode"
-          :existing="action.mode === 'edit' ? active : undefined"
-          :names="names"
-          :has-peak="hasPeak"
-          :busy="busy"
-          :error="formError"
-          @save="submit"
-          @cancel="open = null"
-        />
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+    <DialogContent
+      class="max-h-[calc(100dvh-2rem)] gap-4 overflow-y-auto sm:max-w-sm"
+      :show-close-button="!busy"
+      @escape-key-down="busy && $event.preventDefault()"
+      @interact-outside="busy && $event.preventDefault()"
+    >
+      <DialogHeader class="pe-8">
+        <DialogTitle>{{ action.title }}</DialogTitle>
+        <DialogDescription>
+          Define el tráfico para simularlo en las versiones del proyecto.
+        </DialogDescription>
+      </DialogHeader>
+      <ProjectScenarioForm
+        v-if="open === action.mode"
+        :existing="action.mode === 'edit' ? active : undefined"
+        :names="names"
+        :has-peak="hasPeak"
+        :busy="busy"
+        :error="formError"
+        @save="submit"
+        @cancel="open = null"
+      />
+    </DialogContent>
+  </Dialog>
 </template>

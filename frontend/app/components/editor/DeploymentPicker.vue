@@ -177,7 +177,7 @@ const ids = {
           :key="row.key"
           class="flex items-center justify-between gap-3"
         >
-          <dt class="truncate text-muted-foreground">{{ row.label }}</dt>
+          <dt class="min-w-0 text-muted-foreground">{{ row.label }}</dt>
           <dd class="flex items-center gap-1 whitespace-nowrap">
             <span class="font-mono text-xs tabular-nums">{{ row.text }}</span>
             <ProvenanceBadge

@@ -182,9 +182,19 @@ onMounted(loadProjects);
         </Alert>
         <Button variant="outline" @click="loadProjects">Reintentar</Button>
       </div>
-      <p v-else-if="!projects.length" class="text-sm text-muted-foreground">
-        Todavía no tienes proyectos.
-      </p>
+      <div
+        v-else-if="!projects.length"
+        class="flex flex-col items-start gap-3 rounded-md border border-dashed border-border p-6"
+      >
+        <div class="flex flex-col gap-1">
+          <h2 class="text-sm font-medium">Todavía no tienes proyectos</h2>
+          <p class="max-w-[60ch] text-sm text-muted-foreground">
+            Crea uno desde un repo de GitHub. Branchpoint lee su código, arma el
+            diagrama de la arquitectura y te deja simular tráfico sobre él.
+          </p>
+        </div>
+        <NewProjectDialog @created="openCreatedProject" />
+      </div>
 
       <div
         v-else-if="!visibleProjects.length"

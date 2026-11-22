@@ -69,6 +69,7 @@ import {
 import {
   costComponentLabel,
   flowPeak,
+  scenarioLabel,
   simulationProvenance,
   toBottleneck,
   toComparisonRows,
@@ -1339,7 +1340,11 @@ function openVersionDraft() {
               v-else-if="simulationState === 'idle'"
               class="text-sm text-muted-foreground"
             >
-              Elige un escenario y pulsa Simular para reproducir el resultado.
+              {{
+                scenario
+                  ? `Pulsa Simular para ver cómo se comporta ${version?.label ?? "la versión"} en ${scenarioLabel(scenario)}.`
+                  : "Elige un escenario y pulsa Simular para reproducir el resultado."
+              }}
             </p>
             <SimulationRunSummary
               v-if="run"
