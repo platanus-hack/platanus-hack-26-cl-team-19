@@ -18,6 +18,7 @@ existen vuelven al LLM como error, igual que un error de schema (IA-4).
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import re
 from collections.abc import Callable, Iterator
@@ -201,6 +202,16 @@ def _validation_message(e: ValidationError) -> str:
 
 EVIDENCE_ATTEMPTS = 3  # entregas con evidencia que no calza antes de aceptar sin esos elementos
 TOKEN_CAP_MESSAGE = "El análisis pasó el límite de la key de Branchpoint. Con tu propia API key no hay límite."
+
+# Huella de lo que decide qué entrega el LLM: el prompt, las tools (con el schema de entrega) y los límites.
+# Es parte de la clave del caché de análisis (JAJ-146): si algo de esto cambia, no se reutiliza lo viejo.
+ANALYZER_FINGERPRINT = hashlib.sha256(
+    json.dumps(
+        [SYSTEM, TOOLS, MAX_ITERATIONS, MAX_LINES, MAX_CHARS, MAX_GREP_HITS, MAX_TREE, sorted(SKIP), EVIDENCE_ATTEMPTS],
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode()
+).hexdigest()[:16]
 
 
 @dataclass

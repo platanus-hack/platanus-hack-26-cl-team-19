@@ -49,7 +49,7 @@ def truncate(database_url: str) -> None:
     import psycopg
 
     with psycopg.connect(database_url) as conn:
-        conn.execute("truncate projects, repo_connections, github_installations cascade")
+        conn.execute("truncate projects, repo_connections, github_installations, repo_analyses cascade")
 
 
 @pytest.fixture
