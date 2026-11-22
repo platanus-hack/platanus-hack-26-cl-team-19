@@ -305,7 +305,7 @@ const alertOf = (status?: SaturationStatus) =>
               <path
                 :d="path.d"
                 fill="none"
-                class="stroke-input"
+                class="stroke-info/60"
                 stroke-width="1"
               />
               <circle

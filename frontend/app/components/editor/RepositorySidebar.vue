@@ -95,23 +95,28 @@ const initials = computed(() =>
 <template>
   <Sidebar collapsible="icon" :variant="variant">
     <SidebarHeader>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            size="lg"
-            as-child
-            class="group-data-[collapsible=icon]:justify-center"
-          >
-            <NuxtLink to="/" aria-label="branchpoint">
-              <AppWordmark class="group-data-[collapsible=icon]:hidden" />
-              <AppWordmark
-                compact
-                class="hidden group-data-[collapsible=icon]:inline"
-              />
-            </NuxtLink>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      <div class="flex items-center gap-1">
+        <SidebarMenu class="min-w-0 flex-1">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              as-child
+              class="group-data-[collapsible=icon]:justify-center"
+            >
+              <NuxtLink to="/" aria-label="branchpoint">
+                <AppWordmark class="group-data-[collapsible=icon]:hidden" />
+                <AppWordmark
+                  compact
+                  class="hidden group-data-[collapsible=icon]:inline"
+                />
+              </NuxtLink>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <div class="group-data-[collapsible=icon]:hidden">
+          <ThemeSwitcher />
+        </div>
+      </div>
     </SidebarHeader>
 
     <SidebarContent>

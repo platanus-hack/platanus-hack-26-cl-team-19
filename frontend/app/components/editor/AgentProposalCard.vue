@@ -71,6 +71,7 @@ const emit = defineEmits<{ apply: []; discard: [] }>();
         <Button
           type="button"
           size="sm"
+          variant="highlight"
           :disabled="state === 'pending'"
           @click="emit('apply')"
         >
