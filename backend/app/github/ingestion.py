@@ -34,7 +34,7 @@ from app.ingest.ai_graph import build_from_ai
 from app.ingest.analyzer import AnalysisFailed, analyze_repo
 from app.ingest.build_model import NoEndpoints
 from app.ingest.iac import scan_deployment
-from app.ingest.multirepo import RepoResult, merge_repos, single_repo_sources
+from app.ingest.multirepo import RepoResult, add_repos, merge_repos, single_repo_sources
 
 log = logging.getLogger(__name__)
 
@@ -82,13 +82,22 @@ class IngestionJobs:
         self._lock = threading.Lock()
 
     def start(
-        self, owner: str | None, repo_full_name: str, branch: str, others: list[tuple[str, str]] | None = None
+        self,
+        owner: str | None,
+        repo_full_name: str,
+        branch: str,
+        others: list[tuple[str, str]] | None = None,
+        *,
+        project_id: str | None = None,
     ) -> Ingestion:
-        repos = (
-            (RepoProgress(repo_full_name, branch, True), *(RepoProgress(n, b, False) for n, b in others))
-            if others
-            else ()
-        )
+        """Con ``project_id``, el trabajo suma repos a ese proyecto: ninguno es el principal y cada uno tiene
+        su avance en ``repos``, aunque sea uno solo."""
+        if project_id is not None:
+            repos = tuple(RepoProgress(n, b, False) for n, b in [(repo_full_name, branch), *(others or [])])
+        elif others:
+            repos = (RepoProgress(repo_full_name, branch, True), *(RepoProgress(n, b, False) for n, b in others))
+        else:
+            repos = ()
         job = Ingestion(uuid.uuid4().hex[:12], owner, repo_full_name, branch, repos=repos)
         with self._lock:
             self._jobs[job.id] = job
@@ -241,6 +250,38 @@ def _run_multi(
     principal, la ingesta falla; si falla un secundario, sigue con un aviso."""
     job = jobs.update(job_id, status="running", stage="analisis", llm_steps=0)
     targets = [(primary, job.branch, llm), *secondaries]
+    results = _analyze_all(jobs, job_id, github, targets, provider, max_tokens_total)
+    (first, _), rest = results[0], results[1:]
+    if first.model is None:
+        jobs.update(job_id, status="failed", error_message=f"{primary.full_name}: {first.error}")
+        return
+    try:
+        model = merge_repos(first, [r for r, _ in rest])
+        costs = [r.model["repo"]["source"]["analysis"].get("cost") for r, _ in results if r.model is not None]
+        jobs.update(
+            job_id, stage="preparacion", endpoints=len(model["endpoints"]), cost=_sum_costs([c for c in costs if c])
+        )
+        sources = [
+            _repo_source(store, job.owner, repo, branch, result, sha)
+            for (repo, branch, _), (result, sha) in zip(targets, results, strict=True)
+            if sha is not None  # ni siquiera se pudo descargar: no hay commit que guardar
+        ]
+        project = store.create(project_name, model, None, job.owner, sources[0], sources)
+        jobs.update(job_id, status="done", project_id=project.id, version=1)
+    except Exception as e:  # noqa: BLE001
+        jobs.update(job_id, status="failed", error_message=_failure(e, llm, primary.full_name))
+
+
+def _analyze_all(
+    jobs: IngestionJobs,
+    job_id: str,
+    github: GitHubApp,
+    targets: list[tuple[Repo, str, Any]],
+    provider: str,
+    max_tokens_total: int | None,
+) -> list[tuple[RepoResult, str | None]]:
+    """Descarga y analiza cada repo en paralelo, con su propio LLM. El avance del primero es también el
+    del trabajo. Un repo que falla queda con su error y no bota a los otros."""
 
     def analyze(index: int, repo: Repo, branch: str, repo_llm: Any) -> tuple[RepoResult, str | None]:
         jobs.update_repo(job_id, index, status="running", llm_steps=0)
@@ -272,30 +313,56 @@ def _run_multi(
         return RepoResult(repo.full_name, branch, sha, model), sha
 
     with ThreadPoolExecutor(max_workers=min(4, len(targets))) as pool:
-        results = list(pool.map(lambda item: analyze(item[0], *item[1]), enumerate(targets)))
-    (first, _), rest = results[0], results[1:]
-    if first.model is None:
-        jobs.update(job_id, status="failed", error_message=f"{primary.full_name}: {first.error}")
+        return list(pool.map(lambda item: analyze(item[0], *item[1]), enumerate(targets)))
+
+
+def _repo_source(
+    store: ProjectStore, owner: str | None, repo: Repo, branch: str, result: RepoResult, sha: str
+) -> RepoSource:
+    connection = store.connect_repo(owner, repo.installation_id, repo.id, repo.full_name, repo.default_branch)
+    stats = ((result.model or {}).get("repo") or {}).get("stats")
+    return RepoSource(connection, repo.full_name, branch, sha, stats)
+
+
+def run_add_repos(
+    jobs: IngestionJobs,
+    job_id: str,
+    github: GitHubApp,
+    store: ProjectStore,
+    project_id: str,
+    base: int,
+    primary_full_name: str,
+    targets: list[tuple[Repo, str, Any]],
+    provider: str = "anthropic",
+    max_tokens_total: int | None = None,
+) -> None:
+    """Suma repos secundarios a un proyecto que ya existe: los analiza y guarda una versión nueva, hija de
+    ``base``, con esos repos como servicios no simulados. Si fallan todos, no se guarda nada; si falla
+    alguno, entra con un aviso, igual que al crear el proyecto. Nunca lanza."""
+    job = jobs.update(job_id, status="running", stage="analisis", llm_steps=0)
+    results = _analyze_all(jobs, job_id, github, targets, provider, max_tokens_total)
+    if all(r.model is None for r, _ in results):
+        first = results[0][0]
+        jobs.update(job_id, status="failed", error_message=f"{first.full_name}: {first.error}")
         return
     try:
-        model = merge_repos(first, [r for r, _ in rest])
+        version = store.get_version(project_id, base)
+        if version is None or version.model is None:
+            raise LookupError(f"el proyecto {project_id} no tiene la v{base}")
+        model = add_repos(version.model, primary_full_name, [r for r, _ in results])
         costs = [r.model["repo"]["source"]["analysis"].get("cost") for r, _ in results if r.model is not None]
-        jobs.update(
-            job_id, stage="preparacion", endpoints=len(model["endpoints"]), cost=_sum_costs([c for c in costs if c])
-        )
-        sources = []
-        for (repo, branch, _), (result, sha) in zip(targets, results, strict=True):
-            if sha is None:
-                continue  # ni siquiera se pudo descargar: no hay commit que guardar
-            connection = store.connect_repo(
-                job.owner, repo.installation_id, repo.id, repo.full_name, repo.default_branch
-            )
-            stats = ((result.model or {}).get("repo") or {}).get("stats")
-            sources.append(RepoSource(connection, repo.full_name, branch, sha, stats))
-        project = store.create(project_name, model, None, job.owner, sources[0], sources)
-        jobs.update(job_id, status="done", project_id=project.id, version=1)
+        jobs.update(job_id, stage="preparacion", cost=_sum_costs([c for c in costs if c]))
+        sources = [
+            _repo_source(store, job.owner, repo, branch, result, sha)
+            for (repo, branch, _), (result, sha) in zip(targets, results, strict=True)
+            if sha is not None  # ni siquiera se pudo descargar: no hay commit que guardar
+        ]
+        names = ", ".join(f"{s.repo_full_name}@{s.branch} ({s.commit_sha[:7]})" for s in sources)
+        saved = store.add_repositories(project_id, model, base, f"Agrega {names}", sources)
+        endpoints = sum(len(r.model["endpoints"]) for r, _ in results if r.model is not None)
+        jobs.update(job_id, status="done", project_id=project_id, version=saved.number, endpoints=endpoints)
     except Exception as e:  # noqa: BLE001
-        jobs.update(job_id, status="failed", error_message=_failure(e, llm, primary.full_name))
+        jobs.update(job_id, status="failed", error_message=_failure(e, targets[0][2], targets[0][0].full_name))
 
 
 def _sum_costs(costs: list[dict[str, Any]]) -> dict[str, Any] | None:

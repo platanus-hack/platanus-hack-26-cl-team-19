@@ -23,17 +23,22 @@ import re
 from datetime import date
 from pathlib import Path
 
-from app.catalog import load_catalog
+from app.catalog import deploy, load_catalog
 
 RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
-HOURS_MONTH = 730
 SECONDS_MONTH = 30 * 86400
-TODAY = date.today().isoformat()
+
+
+def today() -> str:
+    """La fecha de hoy, al momento de armar el número. Antes era una constante del módulo: en un servidor
+    con días arriba, los modelos ingeridos salían con la fecha en que arrancó (JAJ-109)."""
+    return date.today().isoformat()
 
 
 # ---------- números con procedencia ----------
 def num(value, unit, label, source, *, default=False, **extra) -> dict:
-    out = {"value": value, "unit": unit, "label": label, "source": source, "date": extra.pop("date", TODAY)}
+    when = extra.pop("date") if "date" in extra else today()
+    out = {"value": value, "unit": unit, "label": label, "source": source, "date": when}
     if label == "SUPUESTO" and default:
         out["needs_review"] = True  # valor por defecto sin respaldo: la UI lo resalta hasta que el usuario lo confirme
     out.update(extra)
@@ -47,7 +52,7 @@ def from_catalog(entry: dict, **over) -> dict:
         over.pop("label", entry["label"]),
         over.pop("source", entry["source"]),
         default=True,
-        date=entry.get("date", TODAY),
+        date=entry["date"] if "date" in entry else today(),
         **over,
     )
 
@@ -386,39 +391,6 @@ def endpoint_weights(endpoints: list[dict], overrides: dict) -> None:
             ep["weight"] = from_catalog(share, value=round(g_share / len(group), 4), unit="fracción")
 
 
-# ---------- de 1 núcleo del laptop a la nube (JAJ-46) ----------
-def core_factor(plan: dict, where: str) -> dict:
-    """Cuántas veces más lento es 1 vCPU del plan que el núcleo donde se calibraron los tiempos."""
-    proc = plan.get("processor", "local")
-    f = CATALOG["cpu_core_factor"][proc]
-    label = weakest(f["label"], plan.get("processor_label", f["label"]))
-    return num(
-        f["value"],
-        "×",
-        label,
-        f"{where}: procesador {proc}. {f['source']}. {CATALOG['cpu_core_factor']['_doc']}",
-        default=True,
-        processor=proc,
-    )
-
-
-def cpu_credits(plan_name: str, vcpu: dict) -> dict | None:
-    """Instancias con créditos (db.t4g): con carga sostenida rinden la base, no los vCPU nominales."""
-    base = CATALOG["burstable_baseline_per_vcpu"].get(plan_name)
-    if base is None:
-        return None
-    per_vcpu = from_catalog(base)
-    sustained = derived(
-        round(vcpu["value"] * per_vcpu["value"], 3),
-        "vCPU",
-        f"vCPU × base por vCPU: lo que rinde {plan_name} con carga sostenida. En modo unlimited "
-        "rinde los vCPU nominales y cobra el exceso",
-        vcpu,
-        per_vcpu,
-    )
-    return {"baseline_per_vcpu": per_vcpu, "sustained_vcpu": sustained}
-
-
 # ---------- respuestas del usuario: tráfico, despliegue y negocio ----------
 def traffic_model(ans: dict) -> dict:
     t = ans.get("traffic", {})
@@ -472,38 +444,114 @@ def traffic_model(ans: dict) -> dict:
     return {**inputs, "requests_per_session": rps_session, "scenarios": scenarios}
 
 
+def _assumed(field: dict, why: str) -> dict:
+    """Un número del perfil de un plan que nadie confirmó: queda SUPUESTO por revisar."""
+    return {**field, "label": "SUPUESTO", "needs_review": True, "source": f"{field['source']}. {why}"}
+
+
+def _db_choice(d: dict, seen: dict, warnings: list[str]) -> tuple[str, str, str, bool]:
+    """(proveedor, plan, por qué, si el plan es supuesto) de la DB: el usuario, luego el repo, luego local."""
+    if "db" in d:
+        return d["db"]["provider"], d["db"]["plan"], "declarado por el usuario", False
+    providers = deploy.db_providers(CATALOG)
+    plan_seen, provider_seen = seen.get("db.plan"), seen.get("db.provider")
+    if plan_seen:
+        name = str(plan_seen["value"])
+        owners = [p for p, plans in providers.items() if name in plans]
+        if provider_seen and provider_seen["value"] in owners:
+            owners = [provider_seen["value"]]
+        if len(owners) == 1:
+            return owners[0], name, f"{plan_seen['source']} ({plan_seen['at']})", False
+        warnings.append(f"El plan de la DB del repo ({name}, {plan_seen['at']}) no está en el catálogo.")
+    if provider_seen:
+        provider = provider_seen["value"]
+        smallest = providers[provider][0]
+        why = (
+            f"{provider_seen['source']} ({provider_seen['at']}). El repo no dice el plan: se asume el más "
+            f"chico de {provider}, por revisar"
+        )
+        return provider, smallest, why, True
+    return "local", "docker", "valor por defecto: ni el usuario ni el repo dicen dónde está la DB", False
+
+
+def _service_technology(s: dict) -> dict | None:
+    """El bloque ``technology`` de un servicio (JAJ-87): de la IaC es OBSERVADO; de la IA, ESTIMADO."""
+    if not s.get("engine"):
+        return None
+    name = ENGINE_NAMES.get(str(s["engine"]).lower(), s["engine"])
+    if s.get("origin"):
+        return deploy.technology(name, None, "ESTIMADO", f"Propuesto por la IA en {s.get('at')}", at=s.get("at"))
+    what = f"imagen {s['image']}" if s.get("image") else f"motor {s['engine']}"
+    return deploy.technology(name, s.get("version"), "OBSERVADO", f"{what} en {s['at']}", at=s["at"])
+
+
+def _db_technology(db: dict, services: list[dict]) -> dict | None:
+    """El motor de la DB (JAJ-87): la imagen de la IaC, si no el proveedor, si no lo que propuso la IA."""
+    dbs = [s for s in services if s.get("role") == "db" and s.get("engine")]
+    for s in dbs:
+        if not s.get("origin"):
+            return _service_technology(s)
+    if "technology" in db:
+        return db["technology"]
+    return _service_technology(dbs[0]) if dbs else None
+
+
+ENGINE_NAMES = {
+    "postgres": "PostgreSQL",
+    "postgis": "PostgreSQL (PostGIS)",
+    "timescale": "PostgreSQL (TimescaleDB)",
+    "mysql": "MySQL",
+    "mariadb": "MariaDB",
+    "mongo": "MongoDB",
+    "redis": "Redis",
+    "valkey": "Valkey",
+    "memcached": "Memcached",
+    "rabbitmq": "RabbitMQ",
+    "kafka": "Kafka",
+}
+
+
+def _app_plan(provider: str, a: dict, seen: dict, vcpu: dict, warnings: list[str]) -> tuple[str | None, str, bool]:
+    """(plan, por qué, si es supuesto) de la API en Fly o Render; ``None`` en Fargate y local."""
+    plans = deploy.app_providers(CATALOG)[provider]
+    if not plans:
+        return None, "", False
+    if "plan" in a:
+        return a["plan"], "declarado por el usuario", False
+    if seen.get("api.plan"):
+        name = (
+            re.sub(r"[\s-]+", "_", str(seen["api.plan"]["value"]).lower())
+            if provider == "render"
+            else str(seen["api.plan"]["value"])
+        )
+        if name in plans:
+            return name, f"{seen['api.plan']['source']} ({seen['api.plan']['at']})", False
+        warnings.append(
+            f"El plan de la API del repo ({name}, {seen['api.plan']['at']}) no está en el catálogo de {provider}: se "
+            "simula con un plan de CPU dedicada parecido, por revisar. Una máquina shared rinde menos con carga sostenida."
+        )
+    # Sin plan dicho: el que calza con los vCPU, o el más chico. Por revisar.
+    fit = next(
+        (p for p in plans if CATALOG["app_plans"][provider]["plans"][p]["vcpu"] >= (vcpu["value"] or 0)), plans[0]
+    )
+    return fit, f"el repo no dice el plan de {provider}: se asume {fit}, por revisar", True
+
+
 def deployment_model(ans: dict, workers: dict, pool: dict, iac: dict) -> dict:
     d = ans.get("deployment", {})
     seen = iac["observed"]
-    dbp = d.get("db", {"provider": "local", "plan": "docker"})
-    plans = CATALOG["db_plans"]
-    plan = plans[dbp["provider"]][dbp["plan"]]
-    src = f"{plans['_sources'][dbp['provider']]}. Plan {dbp['provider']} {dbp['plan']} declarado por el usuario"
-    if dbp["provider"] == "supabase":
-        usd = plans["supabase_base_usd_month"] + max(
-            0, plan["compute_usd_month"] - plans["supabase_compute_credit_usd_month"]
-        )
+    warnings = iac["warnings"]
+    provider, plan_name, why, assumed = _db_choice(d, seen, warnings)
+    db = {**deploy.db_profile(provider, plan_name, why, CATALOG), "pool_per_worker": pool}
+    if assumed:
+        for key in ("vcpu", "ram_gb", "max_connections", "usd_month"):
+            db[key] = _assumed(db[key], "Plan supuesto")
+    if (tech := _db_technology(db, iac["services"])) is not None:
+        db["technology"] = tech
     else:
-        usd = plan["usd_hour"] * HOURS_MONTH
-    db = {
-        "provider": dbp["provider"],
-        "plan": dbp["plan"],
-        "vcpu": num(plan["vcpu"], "vCPU", plan["vcpu_label"], src),
-        "max_connections": num(plan["max_connections"], "conexiones", "ESTIMADO", src),
-        "usd_month": num(
-            round(usd, 2),
-            "US$/mes",
-            "ESTIMADO",
-            f"{src}. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730 (JAJ-11)",
-        ),
-        "pool_per_worker": pool,
-        "cpu_core_factor": core_factor(plan, f"Plan {dbp['provider']} {dbp['plan']}"),
-    }
-    credits = cpu_credits(dbp["plan"], db["vcpu"])
-    if credits:
-        db["cpu_credits"] = credits
-    if "pooler_connections" in plan:
-        db["pooler_connections"] = num(plan["pooler_connections"], "conexiones", "ESTIMADO", src)
+        db.pop("technology", None)
+    if "db.provider" in seen and provider == seen["db.provider"]["value"]:
+        db["provider_seen_at"] = seen["db.provider"]["at"]
     # Cada número: la respuesta del usuario manda; si no, lo que dice el repo (JAJ-60); si no, el valor por defecto
     a = d.get("api", {})
     defaults = {"replicas": 1, "vcpu": 1, "memory_gb": 2}
@@ -525,36 +573,80 @@ def deployment_model(ans: dict, workers: dict, pool: dict, iac: dict) -> dict:
                 f"Valor por defecto: ni el usuario ni el repo dicen {what}",
                 default=True,
             )
-    provider = a.get("provider", "local")
-    price = CATALOG["app_plans"][provider]
-    replicas, vcpu, mem = api_vals["replicas"], api_vals["vcpu"], api_vals["memory_gb"]
-    api_usd = (
-        replicas["value"] * (vcpu["value"] * price["usd_vcpu_hour"] + mem["value"] * price["usd_gb_hour"]) * HOURS_MONTH
+    if "provider" in a:
+        api_provider, provider_why = a["provider"], "declarado por el usuario"
+    elif "api.provider" in seen and deploy.app_provider_from_target(seen["api.provider"]["value"]):
+        api_provider = deploy.app_provider_from_target(seen["api.provider"]["value"])
+        provider_why = f"{seen['api.provider']['source']} ({seen['api.provider']['at']})"
+    else:
+        if "api.provider" in seen:
+            warnings.append(
+                f"La API se despliega en {seen['api.provider']['value']} ({seen['api.provider']['at']}), que no "
+                "está en el catálogo: se simula como local."
+            )
+        api_provider, provider_why = "local", "valor por defecto"
+    plan, plan_why, plan_assumed = _app_plan(api_provider, a, seen, api_vals["vcpu"], warnings)
+    profile = deploy.app_profile(
+        api_provider,
+        plan,
+        api_vals["replicas"],
+        api_vals["vcpu"],
+        api_vals["memory_gb"],
+        plan_why or provider_why,
+        CATALOG,
     )
+    if plan_assumed:
+        for key in ("vcpu", "memory_gb", "usd_month"):
+            profile[key] = _assumed(profile[key], "Plan supuesto")
     api = {
-        "provider": provider,
-        "replicas": replicas,
-        "vcpu": vcpu,
-        "memory_gb": mem,
+        "provider": api_provider,
+        "replicas": api_vals["replicas"],
+        "vcpu": profile.get("vcpu", api_vals["vcpu"]),
+        "memory_gb": profile.get("memory_gb", api_vals["memory_gb"]),
         "workers": workers,
         "threads_per_worker": from_catalog(CATALOG["api"]["threads_per_worker"]),
         "latency_ms": from_catalog(CATALOG["api"]["latency_ms"]),
-        "usd_month": num(round(api_usd, 2), "US$/mes", "ESTIMADO", CATALOG["app_plans"]["_source"]),
-        "cpu_core_factor": core_factor(price, f"API en {provider}"),
+        "usd_month": profile["usd_month"],
+        "cpu_core_factor": profile["cpu_core_factor"],
     }
+    if plan:
+        api["plan"] = plan
+    out = {"api": api, "db": db}
+    frontend = _frontend(d, seen)
+    if frontend:
+        out["frontend"] = frontend
     # Lo que el agente tiene que preguntar (JAJ-59): lo que no dicen ni el repo ni las respuestas
     answered = {f"api.{k}" for k in a} | ({"db.plan"} if "db" in d else set())
+    if not assumed and "db.plan" not in answered and provider != "local":
+        answered.add("db.plan")
+    services = [{**svc, "technology": tech} if (tech := _service_technology(svc)) else svc for svc in iac["services"]]
     return {
-        "api": api,
-        "db": db,
-        "services": iac["services"],
+        **out,
+        "services": services,
         "iac": {
             "files": iac["files"],
             "deploy_targets": iac["deploy_targets"],
-            "warnings": iac["warnings"],
+            "warnings": warnings,
             "missing": [m for m in iac["missing"] if m["field"] not in answered],
         },
     }
+
+
+def _frontend(d: dict, seen: dict) -> dict | None:
+    """Dónde se sirve el frontend, si el usuario o el repo lo dicen. No se inventa uno."""
+    if "frontend" in d:
+        f = d["frontend"]
+        return deploy.frontend_profile(f["provider"], f["plan"], "declarado por el usuario", CATALOG)
+    target = seen.get("frontend.provider")
+    provider = deploy.frontend_provider_from_target(target["value"]) if target else None
+    if provider is None:
+        return None
+    plan = deploy.frontend_providers(CATALOG)[provider][0]
+    out = deploy.frontend_profile(
+        provider, plan, f"{target['source']} ({target['at']}). Se asume el plan {plan}, por revisar", CATALOG
+    )
+    out["usd_month"] = _assumed(out["usd_month"], "Plan supuesto")
+    return out
 
 
 def business_model(ans: dict) -> dict:
@@ -649,7 +741,8 @@ def checks(model: dict) -> dict:
     for name, sc in t["scenarios"].items():
         rps = sc["rps"]["value"]
         valid = {k: v for k, v in caps.items() if v["value"]}
-        bottleneck = min(valid, key=lambda k: valid[k]["value"])
+        # sin ninguna capacidad con valor (ej. sin consultas y sin CPU), no hay cuello que nombrar (JAJ-108)
+        bottleneck = min(valid, key=lambda k: valid[k]["value"]) if valid else None
         sessions_h = rps * 3600 / t["requests_per_session"]["value"]
         at_stake = derived(
             round(sessions_h * biz["conversion"]["value"] * biz["ticket_usd"]["value"], 0),
@@ -768,7 +861,7 @@ def build_from_graph(graph: dict, repo_name: str, answers: dict, *, iac: dict, w
         "schema": "branchpoint.model/v1",
         "repo": {
             "path": repo_name,
-            "extracted_at": TODAY,
+            "extracted_at": today(),
             "stats": {k: v for k, v in graph["stats"].items() if not k.startswith("seconds")},
         },
         "deployment": deployment,

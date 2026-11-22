@@ -23,6 +23,8 @@ const props = withDefaults(
   defineProps<{
     defaultOpen?: boolean;
     open?: boolean;
+    persistState?: boolean;
+    sidebarWidth?: string;
     class?: HTMLAttributes["class"];
   }>(),
   {
@@ -30,6 +32,9 @@ const props = withDefaults(
       `${SIDEBAR_COOKIE_NAME}=false`,
     ),
     open: undefined,
+    persistState: true,
+    sidebarWidth: SIDEBAR_WIDTH,
+    class: undefined,
   },
 );
 
@@ -51,7 +56,8 @@ function setOpen(value: boolean) {
   open.value = value; // emits('update:open', value)
 
   // This sets the cookie to keep the sidebar state.
-  document.cookie = `${SIDEBAR_COOKIE_NAME}=${open.value}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+  if (props.persistState)
+    document.cookie = `${SIDEBAR_COOKIE_NAME}=${open.value}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
 }
 
 function setOpenMobile(value: boolean) {
@@ -95,7 +101,7 @@ provideSidebarContext({
     <div
       data-slot="sidebar-wrapper"
       :style="{
-        '--sidebar-width': SIDEBAR_WIDTH,
+        '--sidebar-width': props.sidebarWidth,
         '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
       }"
       :class="

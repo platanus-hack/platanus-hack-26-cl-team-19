@@ -96,6 +96,8 @@ class Findings:
     services: list[Service] = field(default_factory=list)
     deploy_targets: list[dict[str, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # proveedor de la DB según el host de una URL de conexión de ejemplo (JAJ-143): {provider, at}
+    db_hosts: list[dict[str, str]] = field(default_factory=list)
 
     def by_role(self, role: str) -> list[Service]:
         return [s for s in self.services if s.role == role]
@@ -109,6 +111,9 @@ class Findings:
             "deploy_targets": self.deploy_targets,
             "warnings": self.warnings,
         }
+
+    def add_target(self, target: str, at: str) -> None:
+        self.deploy_targets.append({"target": target, "at": at})
 
 
 # ---------- búsqueda de archivos ----------
@@ -162,14 +167,25 @@ def _line(mapping: dict, key: str) -> int:
 # ---------- workers en comandos ----------
 
 
-def _workers_in(cmd: str) -> int | None:
+def _workers_in(cmd: str, warnings: list[str] | None = None) -> int | None:
     """Procesos del servidor: ``--workers N`` (uvicorn, gunicorn, Puma...) o ``pm2 -i N``. Sin la opción,
-    los servidores de ``API_CMD`` levantan un solo proceso."""
+    los servidores de ``API_CMD`` levantan un solo proceso.
+
+    ``--workers 0`` no levanta procesos que atiendan requests: se descarta (``None``, queda el valor por
+    defecto, por revisar) y, si se pasa ``warnings``, se avisa ahí (JAJ-108)."""
     if not API_CMD.search(cmd) and not WORKER_CMD.search(cmd):
         return None
     m = PM2_INSTANCES.search(cmd) or WORKERS_FLAG.search(cmd)
     if m:
-        return int(m.group(1))
+        n = int(m.group(1))
+        if n < 1:
+            if warnings is not None:
+                warnings.append(
+                    f"«{cmd}» pide {n} procesos: se ignora, porque con 0 la API no atiende requests. "
+                    "Queda el valor por defecto, por revisar."
+                )
+            return None
+        return n
     return 1 if not WORKER_CMD.search(cmd) else None
 
 
@@ -294,7 +310,7 @@ def read_compose(path: Path, rel: str, repo: Path, findings: Findings) -> None:
                 findings.services.append(existing)
             elif image and not existing.image:  # un override completa al archivo base
                 existing.image = image
-            w = _workers_in(command)
+            w = _workers_in(command, findings.warnings)
             if w:
                 existing.workers = num(w, "procesos", _workers_source(w, command, cmd_where), cmd_at)
             if command:
@@ -354,7 +370,7 @@ def read_kubernetes(path: Path, rel: str, findings: Findings) -> None:
                     svc.vcpu = num(c, "vCPU", f"resources.{part}.cpu de {name}", f"{rel}:{_line(r, 'cpu')}")
                 if svc.memory_gb is None and "memory" in r and (g := _memory_gb(r["memory"])) is not None:
                     svc.memory_gb = num(g, "GB", f"resources.{part}.memory de {name}", f"{rel}:{_line(r, 'memory')}")
-            w = _workers_in(command)
+            w = _workers_in(command, findings.warnings)
             if w:
                 svc.workers = num(w, "procesos", _workers_source(w, command, f"el contenedor de {name}"), at)
             svc.queue = _dedicated_celery_queue(command)
@@ -390,6 +406,13 @@ def read_fly(path: Path, rel: str, findings: Findings) -> None:
     svc = Service(cfg.get("app", "app"), "api", f"{rel}:1", source_file=f"fly:{rel}")
     vms = cfg.get("vm") or []
     vm = vms[0] if isinstance(vms, list) and vms else vms if isinstance(vms, dict) else {}
+    if vm.get("cpu_kind") or vm.get("size"):
+        svc.plan = num(
+            str(vm.get("size") or f"{vm['cpu_kind']}-{int(vm.get('cpus', 1))}x"),
+            "plan",
+            "[[vm]] size o cpu_kind y cpus de fly.toml",
+            f"{rel}:{line_of(r'(size|cpu_kind)\s*=')}",
+        )
     if "cpus" in vm:
         svc.vcpu = num(float(vm["cpus"]), "vCPU", "[[vm]] cpus de fly.toml", f"{rel}:{line_of(r'cpus\s*=')}")
     mem = vm.get("memory") or vm.get("memory_mb")
@@ -442,7 +465,7 @@ def read_render(path: Path, rel: str, findings: Findings) -> None:
                     f"numInstances de {s.name}",
                     f"{rel}:{_line(svc, 'numInstances')}",
                 )
-            w = _workers_in(_cmd_text(svc.get("startCommand")))
+            w = _workers_in(_cmd_text(svc.get("startCommand")), findings.warnings)
             if w:
                 cmd = _cmd_text(svc.get("startCommand"))
                 s.workers = num(
@@ -540,6 +563,28 @@ def read_terraform(path: Path, rel: str, findings: Findings) -> None:
         findings.deploy_targets.append({"target": "aws (terraform)", "at": f"{rel}:1"})
 
 
+# ---------- frontend y URLs de conexión de ejemplo (JAJ-143) ----------
+
+ENV_EXAMPLE_RE = re.compile(r"^\.env\.(example|sample|template|dist)$|^[\w.-]+\.env\.(example|sample)$|^example\.env$")
+CONNECTION_VAR = re.compile(r"^\s*(export\s+)?(\w*(DATABASE|DB|POSTGRES|PG)\w*)\s*=\s*['\"]?(\S+?)['\"]?\s*$")
+
+
+def read_env_example(path: Path, rel: str, findings: Findings) -> None:
+    """El proveedor de la DB según el host de la URL de conexión de un ``.env.example``. Solo archivos de
+    ejemplo: un ``.env`` real tiene credenciales y no se lee."""
+    from app.catalog.deploy import db_provider_from_host
+
+    for i, line in enumerate(_text(path).splitlines(), 1):
+        m = CONNECTION_VAR.match(line)
+        if m and (provider := db_provider_from_host(m.group(4))):
+            findings.db_hosts.append({"provider": provider, "at": f"{rel}:{i}", "variable": m.group(2)})
+
+
+def read_frontend_config(path: Path, rel: str, findings: Findings) -> None:
+    target = "vercel" if path.name == "vercel.json" else "netlify"
+    findings.add_target(target, f"{rel}:1")
+
+
 # ---------- Procfile y workflows ----------
 
 
@@ -556,7 +601,7 @@ def read_procfile(path: Path, rel: str, findings: Findings) -> None:
             else "other"
         )
         s = Service(kind.strip(), role, f"{rel}:{i}", source_file=f"procfile:{rel}")
-        w = _workers_in(cmd)
+        w = _workers_in(cmd, findings.warnings)
         if w:
             s.workers = num(w, "procesos", _workers_source(w, cmd, f"el Procfile ({kind.strip()})"), f"{rel}:{i}")
         findings.services.append(s)
@@ -569,6 +614,8 @@ DEPLOY_HINTS = [
     ("aws ecs", re.compile(r"amazon-ecs-deploy-task-definition|aws\s+ecs\s+update-service")),
     ("heroku", re.compile(r"heroku\s+(container:release|deploy)|akhileshns/heroku-deploy")),
     ("railway", re.compile(r"railway\s+up")),
+    ("vercel", re.compile(r"vercel\s+(deploy|--prod)|amondnet/vercel-action")),
+    ("cloudfront", re.compile(r"cloudfront\s+create-invalidation")),
     ("kubernetes", re.compile(r"kubectl\s+apply|helm\s+upgrade")),
     ("docker registry", re.compile(r"docker\s+push|docker/build-push-action")),
 ]
@@ -605,6 +652,12 @@ def scan_deployment(repo: Path) -> Findings:
         elif name.endswith(".tf"):
             findings.files.append({"path": rel, "kind": "terraform"})
             read_terraform(path, rel, findings)
+        elif name in ("vercel.json", "netlify.toml"):
+            findings.files.append({"path": rel, "kind": name.split(".")[0]})
+            read_frontend_config(path, rel, findings)
+        elif ENV_EXAMPLE_RE.match(name):
+            findings.files.append({"path": rel, "kind": "env_example"})
+            read_env_example(path, rel, findings)
         elif name == "Procfile":
             findings.files.append({"path": rel, "kind": "procfile"})
             read_procfile(path, rel, findings)
@@ -628,7 +681,7 @@ def scan_deployment(repo: Path) -> Findings:
             hit = dockerfile_cmd(path, rel)
             if hit and API_CMD.search(hit[0]):
                 svc = Service("app", "api", hit[1], source_file=f"dockerfile:{rel}")
-                w = _workers_in(hit[0])
+                w = _workers_in(hit[0], findings.warnings)
                 if w:
                     svc.workers = num(w, "procesos", _workers_source(w, hit[0], "el CMD del Dockerfile"), hit[1])
                 findings.services.append(svc)
@@ -643,8 +696,10 @@ QUESTIONS = {
     "api.memory_gb": "¿Cuánta memoria tiene cada réplica de la API?",
     "api.workers": "¿Cuántos procesos de la API corre cada réplica (workers, cluster, PM2)?",
     "api.provider": "¿Dónde corre la API (Fargate, Fly, Render, un servidor propio...)?",
-    "db.plan": "¿Qué plan o tamaño de base de datos usan (por ejemplo Supabase Micro o RDS db.t4g.medium)?",
+    "db.plan": "¿Qué plan o tamaño de base de datos usan (por ejemplo Supabase Micro, Neon 1 CU o RDS db.t4g.medium)?",
 }
+# Destinos que sirven solo el frontend: no dicen dónde corre la API (JAJ-143).
+FRONTEND_ONLY = {"vercel", "netlify", "cloudfront"}
 
 
 def _first(services: list[Service], attr: str) -> dict | None:
@@ -660,7 +715,20 @@ def observed(f: Findings) -> dict[str, Any]:
             out[f"api.{attr}"] = v
     if (v := _first(db, "plan")) is not None:
         out["db.plan"] = v
-    targets = {t["target"] for t in f.deploy_targets} - {"docker registry"}
+    if (v := _first(api, "plan")) is not None:
+        out["api.plan"] = v
+    providers = {h["provider"] for h in f.db_hosts}
+    if len(providers) == 1:
+        h = f.db_hosts[0]
+        out["db.provider"] = num(
+            h["provider"], "proveedor", f"host de {h['variable']} en el ejemplo de configuración", h["at"]
+        )
+    fronts = {t["target"] for t in f.deploy_targets} & FRONTEND_ONLY
+    if len(fronts) == 1:
+        t = next(iter(fronts))
+        at = next(x["at"] for x in f.deploy_targets if x["target"] == t)
+        out["frontend.provider"] = num(t, "proveedor", "destino del frontend en el repo", at)
+    targets = {t["target"] for t in f.deploy_targets} - {"docker registry"} - FRONTEND_ONLY
     if len(targets) == 1:
         t = next(iter(targets))
         at = next(x["at"] for x in f.deploy_targets if x["target"] == t)

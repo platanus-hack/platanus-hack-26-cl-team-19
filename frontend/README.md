@@ -19,13 +19,9 @@ La aplicación queda disponible en `http://localhost:3000`.
 
 ## Probar el editor
 
-Desde la home, pulsa **Ver proyectos** para abrir `/projects`. El proyecto
-de demostración muestra sus repos y ramas. Abre el editor para cambiar de repo
-en la barra lateral y volver a **Mis proyectos**. Con `pnpm dev` el editor funciona con
-datos de demostración. El dashboard conserva las versiones de demo en la sesión
-de esa pestaña. Con la URL de FastAPI y Supabase Auth configuradas, el frontend envía la sesión
-a las rutas de proyectos. Configura también `SUPABASE_URL` en FastAPI para que
-valide esa sesión y filtre los proyectos por usuario.
+La home reproduce una animación del editor con datos de ejemplo. Pulsa
+**Probar editor** e inicia sesión con GitHub para entrar a **Mis proyectos**. Configura Supabase Auth en el frontend y `SUPABASE_URL` en FastAPI
+para validar la sesión y filtrar los proyectos por usuario.
 
 Para probar FastAPI directamente en desarrollo, arranca los dos procesos desde la
 raíz del repo, en terminales separadas.
@@ -39,12 +35,14 @@ python3.12 -m venv .venv
 
 ```bash
 cd frontend
-NUXT_PUBLIC_API_BASE=http://127.0.0.1:8000 pnpm dev
+NUXT_PUBLIC_API_BASE=http://127.0.0.1:8000 \
+NUXT_PUBLIC_SUPABASE_URL=tu-url-de-supabase \
+NUXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu-clave-publicable pnpm dev
 ```
 
 1. En [el editor](http://localhost:3000/editor), abre
    `full-stack-fastapi-template`. FastAPI entrega el modelo de ese repo y crea
-   un proyecto con v1. Puedes probarlo sin conectar GitHub ni Supabase.
+   un proyecto con v1.
 2. En **Escenarios**, elige **CyberDay** y pulsa **Simular**. Revisa la serie por
    segundo y el cuello de botella. En **Costos** puedes pedir el costo mensual.
 3. En **Versiones**, cambia **Réplicas de la API** de 1 a 3 y pulsa
@@ -65,9 +63,17 @@ GitHub.
 
 La fuente de verdad está en [tailwind.css](app/assets/css/tailwind.css). Usa los
 roles semánticos de interfaz para fondos, texto, bordes y acciones. Usa
-`status-*` para saturación y `source-*` para procedencia. Acompaña el color de
-estado con una etiqueta visible y un icono. Los valores de las muestras son
-ilustrativos.
+`status-*` para saturación y `source-*` para procedencia.
+
+Tres colores de marca, fuera de la escala de grises:
+
+- `primary` (índigo): acción principal, foco y selección.
+- `highlight` (magenta): lo que bifurca o propone el agente, como "Aplicar" en
+  una propuesta y el lado nuevo de un diff. Úsalo poco, para que se note.
+- `info` (cian): datos y aristas del diagrama.
+
+Acompaña el color de estado con una etiqueta visible y un icono. Los valores de
+las muestras son ilustrativos.
 
 Tailwind 4 y el registro de shadcn-vue se configuran en este proyecto. La muestra
 de fundamentos corresponde a JAJ-36. El catálogo de componentes reutilizables

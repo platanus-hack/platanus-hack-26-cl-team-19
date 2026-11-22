@@ -16,6 +16,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import AgentMarkdown from "./AgentMarkdown.vue";
 import AgentProposalCard from "./AgentProposalCard.vue";
+import ChatChangeProposal from "./ChatChangeProposal.vue";
 import AgentToolCall from "./AgentToolCall.vue";
 import EvidenceRequestCard from "./EvidenceRequestCard.vue";
 import type { ChatMessage } from "./types";
@@ -32,6 +33,7 @@ const props = withDefaults(
     messages: ChatMessage[];
     nextVersion: string;
     thinking?: boolean;
+    proposalBusy?: boolean;
     disabled?: boolean;
     /** Nodo que el agente recibe como contexto, por ejemplo el seleccionado. */
     context?: string;
@@ -44,6 +46,7 @@ const props = withDefaults(
   }>(),
   {
     thinking: false,
+    proposalBusy: false,
     disabled: false,
     context: undefined,
     attachments: () => [],
@@ -61,6 +64,7 @@ const emit = defineEmits<{
   attach: [files: File[]];
   removeAttachment: [localId: string];
   dismissEvidence: [request: EvidenceRequest];
+  openVersion: [version: number];
 }>();
 
 const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
@@ -187,6 +191,18 @@ watch(
             :status="message.status"
             :output="message.output"
             :detail="message.detail"
+            :version="message.version"
+            @open-version="emit('openVersion', $event)"
+          />
+          <ChatChangeProposal
+            v-else-if="message.role === 'chat-proposal'"
+            :proposal="message.proposal"
+            :state="message.state"
+            :version="message.version"
+            :error="message.error"
+            :disabled="thinking || proposalBusy"
+            @apply="emit('apply', message.id)"
+            @discard="emit('discard', message.id)"
           />
           <AgentProposalCard
             v-else

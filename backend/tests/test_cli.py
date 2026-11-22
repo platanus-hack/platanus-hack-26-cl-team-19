@@ -36,7 +36,7 @@ def test_unknown_scenario_names_the_ones_that_exist(model_file, capsys):
     "content, expected",
     [
         ("{no es json", "error: "),
-        ("[1, 2]", "no es un modelo"),
+        ("[1, 2]", "el modelo debe ser un objeto"),
         (json.dumps({"schema": "otra/v1"}), "Esquema no soportado"),
         (json.dumps({"schema": "branchpoint.model/v1"}), "le falta el campo 'deployment'"),
     ],

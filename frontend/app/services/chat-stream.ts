@@ -8,7 +8,20 @@ export type ChatTurn = {
   attachments?: string[];
 };
 
+export interface ChatProposal {
+  id: string;
+  draft: {
+    base: number;
+    note?: string;
+    scenario?: { name: string };
+    ops?: Record<string, unknown>[];
+  };
+  changes: string[];
+  warnings: string[];
+}
+
 type ToolResult = {
+  proposal?: ChatProposal;
   error?: unknown;
   p95_ms?: number;
   scenario?: string;
@@ -18,6 +31,8 @@ type ToolResult = {
   endpoints?: unknown[];
   version?: number;
   note?: string;
+  // propose_version, set_deployment, set_traffic (JAJ-141)
+  changes?: string[];
 };
 
 /** Lo que el backend calcula que falta respaldar con evidencia (IA-7). */

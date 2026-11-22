@@ -15,9 +15,9 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import type { ChatProvider } from "@/services/chat-stream";
 
-const options: { id: ChatProvider; name: string }[] = [
-  { id: "anthropic", name: "Claude (Anthropic)" },
-  { id: "openai", name: "OpenAI" },
+const options: { id: ChatProvider; name: string; company: string }[] = [
+  { id: "anthropic", name: "Claude", company: "Anthropic" },
+  { id: "openai", name: "GPT", company: "OpenAI" },
 ];
 const {
   enabled,
@@ -35,6 +35,14 @@ const keys = reactive<Record<ChatProvider, string>>({
 });
 const notice = ref("");
 const id = useId();
+const usage = computed(() => {
+  const settings = chatSettings.value;
+  if (!settings?.limit) return 0;
+  return Math.min(
+    100,
+    ((settings.limit - settings.remaining) / settings.limit) * 100,
+  );
+});
 
 function changeSource(source: unknown) {
   if (source === "team" || source === "personal")
@@ -68,7 +76,9 @@ async function removeKey(provider: ChatProvider) {
     <Alert v-if="error" variant="destructive">
       <AlertDescription>{{ error }}</AlertDescription>
     </Alert>
-    <p v-if="notice" role="status" class="text-sm">{{ notice }}</p>
+    <p v-if="notice" role="status" class="text-xs text-muted-foreground">
+      {{ notice }}
+    </p>
     <p
       v-if="pending === 'list'"
       role="status"
@@ -76,59 +86,90 @@ async function removeKey(provider: ChatProvider) {
     >
       <Spinner /> Revisando API keys…
     </p>
-    <ul class="divide-y divide-border rounded-md border border-border">
+    <ul class="divide-y divide-border rounded-lg border border-border">
       <li
         v-for="option in options"
         :key="option.id"
-        class="flex flex-col gap-3 p-4"
+        class="flex flex-col gap-3 px-4 py-3"
       >
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <Label :for="`${id}-${option.id}`"
-            >API key de {{ option.name }}</Label
-          >
-          <Badge v-if="providers.includes(option.id)" variant="outline"
-            >Guardada</Badge
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-sm font-medium">
+            {{ option.name }}
+            <span class="font-normal text-muted-foreground">{{
+              option.company
+            }}</span>
+          </p>
+          <Badge
+            :variant="providers.includes(option.id) ? 'outline' : 'secondary'"
+            class="font-normal"
+            >{{
+              providers.includes(option.id) ? "Key guardada" : "Sin key"
+            }}</Badge
           >
         </div>
-        <template v-if="option.id === 'anthropic' && chatSettings">
-          <Label :for="`${id}-source`">Clave activa para Claude</Label>
-          <Select
-            :model-value="
-              chatSettings.personal.includes('anthropic') ? 'personal' : 'team'
-            "
-            :disabled="Boolean(pending)"
-            @update:model-value="changeSource"
-          >
-            <SelectTrigger :id="`${id}-source`" class="w-full"
-              ><SelectValue
-            /></SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="team">Cuota de Branchpoint</SelectItem>
-                <SelectItem
-                  value="personal"
-                  :disabled="!providers.includes('anthropic')"
-                  >Mi API key</SelectItem
-                >
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <p class="text-xs text-muted-foreground">
-            {{
-              chatSettings.team.includes("anthropic")
-                ? `${chatSettings.remaining} de ${chatSettings.limit} mensajes disponibles hoy con Branchpoint.`
-                : "La cuota de Branchpoint aún no está disponible."
-            }}
-            Tu API key usa los límites de tu cuenta de Anthropic.
-          </p>
-        </template>
-        <p
-          v-else-if="option.id === 'openai'"
-          class="text-xs text-muted-foreground"
+
+        <div
+          v-if="option.id === 'anthropic' && chatSettings"
+          class="flex flex-col gap-2"
         >
-          OpenAI usa tu API key y los límites de tu cuenta.
-        </p>
-        <form class="flex flex-wrap gap-2" @submit.prevent="saveKey(option.id)">
+          <div class="flex items-center justify-between gap-3">
+            <Label :for="`${id}-source`" class="text-xs text-muted-foreground"
+              >Usar</Label
+            >
+            <Select
+              :model-value="
+                chatSettings.personal.includes('anthropic')
+                  ? 'personal'
+                  : 'team'
+              "
+              :disabled="Boolean(pending)"
+              @update:model-value="changeSource"
+            >
+              <SelectTrigger :id="`${id}-source`" size="sm" class="w-48"
+                ><SelectValue
+              /></SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="team">Cuota de Branchpoint</SelectItem>
+                  <SelectItem
+                    value="personal"
+                    :disabled="!providers.includes('anthropic')"
+                    >Mi API key</SelectItem
+                  >
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <div
+            v-if="chatSettings.team.includes('anthropic')"
+            class="flex flex-col gap-1"
+          >
+            <div
+              class="h-1 overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-label="Mensajes de Branchpoint usados hoy"
+              :aria-valuenow="chatSettings.limit - chatSettings.remaining"
+              :aria-valuemax="chatSettings.limit"
+            >
+              <div
+                class="h-full rounded-full bg-foreground"
+                :style="{ width: `${usage}%` }"
+              />
+            </div>
+            <p class="text-xs text-muted-foreground tabular-nums">
+              {{ chatSettings.remaining }} de {{ chatSettings.limit }} mensajes
+              de Branchpoint disponibles hoy
+            </p>
+          </div>
+          <p v-else class="text-xs text-muted-foreground">
+            La cuota de Branchpoint aún no está disponible.
+          </p>
+        </div>
+
+        <form class="flex gap-2" @submit.prevent="saveKey(option.id)">
+          <Label :for="`${id}-${option.id}`" class="sr-only"
+            >API key de {{ option.company }}</Label
+          >
           <Input
             :id="`${id}-${option.id}`"
             v-model="keys[option.id]"
@@ -136,21 +177,14 @@ async function removeKey(provider: ChatProvider) {
             autocomplete="off"
             spellcheck="false"
             maxlength="1024"
-            class="min-w-40 flex-1"
+            class="h-8 min-w-0 flex-1 text-sm"
             :placeholder="
               providers.includes(option.id)
-                ? 'Ingresa una nueva API key'
-                : 'Ingresa tu API key'
+                ? 'Pega una nueva API key para reemplazarla'
+                : 'Pega tu API key'
             "
             :disabled="Boolean(pending)"
           />
-          <Button
-            type="submit"
-            size="sm"
-            :disabled="Boolean(pending) || !keys[option.id].trim()"
-          >
-            {{ providers.includes(option.id) ? "Reemplazar" : "Guardar" }}
-          </Button>
           <Button
             v-if="providers.includes(option.id)"
             type="button"
@@ -160,6 +194,13 @@ async function removeKey(provider: ChatProvider) {
             @click="removeKey(option.id)"
           >
             Quitar
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            :disabled="Boolean(pending) || !keys[option.id].trim()"
+          >
+            {{ providers.includes(option.id) ? "Reemplazar" : "Guardar" }}
           </Button>
         </form>
       </li>

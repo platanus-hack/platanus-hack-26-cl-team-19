@@ -101,6 +101,11 @@ export function createGithubApi(
     // ya instalada: GitHub no redirige al cambiarla, así que se autoriza con OAuth (JAJ-57)
     authorizeUrl: () => fetchApi<{ url: string }>("/github/authorize-url"),
     connection: () => fetchApi<GithubConnection>("/github/connection"),
+    syncInstallations: (token: string) =>
+      fetchApi<GithubInstallation[]>("/github/sync-installations", {
+        method: "POST",
+        body: { provider_token: token },
+      }),
     installations: () =>
       fetchApi<GithubInstallation[]>("/github/installations"),
     repos: () => fetchApi<GithubRepo[]>("/github/repos"),
@@ -139,6 +144,25 @@ export function createGithubApi(
         body: {
           repos,
           primary,
+          provider,
+          use_branchpoint_key: useBranchpointKey,
+        },
+      }),
+    // Suma repos a un proyecto que ya existe (JAJ-125): el motor sigue simulando su principal y el
+    // resultado es una versión nueva, hija de `parent` (por defecto, la última).
+    addRepositories: (
+      projectId: string,
+      repos: RepoSelection[],
+      parent?: number,
+      provider: ChatProvider = "anthropic",
+      useBranchpointKey = false,
+    ) =>
+      fetchApi<Ingestion>("/github/ingestions", {
+        method: "POST",
+        body: {
+          project_id: projectId,
+          repos,
+          ...(parent ? { parent } : {}),
           provider,
           use_branchpoint_key: useBranchpointKey,
         },

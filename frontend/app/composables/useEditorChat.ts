@@ -36,10 +36,15 @@ export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
     output = `${number(result.peak_rps.value)} req/s pico · ${result.endpoints?.length ?? 0} endpoints`;
   else if (event.name === "apply_log_traffic" && result?.version)
     output = `Versión ${result.version} con tráfico observado`;
+  else if (typeof result?.version === "number")
+    output = [`Versión ${result.version} creada`, ...(result.changes ?? [])]
+      .slice(0, 3)
+      .join(" · ");
   return {
     status: "done" as const,
     output,
     detail: JSON.stringify(result, null, 2),
+    version: typeof result?.version === "number" ? result.version : undefined,
   };
 }
 
@@ -64,7 +69,19 @@ function applyChatEvent(
       (item): item is ToolMessage =>
         item.role === "tool" && item.id === `${turnId}:${event.id}`,
     );
-    if (message) Object.assign(message, toolResult(event));
+    const proposal = event.result?.proposal;
+    if (proposal) {
+      const card = {
+        id: proposal.id,
+        role: "chat-proposal",
+        proposal,
+        state: "idle",
+      } as const;
+      if (message) messages.splice(messages.indexOf(message), 1, card);
+      else messages.push(card);
+    } else if (message) {
+      Object.assign(message, toolResult(event));
+    }
   } else if (event.type === "done") {
     // la tarjeta se reemplaza con cada respuesta: no se acumulan pedidos viejos
     conversation.evidence = event.evidence ?? null;
@@ -84,6 +101,41 @@ export function historyTurn(
     : { role: "user", content: text };
 }
 
+/** El historial para el modelo a partir de los mensajes guardados: cada pregunta con los textos de su respuesta. */
+export function historyFrom(messages: ChatMessage[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  let reply: string[] = [];
+  const flush = () => {
+    if (reply.length && turns.at(-1)?.role === "user")
+      turns.push({
+        role: "assistant",
+        content: reply.join("\n\n").slice(0, 20_000),
+      });
+    reply = [];
+  };
+  for (const message of messages) {
+    if (message.role === "user") {
+      flush();
+      turns.push(historyTurn(message.text, message.attachments ?? []));
+    } else if (message.role === "agent") reply.push(message.text);
+  }
+  flush();
+  // un turno sin respuesta (se cortó) no va: el modelo espera alternar usuario y asistente
+  if (turns.at(-1)?.role === "user") turns.pop();
+  return turns.slice(-38);
+}
+
+/** Lo que quedó a medias al guardar (una llamada en curso, una propuesta aplicándose) vuelve a un estado estable. */
+export function settledMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.role === "tool" && message.status === "running")
+      return { ...message, status: "error", output: "Llamada interrumpida" };
+    if (message.role === "chat-proposal" && message.state === "pending")
+      return { ...message, state: "idle" };
+    return message;
+  });
+}
+
 function chatError(cause: unknown): string {
   if (cause && typeof cause === "object" && "data" in cause) {
     const data = cause.data as { error?: { message?: string } } | undefined;
@@ -94,7 +146,13 @@ function chatError(cause: unknown): string {
     : "No se pudo completar el mensaje.";
 }
 
-export function useEditorChat(projectId: Ref<string | undefined>) {
+export function useEditorChat(
+  projectId: Ref<string | undefined>,
+  options: {
+    /** La última versión que creó el agente en el turno, al terminar la respuesta. */
+    onVersion?: (version: number) => void;
+  } = {},
+) {
   const baseURL = useRuntimeConfig().public.apiBase.trim();
   const auth = useSupabaseAuth();
   const api = createEditorApi(
@@ -106,9 +164,9 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
     () => ({}),
   );
   const provider = ref<ChatProvider>("anthropic");
-  const conversationId = computed(
-    () => `${provider.value}:${projectId.value ?? ""}`,
-  );
+  // una conversación por proyecto: cambiar de proveedor no la borra
+  const conversationId = computed(() => projectId.value ?? "");
+  const loadedChats = useState<string[]>("editor-chat-loaded", () => []);
   const error = ref("");
   watch(provider, () => {
     error.value = "";
@@ -131,6 +189,7 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
     text: string,
     expectedSource?: ChatKeySource,
     attachments: ChatAttachmentRef[] = [],
+    context?: { version?: number; scenario?: string },
   ) {
     const id = projectId.value;
     if (!id || thinking.value) return;
@@ -160,8 +219,16 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
         provider.value,
         request.signal,
         expectedSource,
+        context,
       );
-      await finishTurn(stream, state, historyTurn(text, attachments), turnId);
+      const created = await finishTurn(
+        stream,
+        state,
+        historyTurn(text, attachments),
+        turnId,
+      );
+      const last = created.at(-1);
+      if (last !== undefined) options.onVersion?.(last);
     } catch (cause) {
       if (!request.signal.aborted) error.value = chatError(cause);
       for (const message of state.messages) {
@@ -175,13 +242,48 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
     } finally {
       request = undefined;
       thinking.value = false;
+      await persist(id);
     }
   }
 
+  /** Guarda la conversación en el backend. Si falla, el chat sigue funcionando en esta pestaña. */
+  async function persist(id = projectId.value) {
+    if (!baseURL || !id || !loadedChats.value.includes(id)) return;
+    const messages = settledMessages(conversations.value[id]?.messages ?? []);
+    try {
+      await api.saveChat(id, messages);
+    } catch {
+      // se reintenta con el próximo turno
+    }
+  }
+
+  async function load(id: string | undefined) {
+    if (
+      !import.meta.client ||
+      !baseURL ||
+      !id ||
+      loadedChats.value.includes(id)
+    )
+      return;
+    try {
+      const { messages: saved } = await api.getChat(id);
+      // si ya se escribió algo mientras cargaba, gana lo de esta pestaña
+      if (!conversations.value[id]?.messages.length && saved.length) {
+        const messages = settledMessages(saved);
+        conversations.value[id] = { messages, history: historyFrom(messages) };
+      }
+      loadedChats.value.push(id);
+    } catch {
+      // sin la conversación guardada se parte de cero; no se marca como cargada para no pisarla
+    }
+  }
+  watch(projectId, load, { immediate: true });
+
   function reset() {
-    if (projectId.value && !thinking.value)
-      conversations.value[conversationId.value] = undefined;
+    if (!projectId.value || thinking.value) return;
+    conversations.value[conversationId.value] = undefined;
     error.value = "";
+    void persist();
   }
 
   function dismissEvidence(field: string) {
@@ -197,6 +299,7 @@ export function useEditorChat(projectId: Ref<string | undefined>) {
     evidence,
     send,
     reset,
+    persist,
     dismissEvidence,
   };
 }
@@ -206,11 +309,18 @@ export async function finishTurn(
   conversation: Conversation,
   user: ChatTurn,
   turnId: string,
-) {
+): Promise<number[]> {
   const reply: string[] = [];
+  const created: number[] = [];
   for await (const event of readChatEvents(stream)) {
     applyChatEvent(conversation, event, turnId);
     if (event.type === "text") reply.push(event.text);
+    if (
+      event.type === "tool_result" &&
+      !event.result?.error &&
+      typeof event.result?.version === "number"
+    )
+      created.push(event.result.version);
     if (event.type === "done") {
       if (reply.length)
         conversation.history = [
@@ -218,7 +328,7 @@ export async function finishTurn(
           user,
           { role: "assistant", content: reply.join("\n\n").slice(0, 20_000) },
         ];
-      return;
+      return created;
     }
   }
   throw new Error("La conexión se interrumpió antes de completar el mensaje.");

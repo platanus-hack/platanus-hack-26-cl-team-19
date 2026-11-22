@@ -33,6 +33,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.catalog import deploy
 from app.ingest import build_model as bm
 from app.ingest.iac import Findings
 
@@ -163,6 +164,15 @@ OBSERVABLE = {
     "db.pool_size": ("conexiones", "conexiones fijas del pool por proceso"),
     "db.max_overflow": ("conexiones", "conexiones extra del pool por proceso"),
     "db.pool_timeout_s": ("s", "segundos de espera por una conexión del pool"),
+}
+# El mínimo que el motor acepta para cada valor citado (JAJ-108), y por qué uno menor no sirve. Un valor
+# menor se descarta con un aviso y queda el de por defecto, por revisar: antes, workers=0 armaba un modelo
+# que la API rechaza (JAJ-101) o, sin consultas a la DB, rompía checks() con min() vacío.
+OBSERVABLE_MIN = {
+    "api.workers": (1, "con 0 procesos la API no atiende requests"),
+    "db.pool_size": (1, "en SQLAlchemy, pool_size=0 es un pool sin límite, que el motor no modela"),
+    "db.max_overflow": (0, ""),
+    "db.pool_timeout_s": (1, "con 0 s ninguna request espera una conexión del pool"),
 }
 
 
@@ -461,6 +471,13 @@ def observed_values(sub: ArchitectureSubmission, root: Path | None) -> tuple[dic
     warnings: list[str] = []
     for o in sub.observations:
         unit, what = OBSERVABLE[o.field]
+        minimum, why = OBSERVABLE_MIN[o.field]
+        if o.value < minimum:
+            warnings.append(
+                f"La IA citó {o.field}={o.value} en {o.at}: se descarta porque {why}. "
+                "Queda el valor por defecto, por revisar."
+            )
+            continue
         if root is None:
             values[o.field] = bm.num(
                 o.value,
@@ -518,7 +535,64 @@ def build_from_ai(
         if f"db.{key}" in observed:
             pool[key] = observed[f"db.{key}"]
             pool["defined_at"] = pool["defined_at"] or observed[f"db.{key}"]["at"]
-    return bm.build_from_graph(to_graph(sub, via), sub.repo, answers or {}, iac=iac, workers=workers, pool=pool)
+    model = bm.build_from_graph(to_graph(sub, via), sub.repo, answers or {}, iac=iac, workers=workers, pool=pool)
+    model["deployment"]["api"]["technology"] = api_technology(sub, root)
+    return model
+
+
+# ---------- tecnología de la API (JAJ-87) ----------
+
+# framework (como lo nombra la IA) → (nombre para mostrar, paquete en el manifiesto)
+FRAMEWORKS = {
+    "fastapi": ("FastAPI", "fastapi"),
+    "django": ("Django", "django"),
+    "flask": ("Flask", "flask"),
+    "express": ("Express", "express"),
+    "nestjs": ("NestJS", "@nestjs/core"),
+    "nest": ("NestJS", "@nestjs/core"),
+    "next": ("Next.js", "next"),
+    "nextjs": ("Next.js", "next"),
+    "fastify": ("Fastify", "fastify"),
+    "koa": ("Koa", "koa"),
+    "hono": ("Hono", "hono"),
+    "rails": ("Ruby on Rails", "rails"),
+    "laravel": ("Laravel", "laravel/framework"),
+    "gin": ("Gin", "github.com/gin-gonic/gin"),
+    "echo": ("Echo", "github.com/labstack/echo"),
+    "spring": ("Spring Boot", "spring-boot"),
+}
+MANIFESTS = ("package.json", "pyproject.toml", "requirements.txt", "go.mod", "composer.json", "Gemfile", "pom.xml")
+_VERSION = r"[\s\"'=<>~^:@]*v?(\d+(?:\.\d+){0,2})"
+
+
+def _manifest_version(root: Path, package: str) -> tuple[str, str] | None:
+    """(versión, archivo:línea) del paquete en un manifiesto de la raíz o de una carpeta de primer nivel."""
+    candidates = [root / m for m in MANIFESTS] + [
+        d / m for d in sorted(root.iterdir()) if d.is_dir() for m in MANIFESTS
+    ]
+    rx = re.compile(rf"(?<![\w/-]){re.escape(package)}(?![\w/-])(?:\[[^\]]*\])?\"?{_VERSION}", re.I)
+    for path in candidates:
+        if not path.is_file() or "node_modules" in path.parts:
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if m := rx.search(line):
+                return m.group(1), f"{path.relative_to(root).as_posix()}:{i}"
+    return None
+
+
+def api_technology(sub: ArchitectureSubmission, root: Path | None) -> dict:
+    """El framework y el lenguaje de la API. El framework lo reconoce la IA (ESTIMADO); si el manifiesto
+    del repo lo declara, queda OBSERVADO con su versión y su línea."""
+    name, package = FRAMEWORKS.get(sub.framework.lower(), (sub.framework, sub.framework))
+    found = _manifest_version(root, package) if root is not None and root.is_dir() else None
+    if found:
+        version, at = found
+        return deploy.technology(
+            name, version, "OBSERVADO", f"{package} {version} en {at}", at=at, language=sub.language
+        )
+    return deploy.technology(
+        name, None, "ESTIMADO", f"Framework que reconoció la IA ({sub.framework})", language=sub.language
+    )
 
 
 def replace_architecture(model: dict, sub: ArchitectureSubmission) -> dict:

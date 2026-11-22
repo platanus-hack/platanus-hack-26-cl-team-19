@@ -40,6 +40,16 @@ const surfaces = [
     token: "--primary",
     style: "bg-primary",
   },
+  {
+    label: "Propuesta del agente",
+    token: "--highlight",
+    style: "bg-highlight",
+  },
+  {
+    label: "Datos y aristas",
+    token: "--info",
+    style: "bg-info",
+  },
 ];
 
 const semanticGroups = [

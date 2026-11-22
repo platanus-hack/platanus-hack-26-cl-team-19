@@ -137,12 +137,20 @@ class GitHubApp:
         user_token = granted.get("access_token")
         if not user_token:
             raise GitHubError(401, "GitHub rechazó la autorización (el código venció o ya se usó). Vuelve a conectar.")
+        return self.visible_installations(user_token)
+
+    def visible_installations(self, user_token: str, *, require_app_match: bool = False) -> dict[int, str]:
+        """Lista las instalaciones que GitHub permite ver con un token de usuario."""
         found: dict[int, str] = {}
         page = 1
         while True:  # un usuario puede ver varias instalaciones (su cuenta y sus orgs)
             data = self._request("GET", f"/user/installations?per_page=100&page={page}", user_token, what="user")
             batch = data.get("installations", [])
-            found |= {inst["id"]: (inst.get("account") or {}).get("login") or "" for inst in batch}
+            found |= {
+                inst["id"]: (inst.get("account") or {}).get("login") or ""
+                for inst in batch
+                if not require_app_match or str(inst.get("app_id")) == self.config.app_id
+            }
             if len(batch) < 100:
                 return found
             page += 1
@@ -166,8 +174,16 @@ class GitHubApp:
 
     def list_branches(self, installation_id: int, full_name: str) -> list[str]:
         token = self.installation_token(installation_id, full_name.split("/", 1)[1])
-        data = self._request("GET", f"/repos/{full_name}/branches?per_page=100", token, what="branches")
-        return [b["name"] for b in data]
+        branches: list[str] = []
+        page = 1
+        while True:
+            batch = self._request(
+                "GET", f"/repos/{full_name}/branches?per_page=100&page={page}", token, what="branches"
+            )
+            branches.extend(branch["name"] for branch in batch)
+            if len(batch) < 100:
+                return branches
+            page += 1
 
     def fetch(self, installation_id: int, full_name: str, ref: str) -> tuple[str, bytes]:
         """El SHA del commit de ``ref`` y su tarball. Pide el SHA primero para analizar y guardar

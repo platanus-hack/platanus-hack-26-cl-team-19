@@ -31,6 +31,8 @@ backend/
 │   │   ├── mcp.py           #   /mcp: las tools para la CLI de IA del usuario (JAJ-54, JAJ-67)
 │   │   └── loop.py          #   el loop del chat del editor con Claude (JAJ-67)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
+│   │   └── deploy.py        # perfiles de despliegue: proveedor y plan de la DB, la API y el frontend (JAJ-143)
+│   ├── reports/             # reportes de simulación: armado, comparación y Markdown (JAJ-127)
 │   ├── costs/               # costo mensual por componente (JAJ-72)
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
@@ -65,6 +67,13 @@ Los recursos se arman desde el `deployment` del modelo:
 | Pool de conexiones (`db_pool`) | pool por worker × workers × réplicas (tope: conexiones de la DB) | desde la primera consulta hasta el final de la request |
 | CPU de la DB (`db_cpu`) | vCPU de la DB | cada consulta, durante su tiempo (también las de los workers de las colas) |
 | Workers de una cola (`queue:<nombre>`) | `workers` de la cola | cada trabajo encolado, durante sus `job_steps` |
+
+En el `Run`, cada recurso trae su uso, la cola máxima y final, los timeouts y `mean_wait_ms`. Ese campo es la espera media de **todos** los que pidieron el recurso (JAJ-135):
+- quienes lo obtuvieron, hasta obtenerlo;
+- quienes vencieron, hasta vencer;
+- quienes seguían en la cola al terminar, hasta el final.
+
+Antes solo contaba a quienes lo obtuvieron. En saturación quedaba muy por debajo de la espera real: en un pool donde vence el 82 %, daba 18,7 ms cuando la espera real es 44,4 ms.
 
 - Cada request recorre los `steps` de su endpoint en orden. Respeta `repeat` (N+1).
 - Esperar una conexión más que el timeout del pool es un error (`pool_timeout`).
@@ -120,6 +129,31 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
 **Validación del ajuste** (`tests/engine/test_cloud_factor.py`):
 - **Cuentas a mano:** el uso de CPU sube exactamente en el factor, y el punto de saturación baja en el factor.
 - **Contra los `checks` de `build_model.py`, que ya aplican el factor y la base de créditos:** en los dos modelos de ejemplo, el motor da el mismo uso de CPU (±5 %) en los escenarios bajo saturación, y el mismo cuello de botella en CyberDay.
+
+### Dónde está desplegado cada componente (JAJ-143) y su tecnología (JAJ-87)
+
+Cada componente corre en un proveedor y un plan del catálogo. El perfil del plan (`app/catalog/deploy.py`) define a la vez lo que simula el motor y lo que cuesta, así que el rendimiento y el precio salen de la misma fuente:
+
+| Componente | Proveedores y planes | Qué cambia en la simulación |
+| -- | -- | -- |
+| DB | Supabase (micro a 4xl), Neon (0.25 a 4 CU), RDS (`db.t4g.*`, `db.m7g.*`), local | vCPU, `max_connections`, pooler, procesador (`cpu_core_factor`), créditos de CPU y `network_rtt_ms` |
+| API | Fargate y local (por vCPU y GB), Fly (`performance-1x/2x`), Render (free a `pro_ultra`) | vCPU y memoria del plan, procesador |
+| Frontend | Vercel (hobby, pro), CloudFront (planes de tarifa plana), local | Nada: solo suma su costo. El diagrama lo muestra antes de la API |
+
+- **Red hasta la DB (`deployment.db.network_rtt_ms`):** cada consulta espera la ida y vuelta con la conexión tomada, sin usar la CPU de la DB. Es 0 en local (ya está en la calibración de JAJ-8) y 1 ms en la nube, como `SUPUESTO` (AWS: menos de 1 ms dentro de una zona, un dígito de ms entre zonas).
+- **Precios:** los de Neon y CloudFront salen de `app/costs/prices/manual.json` (JAJ-11). Los de Fly, Render y Vercel están en el catálogo, con su fuente y fecha.
+- **Procesador:** Neon, Fly y Render no lo publican. Se usa `x86_cloud`, con el factor más lento del catálogo (el de Graviton2), como `SUPUESTO`.
+- **Lo que dice el repo** (`iac.py`):
+  - **DB:** el host de la URL de conexión de un `.env.example` (`*.neon.tech`, `*.supabase.co`, `*.rds.amazonaws.com`) da el proveedor. Un `.env` real nunca se lee.
+  - **API:** el plan de `render.yaml`, el `size` o `cpu_kind` de `fly.toml`, o el destino del despliegue.
+  - **Frontend:** `vercel.json`, `netlify.toml` o el workflow de despliegue.
+  - **Sin plan dicho:** si el repo da el proveedor pero no el plan, se usa el más chico como `SUPUESTO` por revisar, y el agente lo pregunta.
+- **Proveedor sin perfil** (Heroku, Netlify...): queda un aviso en `deployment.iac.warnings` y la API se simula como local.
+- **Tecnología (JAJ-87):** la DB, la API y cada servicio traen un bloque `technology` (`name`, `version`, `label`, `source`, `at`).
+  - **`OBSERVADO`:** la imagen de la IaC (`postgres:16`) o el manifiesto del repo (`express` en `package.json:3`).
+  - **`ESTIMADO`:** el framework que reconoció la IA, o el motor que implica el proveedor (Neon solo ofrece PostgreSQL).
+- **Editor (JAJ-148):** `GET /catalog/deployment` lista los proveedores y planes de la DB, la API y el frontend, con sus especificaciones y procedencia. El inspector los ofrece al hacer clic en esos nodos; elegir uno llama a `POST /projects/{id}/versions/{n}/ops` con `origin: "manual"` y crea la versión nueva.
+- **Agente:** `change_db_plan` acepta Neon. `change_api_host` mueve la API a otro proveedor o plan. `change_frontend_host` dice dónde se sirve el frontend. `set_deployment` con `db.plan` deduce el proveedor del plan, por ejemplo «Neon 1 CU» → `neon 1cu`.
 
 ### Quién causa el cuello de botella (JAJ-69)
 
@@ -277,8 +311,9 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/projects/{id}/compare` | Simula las versiones `a` y `b` con el mismo escenario y semilla. Devuelve los dos `Run` y `delta`: p50/p95/p99, errores y throughput (`a`, `b`, `diff`, `pct`), si cambió el cuello de botella y `model_changes` (qué valores cambiaron entre los modelos). También trae `cost_a`, `cost_b` y `cost_delta` (US$/mes total y por componente), `failure_a` y `failure_b` (ventas en juego por hora, JAJ-74) y `summary`, la comparación en una frase. `region` opcional para los costos. |
 | `GET` | `/projects/{id}/scenarios` | Los escenarios del proyecto (`name`, `multiplier` o `rps`, `description`). Ver "Escenarios del proyecto" abajo. |
 | `GET` | `/projects/{id}/scenarios/{name}` | Un escenario. 404 si el proyecto no lo tiene. |
-| `PUT` | `/projects/{id}/scenarios/{name}` | Crea o reemplaza el escenario. Body: `{"multiplier": 20}` (× el pico de cada versión) o `{"rps": 300}` (req/s fijas), y `description` opcional. |
+| `PUT` | `/projects/{id}/scenarios/{name}` | Crea o reemplaza el escenario. Body: `{"multiplier": 20}` (× el pico de cada versión) o `{"rps": 300}` (req/s fijas), y `description` opcional. También `endpoint_weights`, `slowdowns` y `business` (ver "Reemplazos del escenario" abajo). |
 | `GET` | `/projects/{id}/versions/{n}/costs` | Costo mensual de la versión `n`, por componente. `?region=us-east-1` (por defecto) o `sa-east-1`. |
+| `POST` | `/projects/{id}/versions/{n}/results` | Lo que necesita la pantalla de resultados, en una llamada (JAJ-128): el `run` (el mismo de `…/runs`, del guardado si ya existe), el `cost` (el de `…/costs`) y el `failure` (ventas en juego por hora, antes solo en `compare`), con `failure_missing` y `summary`. Body: el de `…/runs` más `region`. Ver "Resultados de una versión" abajo. |
 | `POST` | `/costs` | Costo mensual de `{"model", "region"}`, por componente. Ver "Costos" abajo. |
 
 **Dónde se guardan los proyectos:** con `DATABASE_URL` (en `backend/.env`), en Postgres (`app/db/postgres_store.py`). Sin ella, en memoria, y se pierden al reiniciar la API. Las dos implementan `ProjectStore` (`app/api/store.py`), así que las rutas son las mismas. Con Postgres, los ids de proyecto son `uuid`.
@@ -310,6 +345,20 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 - **`POST /projects/{id}/versions/{n}/runs` y `compare`** buscan el escenario por nombre en el proyecto, no en el modelo. Uno creado con `PUT` sirve para cualquier versión, aunque no esté en su `traffic.scenarios`. Si no existe, responden 422 `unknown_scenario` con `available`. Con `rps` en la request, el escenario es solo un nombre y no se busca.
 - **Al editar un escenario** cambia la tasa final y, con ella, la clave del run guardado: se vuelve a simular y nunca se devuelve un run con la tasa vieja.
 - **Duración, llegadas y timeout** siguen saliendo de la request. Las columnas de la tabla para eso (`duration_s`, `arrivals`…) todavía no se usan.
+
+**Reemplazos del escenario (JAJ-131):** un escenario puede cambiar más que la tasa. Son tres reemplazos opcionales que cambian la situación, no la arquitectura: se aplican a una copia del modelo solo para esa corrida, sin crear versiones (`app/models/overrides.py`). Van en el body de `…/runs`, `…/results`, `compare` y `POST /runs`, o guardados en el escenario con `PUT /projects/{id}/scenarios/{name}`.
+
+| Campo | Ejemplo | Qué cambia |
+| -- | -- | -- |
+| `endpoint_weights` | `{"POST /checkout": 3}` | La mezcla de endpoints. Los que no aparecen conservan su peso del modelo, y el motor normaliza como siempre. |
+| `slowdowns` | `{"external:pagos": 10, "db": 1.5}` | Multiplica el tiempo de los pasos de un nodo del grafo (los ids de `POST /graph`): `db`, `cache`, `external` (llamadas externas sin servicio) o `external:<servicio>`. Un valor menor que 1 lo hace más rápido. Va de más de 0 a 100. |
+| `business` | `{"conversion": 0.04, "ticket_usd": 60}` | La conversión y el ticket del costo de fallar (JAJ-74). Puede completar un modelo que no los trae. |
+
+- **Guardados en el escenario**, se aplican al simular y comparar cualquier versión con él. Si la request trae uno de los tres, ese reemplaza al guardado.
+- **El `Run` dice con qué se simuló:** `overrides` trae una frase por reemplazo, por ejemplo *"Dependencias del escenario: external:pagos ×10 el tiempo de sus pasos."* El `summary` de `…/results` y de `compare` también las incluye, para que un resultado con pagos ×10 no se lea como el de la arquitectura tal cual.
+- **Procedencia:** los números que pone el escenario quedan `SUPUESTO`, con fuente "Escenario: …" o "Declarado en el escenario: …". El costo de fallar nombra de dónde salen su conversión y su ticket.
+- **Un reemplazo que no calza** con el modelo (un endpoint o un nodo que no tiene, o una mezcla con todos los pesos en 0) responde 422 `invalid_parameters`, con `available` cuando hay valores que sí sirven.
+- **Entran en la clave del run guardado** (JAJ-75): otro reemplazo simula de nuevo y el mismo vuelve del guardado.
 
 **Runs guardados (JAJ-75):** `POST /projects/{id}/versions/{n}/runs` y `compare` guardan cada `Run` y, si se pide lo mismo otra vez, devuelven el guardado sin simular. Funciona así porque las versiones no se editan y el motor es determinista con la misma semilla.
 - **La clave** (`cache_key`, en `app/api/run_cache.py`) es el sha256 del proyecto, el número de versión, los `RunParams` (escenario, semilla, duración, tasa, perfil, créditos de CPU…) y `ENGINE_VERSION`. La tasa es la final: si viene de un escenario del proyecto, ya va calculada con el pico de la versión (JAJ-76).
@@ -353,12 +402,20 @@ Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "mes
 
 | `code` | Cuándo |
 | -- | -- |
-| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, o pasa un límite del servicio (ver "Límites de trabajo" abajo). |
+| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, un valor tiene la forma o el rango equivocado (ver "Validación del modelo" abajo), o pasa un límite del servicio (ver "Límites de trabajo"). |
 | `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
 | `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo), o la simulación pasó el presupuesto de eventos (trae `max_events`). |
 | `invalid_operations` | Una operación de `/ops` no se puede aplicar. El `message` dice cuál y qué valores sí existen. No guarda nada. |
 | `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
+| `internal_error` | 500: un error inesperado del backend. El `message` no trae el detalle; el traceback queda en el log (JAJ-101). |
+
+- **Validación del modelo (JAJ-101).** `load_model` es el único lugar donde se valida un modelo, y todas las rutas que reciben uno pasan por ahí (`POST /projects`, `POST /runs`, `POST /projects/{id}/versions`, `POST /costs`, `POST /graph`, las `/ops`). Un modelo que pasa ya no hace fallar al motor, al costo ni a los escenarios con un 500.
+  - **Forma:** `deployment`, `deployment.api`, `deployment.db`, `traffic`, cada escenario, cada endpoint y cada paso son objetos; `endpoints` y `steps` son listas; el `id` de un endpoint es un texto.
+  - **Números:** con procedencia (`{"value": 2, …}`) o solos (`2`), en todos lados; quien lea el JSON original usa `value()`. Un texto (`"2"`) o `true` no son números.
+  - **Rangos:** réplicas, workers e hilos, enteros ≥ 1; vCPU > 0; tiempos, pesos, `api_cpu_ms` y `latency_ms` ≥ 0; `max_connections` y `max_length` ≥ 1, o `null` para "sin límite" (0 ya no significa "sin límite" ni "rechaza todo"); `pool_size + max_overflow` ≥ 1; las req/s y el multiplicador de un escenario > 0; `business.conversion` entre 0 y 1.
+  - **`schema`:** exactamente `branchpoint.model/v1`. Antes pasaba con un sufijo (`v1.1`) y Postgres lo rechazaba con un 500.
+  - El mensaje nombra el campo con su ruta: `deployment.api.replicas debe ser al menos 1 (es 0)`, `endpoints[0].steps[2].time no puede ser negativo (es -5)`.
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.
@@ -375,17 +432,21 @@ Son el vocabulario con que el agente propone versiones (`app/agent/ops.py`, [ADR
 
 | Operación | Qué cambia | De dónde salen los números |
 | -- | -- | -- |
-| `scale_api(replicas, vcpu?, quote?)` | Réplicas y vCPU de la API; recalcula `usd_month` | Decisión de diseño: `SUPUESTO` "Propuesta del agente" con `needs_review`, o la frase del usuario si va `quote`. Precio de Fargate del catálogo |
-| `change_db_plan(plan, provider?)` | vCPU, conexiones, procesador, créditos de CPU, pooler y costo | Plan del catálogo (JAJ-11) |
-| `add_pooler()` | Agrega `deployment.db.pooler` en modo transacción | `pooler_connections` del plan. Solo Supabase en el MVP |
+| `scale_api(replicas, vcpu?, quote?)` | Réplicas y vCPU de la API; recalcula `usd_month` | Decisión de diseño: `SUPUESTO` "Propuesta del agente" con `needs_review`, o la frase del usuario si va `quote`. Precio del plan del catálogo. En Fly y Render los vCPU los fija el plan |
+| `change_db_plan(plan, provider?)` | vCPU, conexiones, procesador, créditos de CPU, pooler, red y costo | Plan del catálogo (JAJ-11, JAJ-143) |
+| `change_api_host(provider, plan?, vcpu?, quote?)` | Proveedor y plan de la API: vCPU, memoria, procesador y costo | Plan del catálogo (JAJ-143) |
+| `change_frontend_host(provider, plan, quote?)` | Dónde se sirve el frontend. No cambia la simulación | Plan del catálogo (JAJ-143) |
+| `add_pooler()` | Agrega `deployment.db.pooler` en modo transacción | `pooler_connections` del plan: Supavisor en Supabase, PgBouncer en Neon |
 | `add_cache(endpoint, at?, hit_ratio?, quote?)` | Las lecturas del endpoint GET pasan a `on_miss` de un paso de caché | Tiempo de Redis del catálogo. `hit_ratio` es un dato del usuario: solo con `quote`; sin él, 0 % de aciertos (el peor caso) |
 | `move_to_queue(endpoint, at, queue, workers, quote?)` | El paso de `at` pasa a `job_steps` de una cola nueva y la request solo encola | Tiempo de encolar del catálogo. `workers`: decisión de diseño, igual que `replicas` |
 | `remove_cache(endpoint)` | Inversa de `add_cache`: el paso de caché desaparece y sus lecturas de `on_miss` vuelven a su lugar | Ninguno nuevo. Una caché del repo sin `on_miss` se rechaza: no se sabe qué vuelve a la DB |
 | `remove_pooler()` | Inversa de `add_pooler`: la app vuelve al límite de conexiones del plan | `max_connections` del plan actual |
 | `move_to_sync(endpoint, step)` | Inversa de `move_to_queue`: el trabajo de la cola vuelve a la request (y su CPU a `api_cpu_ms`). Si la cola queda sin uso, se quita | Ninguno nuevo. Una cola sin `job_steps` se rechaza |
 | `scale_workers(queue, workers, quote?)` | Workers de una cola existente | Decisión de diseño, igual que `replicas` |
+| `add_read_replica(count, plan?, quote?)` | Agrega `deployment.db.read_replicas` (JAJ-140): las lecturas (`pk`, `lookup`, `range`, `count`, `count_all`, `scan`) de las requests van a las réplicas, repartidas en ronda; las escrituras y los trabajos de las colas siguen en la primaria | `count`: decisión de diseño, igual que `replicas`. vCPU, conexiones, créditos de CPU y costo del plan del catálogo (el de la primaria por defecto). Que la app separe lecturas y escrituras es `SUPUESTO` (`routing`). No se simula el retraso de replicación |
+| `remove_read_replica()` | Inversa de `add_read_replica`: todas las consultas vuelven a la primaria | Ninguno nuevo |
 
-Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`. Una operación existe solo si el motor puede simular su efecto: para lo que no está (réplica de lectura, CDN, cambiar de base de datos), el agente tiene que decir que Branchpoint todavía no lo simula.
+Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`. Una operación existe solo si el motor puede simular su efecto: para lo que no está (CDN, sharding, cambiar de base de datos), el agente tiene que decir que Branchpoint todavía no lo simula.
 
 ```bash
 # v2 propuesta: 3 réplicas + pooler, y compararla con v1 en CyberDay
@@ -461,6 +522,12 @@ CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingesti
 
 - **La IA clasifica; los números salen del catálogo.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache` (con `on_miss`), `external` (con el nombre del servicio), `background` (con `task` y `queue`) o `cpu`. El schema no acepta tiempos, filas ni costos.
 - **La configuración se cita, no se inventa.** Los workers de la API y el pool de conexiones van en `observations`, con el `archivo:línea` donde está escrito el número. En la ingesta, el servidor revisa que el número esté en esa línea: si está, queda `OBSERVADO`, y si no, se descarta con un aviso. Desde la CLI no puede revisarlo, así que queda `ESTIMADO` y por revisar.
+- **Valores que el motor no modela (JAJ-108).** Un número citado bajo su mínimo se descarta con un aviso y queda el valor por defecto, por revisar:
+  - `api.workers` < 1, porque con 0 procesos la API no atiende requests;
+  - `db.pool_size` < 1, porque en SQLAlchemy 0 es un pool sin límite;
+  - `db.pool_timeout_s` < 1.
+  
+  Lo mismo pasa con un `--workers 0` en un comando de despliegue (Dockerfile, compose, Procfile…). Antes, ese 0 armaba un modelo que la API rechaza o, sin consultas a la DB, rompía `checks()`. La IA tampoco puede mandar dos métodos en un endpoint (`GET,POST`), un WebSocket ni endpoints repetidos: `ArchitectureSubmission` los rechaza.
 - **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`, `via: "cli"` o `"ingesta"`). Los tiempos de sus pasos son `ESTIMADO` como máximo. La CPU base queda `SUPUESTO` si el framework no es en el que la midió el catálogo.
 - **La IaC manda.** Si un archivo de despliegue declara un servicio con el mismo nombre que un componente de la IA, se queda el de la IaC. Los workers de la IaC ganan sobre los que cita la IA.
 - **Volver a mandar.** Con `project_id`, `submit_architecture` guarda una versión nueva (origen `agente`) con la arquitectura nueva, y conserva el despliegue, el tráfico y lo que dijo la IaC.
@@ -469,6 +536,8 @@ CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingesti
 - **Varios repos (IA-5).** `POST /github/ingestions` acepta `repos` (entre 1 y 4, sin repetidos) y `primary` (obligatorio con más de uno), además del cuerpo de un solo repo. Cada repo descuenta 1 de la cuota de extracción, todos o ninguno. Se analizan en paralelo, cada uno con su LLM; si falla el principal la ingesta falla, y si falla un secundario sigue con un aviso. El motor simula el principal; cada secundario entra en `deployment.services` con `role: "service"` y `simulated: false`, con sus componentes (sin duplicar los del principal). Un paso externo que nombra a un secundario queda enlazado a su servicio (`app/ingest/multirepo.py`). `repo.sources` lista todos los repos; `POST /graph` pasa `repo` y `simulated` a cada nodo, y `GET /projects` lista todos los repos en `repositories`, con `primary`.
 - **Evidencia verificada (IA-4).** Cada entrega del analizador pasa por `check_evidence` (`app/ingest/ai_graph.py`): el archivo existe dentro del repo (sin salir por symlink), la línea está en rango y, en los endpoints, el segmento fijo más largo de la ruta aparece a ±30 líneas. Los problemas vuelven al modelo; tras 3 entregas así, se acepta sin esos elementos y quedan en `analysis.dropped` y en `warnings`. Sin ningún endpoint válido, falla.
 - **Tope y progreso.** Con la key de Branchpoint, el análisis se corta al pasar `BRANCHPOINT_TEAM_EXTRACT_TOKENS` (1.500.000 por defecto, provisorio hasta medir con IA-0). `GET /github/ingestions/{id}` trae `llm_steps` en vivo y `cost` al terminar. Un error del proveedor (key inválida, sin crédito) deja la ingesta `failed` con el mensaje del proveedor, sin la key. `AnthropicLLM` marca el último bloque con `cache_control`: el historial que se reenvía en cada vuelta se cobra como lectura de caché.
+- **Precio de los tokens (`cost_usd`).** Los cuatro precios salen de `llm_tokens.usd_per_million` en `app/costs/prices/manual.json`: entrada, salida, lectura de caché y escritura de caché (`cache_write`, la de 5 minutos, 1,25 × entrada). La escritura antes era un ×1,25 escrito en el código, sin fuente (JAJ-109). Si a un modelo le falta alguno, `cost` es `null`; un test revisa que todos los modelos de la tabla traigan los cuatro.
+- **Fecha de los números ingeridos.** Cada número que arma la ingesta lleva la fecha del día en que se armó (`build_model.today()`), igual que `repo.extracted_at`. Antes era una constante del módulo, así que un servidor con días arriba fechaba todo con el día en que arrancó (JAJ-109).
 
 El chat del editor no ofrece `submit_architecture`, porque no ve el repo.
 
@@ -550,6 +619,33 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
 - **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Si lo que tiene precio ya supera el presupuesto, queda en `false`, porque lo que falta solo puede sumar. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
 
+### Reportes de simulación (JAJ-127)
+
+Cada simulación guarda su reporte (`branchpoint.report/v1`, tabla `reports`): una foto congelada de la corrida. El PDF (que imprime el navegador desde la página del reporte) y el Markdown salen de esa foto, así que no hace falta volver a simular, y el reporte no cambia aunque después se edite la versión o cambien los precios.
+
+| Ruta | Qué hace |
+| -- | -- |
+| `POST /projects/{id}/versions/{n}/reports` | Simula con una semilla nueva (o la que venga) y guarda el reporte. Con `rps`, el escenario queda "personalizado" |
+| `GET /projects/{id}/reports` | La lista, del más nuevo al más viejo |
+| `GET /projects/{id}/reports/{rid}` | El reporte completo |
+| `GET /projects/{id}/reports/{rid}/markdown` | El mismo reporte en Markdown |
+| `POST /projects/{id}/reports/compare` | Compara dos reportes guardados, sin simular, y guarda la comparación |
+| `DELETE /projects/{id}/reports/{rid}` | Lo borra |
+
+- **Contenido:**
+  - **Identificación:** proyecto, versión, escenario (o req/s), semilla y motor.
+  - **Resultados:** latencias, throughput, errores, requests sin respuesta y saturación, con su procedencia.
+  - **Cuello de botella:** el recurso, su `archivo:línea` y el endpoint que más lo ocupa.
+  - **Costos y supuestos:** el costo por línea, el costo de fallar y los supuestos principales.
+  - **Conclusión:** escrita con una plantilla, sin LLM.
+- **Diagnóstico por componente** (API, DB, colas): uso promedio y pico del recurso más ocupado, costo mensual y estado.
+  - **Estados:** `overloaded` (uso promedio de 80 % o más, o el cuello de botella con requests sin atender), `idle` (bajo 30 % incluso en el pico y con costo) u `ok`. Los umbrales van en `thresholds`, con etiqueta `SUPUESTO`.
+  - **Margen hasta saturar:** req/s ÷ uso promedio. Es una aproximación lineal (`ESTIMADO`) y se omite si el recurso ya está saturado.
+  - **Propósito:** son datos estructurados, pensados para decidir más adelante cambios de arquitectura por costo o por riesgo de caída.
+- **Comparación:** métricas, costo y estado de cada componente en A y B, más los cambios del modelo entre las dos versiones. Si los escenarios son distintos, lo avisa.
+- **El chat:** la tool `simulate` también guarda su reporte y devuelve `report_id`.
+- **El editor:** cada vez que pulsas Simular, se crea el reporte. Luego se pide el `Run` con la misma semilla, que ya está guardado (`X-Branchpoint-Run-Cache: hit`). La sección "Reportes" lista los reportes y compara dos. La página `/reports/{proyecto}/{reporte}` tiene "Descargar PDF" y "Copiar Markdown". En el modo demo, sin backend, no hay reportes.
+
 ### Costo de fallar (JAJ-74)
 
 `failure_cost(modelo, run)` (`app/costs/failure.py`) da las ventas en juego por hora según lo que simuló el motor. Es la fórmula de JAJ-11: sesiones por hora × fracción que falla × conversión × ticket. La conversión y el ticket salen del `business` del modelo, y las requests por sesión de `traffic`. La cota de `build_model.py` (`checks.sales_at_stake_per_hour`) suponía que todo falla; aquí la fracción sale de la tasa de error del `Run`.
@@ -573,7 +669,28 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 
 El rango es amplio porque las dos versiones fallan mucho: la v1 con 75 % de errores y la v2 con 46 %. Con esas tasas, el techo de las dos se acerca a "si fallara todo". La diferencia de los pisos es lo que la v2 evita con seguridad.
 
-Los tests están en `tests/costs/test_failure.py` y `tests/api/test_costs.py`:
+### Resultados de una versión (JAJ-128)
+
+`POST /projects/{id}/versions/{n}/results` junta, para una sola versión, lo que antes había que pedir por separado o solo venía en `compare`. Body: el de `…/runs` (`scenario`, `seed`, `duration_s`, `traffic_profile`…) más `region` (`us-east-1` por defecto, o `sa-east-1`).
+
+| Campo | Qué es | Para mostrar |
+| -- | -- | -- |
+| `version` | número, origen y nota de la versión | — |
+| `run` | el `Run` del motor, el mismo de `…/runs`. Con los mismos parámetros sale del guardado (header `X-Branchpoint-Run-Cache: hit`) | métricas, serie, cuello de botella, `saturation` (JAJ-89) |
+| `cost` | el `CostEstimate` de `…/costs` en esa región | `total` y `lines[].usd_month` traen `value`, `unit` (`US$/mes`), `label`, `source` y `date`; `cost.region`. **Si `cost.missing` no está vacío, el total es parcial**: faltan esos componentes (JAJ-88) |
+| `failure` | ventas en juego por hora según la tasa de error del `run` (JAJ-74), o `null` | `lost_sales_per_hour.low/high`, `is_floor` ("al menos"), `too_short` ("simula más tiempo"), `message` |
+| `failure_missing` | si `failure` es `null`, qué datos de negocio le faltan al modelo (`traffic.requests_per_session`, `business.conversion`, `business.ticket_usd`) | "Agrega conversión y ticket para ver el costo de fallar" |
+| `summary` | todo lo anterior en una o dos frases, para mostrar tal cual | — |
+
+Ejemplos de `summary` con el template:
+
+> v1 cuesta US$148.67/mes en us-east-1. Con 74.7% de errores, al menos US$24,543 a US$32,868 por hora en ventas en juego (US$32,868/hora si fallara todo). Ojo: v1 no alcanza a atender este tráfico (v1 deja 22 % de las requests sin respuesta al terminar): su tasa de error es un piso.
+
+> v1 cuesta US$99.81/mes en us-east-1 sin contar la DB, que no tiene precio (despliegue local o proveedor sin precios). El costo de fallar no se calcula: al modelo le falta la tasa de conversión y el ticket promedio (business.conversion, business.ticket_usd).
+
+`compare` también trae `failure_missing_a` y `failure_missing_b`, con el mismo sentido. Los tests están en `tests/api/test_results.py`: que el `run` sea el de `…/runs` y el `cost` el de `…/costs`, que `failure` calce con el de `compare`, el total parcial, la versión saturada y el modelo sin datos de negocio.
+
+Los tests del costo de fallar están en `tests/costs/test_failure.py` y `tests/api/test_costs.py`:
 - la versión con más errores muestra más ventas en juego;
 - la fórmula sale del `Run`;
 - "si fallara todo" calza con `build_model` (±0,2 % con llegadas uniformes);

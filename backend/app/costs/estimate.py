@@ -8,6 +8,9 @@ Usa las fórmulas del spike de JAJ-11 (``spikes/jaj-11-costos/costs.py``) y sus 
 | API (Fargate ARM) | réplicas × (vCPU × US$/vCPU-h + GB × US$/GB-h) × 730 h | ``deployment.api.provider`` es ``fargate`` |
 | DB Supabase | 25 + max(0, compute − 10) + disco y egreso sobre lo incluido | ``deployment.db.provider`` es ``supabase`` |
 | DB RDS PostgreSQL | US$/h × 730 + GB × US$/GB-mes de gp3 | ``deployment.db.provider`` es ``rds_postgres`` |
+| DB Neon (Launch) | CU × 730 × US$/CU-h + disco + egreso sobre 500 GB | ``deployment.db.provider`` es ``neon`` |
+| API en Fly o Render | réplicas × US$/mes del plan | ``deployment.api.provider`` es ``fly`` o ``render`` |
+| Frontend | precio fijo del plan (Vercel, CloudFront) | hay ``deployment.frontend`` |
 | Balanceador (ALB) | (US$/h + LCU × US$/LCU-h) × 730 | la API está en Fargate |
 | Transferencia de la API | GB de respuestas sobre los 100 GB gratis, por tramos | hay tráfico mensual en el modelo |
 | Caché (Valkey serverless) | GB × US$/GB-h × 730 + operaciones × US$/ECPU | algún endpoint tiene un paso de caché |
@@ -18,8 +21,7 @@ página del proveedor) y los datos del modelo (por ejemplo, los usuarios mensual
 ser ``SUPUESTO``).
 
 Lo que no tiene precio queda en ``unpriced``, con el motivo: por ejemplo, los workers de una cola,
-porque el modelo no dice su tamaño. Los estáticos (CDN, S3) no están: el modelo describe la API,
-no el frontend.
+porque el modelo no dice su tamaño. El frontend solo aparece si el modelo dice dónde se sirve (JAJ-143).
 
 Si la API o la DB corren en local (US$0) o en un proveedor sin precios, quedan en ``missing`` con un
 aviso, el primero de ``warnings`` (JAJ-88): el total no las incluye, así que no cambia con sus
@@ -36,6 +38,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any
 
+from app.catalog import load_catalog
 from app.costs.prices import aws_price, aws_tiers, manual_block
 from app.models.architecture import value
 
@@ -101,7 +104,7 @@ def _traffic(raw: dict[str, Any]) -> tuple[float | None, float | None, str | Non
     mau, profile = t.get("mau"), t.get("profile")
     if not isinstance(mau, dict) or not isinstance(profile, dict):
         return None, None, None
-    sessions, per_session = profile.get("sessions_per_month"), profile.get("requests_per_session")
+    sessions, per_session = value(profile.get("sessions_per_month")), value(profile.get("requests_per_session"))
     if not sessions or not per_session or not value(mau):
         return value(mau), None, _label(mau)
     return value(mau), value(mau) * sessions * per_session, _weakest(_label(mau), _label(profile))
@@ -129,8 +132,10 @@ def _api_line(raw: dict[str, Any], region: str) -> CostLine | str:
         return CostLine(
             "api", "API (local)", "api", _num(0.0, "US$/mes", "OBSERVADO", "Corre en local: sin costo"), "0"
         )
+    if provider in PLAN_PRICED_API:
+        return _api_plan_line(api, provider)
     if provider != "fargate":
-        return f"API en '{provider}': el MVP solo tiene precios de Fargate (JAJ-11)."
+        return f"API en '{provider}': sin precios en el catálogo (JAJ-11, JAJ-143)."
     vcpu_p, gb_p = (
         aws_price(region, "fargate_linux_arm", "vcpu_hour"),
         aws_price(region, "fargate_linux_arm", "gb_hour"),
@@ -205,7 +210,39 @@ def _db_line(raw: dict[str, Any], region: str, mau: float | None, mau_label: str
             f"US$/h × {HOURS_MONTH} h + GB × US$/GB-mes (gp3)",
             {"usd_hour": hour.usd, "storage_gb": round(gb, 2), "usd_gb_month": gp3.usd},
         )
+    if provider == "neon":
+        return _neon_line(plan, gb_db, mau, mau_label)
     return f"DB en '{provider}': sin precios en el MVP (JAJ-11)."
+
+
+def _neon_line(plan: str | None, gb_db: float, mau: float | None, mau_label: str | None) -> CostLine | str:
+    """Neon (JAJ-143), con la fórmula de ``neon_mes`` del spike de JAJ-11 pero con el tamaño del plan:
+    CU × horas × US$/CU-hora (sin escalar a cero, el peor caso) + disco + egreso sobre lo incluido."""
+    nn = manual_block("neon")
+    sizes = load_catalog()["db_plans"]["neon"]
+    if plan not in sizes:
+        return f"DB Neon '{plan}': el tamaño no está en el catálogo (JAJ-143)."
+    cu = sizes[plan]["cu"]
+    gb_egress = (mau or 0) * MB_DB_EGRESS_PER_USER / 1024
+    compute = cu * HOURS_MONTH * nn["cu_hour"]["launch"]
+    storage = gb_db * nn["storage_gb_month"]
+    egress = max(0.0, gb_egress - nn["egress_included_gb"]) * nn["egress_gb"]
+    return CostLine(
+        "db",
+        f"DB (Neon Launch, {plan})",
+        "db",
+        _num(
+            round(compute + storage + egress, 2),
+            "US$/mes",
+            _weakest(nn["provenance"], mau_label if mau else None),
+            f"{nn['source']}, leído el {nn['read_on']}. Disco y egreso: {MB_DB_PER_USER:g} MB y "
+            f"{MB_DB_EGRESS_PER_USER:g} MB por usuario ({SPIKE_SOURCE})",
+            nn["read_on"],
+            derived=True,
+        ),
+        f"CU × {HOURS_MONTH} h × US$/CU-h + GB_db × US$/GB-mes + max(0, GB_egreso − 500) × US$/GB",
+        {"cu": cu, "gb_db": round(gb_db, 2), "gb_egress": round(gb_egress, 2), "mau": mau},
+    )
 
 
 def _alb_line(region: str, requests_month: float, traffic_label: str | None) -> CostLine:
@@ -287,6 +324,42 @@ def _cache_line(
     )
 
 
+def _api_plan_line(api: dict[str, Any], provider: str) -> CostLine | str:
+    """API en Fly o Render (JAJ-143): se paga un precio fijo por máquina del plan."""
+    entry = load_catalog()["app_plans"][provider]
+    plan = entry["plans"].get(api.get("plan") or "")
+    if plan is None:
+        return f"API en {provider}: el plan '{api.get('plan')}' no está en el catálogo (JAJ-143)."
+    replicas = value(api["replicas"], 1)
+    usd = replicas * plan["usd_month"]
+    return CostLine(
+        "api",
+        f"API ({provider.capitalize()} {api['plan']})",
+        "api",
+        _num(
+            round(usd, 2), "US$/mes", _weakest(PRICE_LABEL, _label(api.get("replicas"))), entry["_source"], derived=True
+        ),
+        "réplicas × US$/mes del plan",
+        {"replicas": replicas, "plan": api["plan"], "usd_month_plan": plan["usd_month"]},
+    )
+
+
+def _frontend_line(raw: dict[str, Any]) -> CostLine | None:
+    """El frontend (JAJ-143), si el modelo dice dónde se sirve. Su costo viene del perfil del plan."""
+    front = raw["deployment"].get("frontend")
+    if not front:
+        return None
+    usd = front["usd_month"]
+    return CostLine(
+        "frontend",
+        f"Frontend ({front['provider']} {front['plan']})",
+        None,
+        {**usd, "derived": True},
+        "precio fijo del plan",
+        {"plan": front["plan"]},
+    )
+
+
 def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEstimate:
     """Costo mensual del modelo, por componente. ``region``: dónde corre la infraestructura de AWS."""
     mau, requests_month, traffic_label = _traffic(raw)
@@ -314,6 +387,21 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
     else:
         unpriced.append("Balanceador y transferencia: el modelo no trae usuarios mensuales ni perfil de uso.")
 
+    # JAJ-140: las réplicas de lectura traen su costo de add_read_replica (catálogo × réplicas)
+    replicas = raw["deployment"]["db"].get("read_replicas")
+    if replicas and isinstance(replicas.get("usd_month"), dict):
+        n = value(replicas.get("count"))
+        lines.append(
+            CostLine(
+                "db_replica",
+                f"Réplicas de lectura ({n} × {replicas.get('plan')})",
+                "db_replica",
+                replicas["usd_month"],
+                "costo del plan por réplica × réplicas",
+                {"count": n, "plan": replicas.get("plan")},
+            )
+        )
+
     has_cache = any(s.get("resource") == "cache" for e in raw["endpoints"] for s in e.get("steps", []))
     if has_cache:
         if requests_month and mau:
@@ -321,14 +409,17 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
         else:
             unpriced.append("Caché: sin usuarios mensuales no se puede estimar su tamaño ni sus operaciones.")
 
+    if (front := _frontend_line(raw)) is not None:
+        lines.append(front)
     for name in raw["deployment"].get("queues", {}):
         unpriced.append(f"Workers de la cola '{name}': el modelo no dice en qué máquina corren.")
 
     if missing:
         warnings.insert(0, _missing_warning(raw, missing))  # primero: cambia cómo leer el total
     if raw["deployment"]["db"].get("pooler"):
-        warnings.append("El pooler de Supabase (Supavisor) viene incluido en el plan: no suma costo.")
-    warnings.append("No incluye los estáticos del frontend (CDN, S3): el modelo describe la API.")
+        warnings.append("El pooler de la DB (Supavisor o PgBouncer) viene incluido en el plan: no suma costo.")
+    if not raw["deployment"].get("frontend"):
+        warnings.append("No incluye el frontend: el modelo no dice dónde se sirve (Vercel, CloudFront...).")
 
     total = sum(value(line.usd_month) for line in lines)
     total_num = _num(
@@ -351,8 +442,9 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
 
 # Proveedores con precio, para decirle al usuario qué elegir. Lo que falta se detecta de las líneas;
 # tests/costs/test_missing.py comprueba que estos conjuntos coinciden con _api_line y _db_line.
-PRICED_API = {"fargate"}
-PRICED_DB = {"supabase", "rds_postgres"}
+PLAN_PRICED_API = {"fly", "render"}
+PRICED_API = {"fargate"} | PLAN_PRICED_API
+PRICED_DB = {"supabase", "rds_postgres", "neon"}
 COMPONENT_NAMES = {"api": "la API", "db": "la DB"}
 # líneas de costo que dependen de cada componente: el ALB solo existe con la API en Fargate
 COMPONENT_LINES = {"api": {"api", "alb"}, "db": {"db"}}

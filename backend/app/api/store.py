@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from app.models.architecture import value
+
 Origin = Literal["repo", "manual", "agente"]
 
 
@@ -27,6 +29,7 @@ class Version:
     created_at: str
     # el modelo completo pesa ~100 KB: get() trae las versiones sin él y get_version() con él
     model: dict[str, Any] | None
+    proposal_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -76,13 +79,23 @@ class ProjectScenario:
     multiplier: float | None
     rps: float | None
     description: str | None = None
+    # JAJ-131: reemplazos que trae el escenario (mezcla de endpoints, dependencias más lentas, negocio)
+    endpoint_weights: dict[str, float] | None = None
+    slowdowns: dict[str, float] | None = None
+    business: dict[str, float] | None = None
+    traffic_step: dict[str, int | float] | None = None
+
+    def overrides(self) -> dict[str, Any]:
+        """Los reemplazos no vacíos, como se guardan en ``scenarios.overrides``."""
+        found = {"endpoint_weights": self.endpoint_weights, "slowdowns": self.slowdowns, "business": self.business}
+        return {k: v for k, v in found.items() if v}
 
     def rate_for(self, model: dict[str, Any]) -> float:
         """Las req/s del escenario para el modelo de una versión. ``ValueError`` si es un
         multiplicador y el modelo no trae ``traffic.peak_rps``."""
         if self.rps is not None:
             return self.rps
-        peak = ((model.get("traffic") or {}).get("peak_rps") or {}).get("value")
+        peak = value((model.get("traffic") or {}).get("peak_rps"))  # con procedencia o escalar (JAJ-101)
         if not peak or peak <= 0:
             raise ValueError(
                 f"El escenario '{self.name}' es ×{self.multiplier:g} el pico, pero el modelo no tiene "
@@ -153,13 +166,42 @@ def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
     """
     scenarios = []
     for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
-        multiplier = (sc.get("multiplier") or {}).get("value")
-        rps = (sc.get("rps") or {}).get("value")
+        multiplier, rps = value(sc.get("multiplier")), value(sc.get("rps"))  # con procedencia o escalar
         if multiplier is not None and multiplier > 0:
             scenarios.append(ProjectScenario(name, float(multiplier), None))
         elif rps is not None and rps > 0:
             scenarios.append(ProjectScenario(name, None, float(rps)))
     return scenarios
+
+
+@dataclass(frozen=True)
+class ReportSummary:
+    """Lo que muestra la lista de reportes (JAJ-127). En una comparación, los valores son los de B."""
+
+    id: str
+    kind: str  # run | comparison
+    created_at: str
+    version: int | None
+    scenario: str | None
+    rps: float | None
+    seed: int | None
+    p95_ms: float | None
+    error_rate: float | None
+    usd_month: float | None
+
+
+def report_summary(report: dict[str, Any]) -> ReportSummary:
+    if report["kind"] == "comparison":
+        b = report["b"]
+        return ReportSummary(
+            report["id"], "comparison", report["created_at"], b["version"], b["scenario"]["label"],
+            b["scenario"]["rps"], b["scenario"]["seed"], b["p95_ms"], b["error_rate"], b["usd_month"],
+        )  # fmt: skip
+    res, sc = report["results"], report["scenario"]
+    return ReportSummary(
+        report["id"], "run", report["created_at"], report["version"]["number"], sc["label"], sc["rps"],
+        sc["seed"], res["latency"]["p95_ms"], res["error_rate"], (report["costs"]["total"] or {}).get("value"),
+    )  # fmt: skip
 
 
 class ProjectStore(Protocol):
@@ -199,8 +241,31 @@ class ProjectStore(Protocol):
         ...
 
     def add_version(
-        self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
+        self,
+        project_id: str,
+        model: dict[str, Any],
+        origin: Origin,
+        parent: int | None,
+        note: str | None,
+        *,
+        proposal_id: uuid.UUID | None = None,
     ) -> Version: ...
+
+    def add_repositories(
+        self, project_id: str, model: dict[str, Any], parent: int, note: str, sources: list[RepoSource]
+    ) -> Version:
+        """Suma repos secundarios a un proyecto que salió de un repo y guarda, en la misma transacción, la
+        versión con su análisis (``origin`` repo). Un proyecto de un solo repo pasa a guardar su principal
+        en ``project_repositories``."""
+        ...
+
+    def get_chat(self, project_id: str) -> list[dict[str, Any]]:
+        """Los mensajes del chat del proyecto, tal como los muestra el panel, del más viejo al más nuevo."""
+        ...
+
+    def save_chat(self, project_id: str, messages: list[dict[str, Any]]) -> None:
+        """Reemplaza los mensajes del chat del proyecto (una conversación por proyecto)."""
+        ...
 
     def list_scenarios(self, project_id: str) -> list[ProjectScenario]:
         """Los escenarios del proyecto, por nombre (JAJ-76)."""
@@ -236,6 +301,22 @@ class ProjectStore(Protocol):
         engine_version: str,
     ) -> None:
         """Guarda el ``Run`` de la versión ``number``. Si la clave ya existe, no hace nada (JAJ-75)."""
+        ...
+
+    def save_report(self, project_id: str, report: dict[str, Any]) -> None:
+        """Guarda un reporte ``branchpoint.report/v1`` (JAJ-127). Su ``id`` lo trae el reporte."""
+        ...
+
+    def list_reports(self, project_id: str) -> list[ReportSummary]:
+        """Los reportes del proyecto, del más nuevo al más viejo."""
+        ...
+
+    def get_report(self, project_id: str, report_id: str) -> dict[str, Any] | None:
+        """Un reporte completo, si es de ese proyecto."""
+        ...
+
+    def delete_report(self, project_id: str, report_id: str) -> bool:
+        """Borra el reporte. ``False`` si no existía en ese proyecto."""
         ...
 
     # ---------- GitHub App (JAJ-57) ----------
@@ -337,6 +418,8 @@ class InMemoryProjectStore:
         self._connections: dict[tuple[str | None, int], str] = {}  # (owner, repo_id) → connection id
         self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
         self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
+        self._chats: dict[str, list[dict[str, Any]]] = {}  # proyecto → mensajes del chat
+        self._reports: dict[str, tuple[str, dict[str, Any]]] = {}  # id → (proyecto, reporte) (JAJ-127)
 
     def create(
         self,
@@ -379,11 +462,47 @@ class InMemoryProjectStore:
         return sorted(mine, key=lambda p: p.created_at, reverse=True)
 
     def add_version(
-        self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
+        self,
+        project_id: str,
+        model: dict[str, Any],
+        origin: Origin,
+        parent: int | None,
+        note: str | None,
+        *,
+        proposal_id: uuid.UUID | None = None,
     ) -> Version:
         with self._lock:
             project = self._projects[project_id]
-            version = Version(len(project.versions) + 1, origin, parent, note, _now(), copy.deepcopy(model))
+            if proposal_id is not None:
+                prior = next((item for item in project.versions if item.proposal_id == proposal_id), None)
+                if prior is not None:
+                    return prior
+            version = Version(
+                len(project.versions) + 1, origin, parent, note, _now(), copy.deepcopy(model), proposal_id
+            )
+            project.versions.append(version)
+        return version
+
+    def get_chat(self, project_id: str) -> list[dict[str, Any]]:
+        return copy.deepcopy(self._chats.get(project_id, []))
+
+    def save_chat(self, project_id: str, messages: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self._chats[project_id] = copy.deepcopy(messages)
+
+    def add_repositories(
+        self, project_id: str, model: dict[str, Any], parent: int, note: str, sources: list[RepoSource]
+    ) -> Version:
+        with self._lock:
+            project = self._projects[project_id]
+            repos = project.repos()
+            if not repos:
+                raise ValueError("el proyecto no salió de un repo")
+            project.repositories = [
+                *repos,
+                *(ProjectRepo(s.repo_full_name, s.branch, False) for s in sources),
+            ]
+            version = Version(len(project.versions) + 1, "repo", parent, note, _now(), copy.deepcopy(model))
             project.versions.append(version)
         return version
 
@@ -426,6 +545,30 @@ class InMemoryProjectStore:
             raise KeyError(f"{project_id} v{number}")
         with self._lock:
             self._runs.setdefault(cache_key, (project_id, number, copy.deepcopy(run)))
+
+    def save_report(self, project_id: str, report: dict[str, Any]) -> None:
+        if project_id not in self._projects:
+            raise KeyError(project_id)
+        with self._lock:
+            self._reports[report["id"]] = (project_id, copy.deepcopy(report))
+
+    def list_reports(self, project_id: str) -> list[ReportSummary]:
+        with self._lock:
+            mine = [r for pid, r in self._reports.values() if pid == project_id]
+        # del más nuevo al más viejo; con la misma fecha, el último guardado primero
+        return [report_summary(r) for r in sorted(reversed(mine), key=lambda r: r["created_at"], reverse=True)]
+
+    def get_report(self, project_id: str, report_id: str) -> dict[str, Any] | None:
+        saved = self._reports.get(report_id)
+        return copy.deepcopy(saved[1]) if saved is not None and saved[0] == project_id else None
+
+    def delete_report(self, project_id: str, report_id: str) -> bool:
+        with self._lock:
+            saved = self._reports.get(report_id)
+            if saved is None or saved[0] != project_id:
+                return False
+            del self._reports[report_id]
+            return True
 
     def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
         with self._lock:

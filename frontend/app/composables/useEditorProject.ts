@@ -1,13 +1,21 @@
+import type { DeploymentOptions } from "@/services/deployment-options";
 import type {
   Comparison,
   CostEstimate,
   Graph,
   ModelSummary,
   Project,
-  Run,
+  ProjectScenario,
+  ProjectScenarioInput,
+  ScenarioOverrides,
+  VersionResults,
   VersionDetail,
 } from "@/services/editor-api";
+import type { ChatProposal } from "@/services/chat-stream";
+import { createMockEditorApi } from "@/services/editor-mock";
+import { editorRunParams } from "@/services/editor-api";
 import { toScenarios, toVersionEntry } from "@/services/editor-view";
+import type { RunReport } from "@/services/reports-api";
 
 function errorMessage(error: unknown): string {
   const response = error as { data?: { error?: { message?: string } } };
@@ -36,43 +44,67 @@ function changeReplicas(version: VersionDetail, replicas: number) {
   return model;
 }
 
-export function useEditorProject() {
-  const { api, isMock } = useProjectApi();
+export function useEditorProject(embeddedDemo = false) {
+  const { api, isMock } = embeddedDemo
+    ? {
+        api: createMockEditorApi(undefined, { landing: true }),
+        isMock: true as const,
+      }
+    : useProjectApi();
+  const reportsApi = embeddedDemo ? null : useReportsApi();
+  // JAJ-127: el reporte de la última corrida; reportsVersion avisa a la lista que hay uno nuevo
+  const lastReport = shallowRef<RunReport | null>(null);
+  const reportsVersion = ref(0);
   const models = shallowRef<ModelSummary[]>([]);
   const project = shallowRef<Project | null>(null);
   const projectGroup = shallowRef<Project | null>(null);
   const version = shallowRef<VersionDetail | null>(null);
   const graph = shallowRef<Graph | null>(null);
-  const run = shallowRef<Run | null>(null);
+  // JAJ-141: el grafo de la versión padre, para marcar lo nuevo y lo que cambió
+  const parentGraph = shallowRef<Graph | null>(null);
+  const results = shallowRef<VersionResults | null>(null);
+  const run = computed(() => results.value?.run ?? null);
   const costs = shallowRef<CostEstimate | null>(null);
   const costsError = ref("");
   const comparison = shallowRef<Comparison | null>(null);
   const scenario = ref("");
+  const savedScenarios = shallowRef<ProjectScenario[]>([]);
   const pending = ref("");
   const error = ref("");
+  // JAJ-129: la simulación tiene su propio error (se muestra en el panel con Reintentar) y recuerda
+  // qué versión y escenario se simularon
+  const simulationError = ref("");
+  const runContext = shallowRef<{
+    version: string;
+    scenario: string;
+    at: Date;
+  } | null>(null);
 
   const scenarios = computed(() =>
-    version.value ? toScenarios(version.value.model) : [],
+    version.value ? toScenarios(version.value.model, savedScenarios.value) : [],
   );
   const versions = computed(() =>
     (project.value?.versions ?? []).toReversed().map(toVersionEntry),
   );
 
   async function request(label: string, action: () => Promise<void>) {
-    if (pending.value) return;
+    if (pending.value) return false;
     pending.value = label;
     error.value = "";
     try {
       await action();
+      return true;
     } catch (cause) {
       error.value = errorMessage(cause);
+      return false;
     } finally {
       pending.value = "";
     }
   }
 
-  function resetResults() {
-    run.value = null;
+  function resetResults(keepRun = false) {
+    if (!keepRun) results.value = null;
+    simulationError.value = "";
     costs.value = null;
     costsError.value = "";
     comparison.value = null;
@@ -80,20 +112,48 @@ export function useEditorProject() {
 
   async function displayVersion(detail: VersionDetail) {
     version.value = detail;
-    graph.value = null;
-    resetResults();
-    if (!scenarios.value.some((item) => item.id === scenario.value)) {
+    if (!embeddedDemo) graph.value = null;
+    resetResults(embeddedDemo);
+    const available = scenarios.value.filter(({ disabled }) => !disabled);
+    if (!available.some(({ id }) => id === scenario.value)) {
       scenario.value =
-        scenarios.value.find((item) => item.id === "cyberday")?.id ??
-        scenarios.value[0]?.id ??
+        available.find(({ id }) => id === "cyberday")?.id ??
+        available[0]?.id ??
         "";
     }
+    parentGraph.value = null;
     // Los costos dependen solo de la versión: se estiman junto al diagrama.
     const [nextGraph] = await Promise.all([
       api.getGraph(detail.model),
       fetchCosts(detail),
     ]);
     graph.value = nextGraph;
+    void fetchParentGraph(detail);
+  }
+
+  async function fetchParentGraph(detail: VersionDetail) {
+    const id = project.value?.id;
+    const parent = detail.parent;
+    if (!id || !parent) return;
+    try {
+      const base = await api.getVersion(id, parent);
+      const baseGraph = await api.getGraph(base.model);
+      if (version.value === detail) parentGraph.value = baseGraph;
+    } catch {
+      // sin el padre el diagrama se ve igual, solo sin las marcas de Nuevo y Cambiado
+    }
+  }
+
+  /** Vuelve a leer las versiones del proyecto: el agente pudo crear una (JAJ-141). */
+  async function reloadVersions() {
+    const current = project.value;
+    if (!current) return;
+    try {
+      const fresh = await api.getProject(current.id);
+      if (project.value?.id === fresh.id) project.value = fresh;
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
   }
 
   async function fetchCosts(detail: VersionDetail) {
@@ -123,7 +183,11 @@ export function useEditorProject() {
     });
   }
 
-  async function openProject(id: string, repoId?: string) {
+  async function openProject(
+    id: string,
+    repoId?: string,
+    initialVersion?: number,
+  ) {
     await request("Abriendo proyecto…", async () => {
       const group = await api.getProject(id);
       projectGroup.value = group;
@@ -136,9 +200,12 @@ export function useEditorProject() {
           : group;
       const latest = versions.value[0];
       if (!latest) throw new Error("El proyecto todavía no tiene una versión.");
-      await displayVersion(
-        await api.getVersion(project.value.id, Number(latest.id)),
-      );
+      const [detail, projectScenarios] = await Promise.all([
+        api.getVersion(project.value.id, initialVersion ?? Number(latest.id)),
+        api.listScenarios(project.value.id),
+      ]);
+      savedScenarios.value = projectScenarios;
+      await displayVersion(detail);
     });
   }
 
@@ -150,7 +217,22 @@ export function useEditorProject() {
     });
   }
 
-  async function saveReplicas(replicas: number) {
+  async function saveScenario(name: string, input: ProjectScenarioInput) {
+    const id = project.value?.id;
+    if (!id) return false;
+    return request("Guardando escenario…", async () => {
+      const saved = await api.saveScenario(id, name, input);
+      savedScenarios.value = [
+        ...savedScenarios.value.filter((item) => item.name !== saved.name),
+        saved,
+      ].sort((a, b) => a.name.localeCompare(b.name));
+      scenario.value = saved.name;
+      results.value = null;
+      comparison.value = null;
+    });
+  }
+
+  async function createVersion(replicas: number, note: string) {
     const current = project.value;
     const parent = version.value;
     if (
@@ -160,36 +242,140 @@ export function useEditorProject() {
       replicas < 1 ||
       replicas > 50
     )
-      return;
-    const previous = parent.model.deployment.api.replicas.value;
-    if (replicas === previous) return;
-    await request("Guardando versión…", async () => {
-      const model = changeReplicas(parent, replicas);
+      return false;
+    return request("Guardando versión…", async () => {
+      const previous = parent.model.deployment.api.replicas.value;
+      const model =
+        replicas === previous ? parent.model : changeReplicas(parent, replicas);
+      const summary =
+        note.trim() ||
+        (replicas === previous
+          ? `Copia de ${parent.label}`
+          : `Réplicas de la API: ${previous} → ${replicas}`);
       const saved = await api.saveVersion(
         current.id,
         parent.number,
         model,
-        `Réplicas de la API: ${previous} → ${replicas}`,
+        summary,
       );
       project.value = { ...current, versions: [...current.versions, saved] };
       await displayVersion(saved);
     });
   }
 
-  async function simulate() {
+  async function acceptChatProposal(proposal: ChatProposal) {
+    const current = project.value;
+    if (!current || isMock || version.value?.number !== proposal.draft.base)
+      return null;
+    let accepted: VersionDetail | null = null;
+    await request("Aplicando propuesta…", async () => {
+      const saved = await api.acceptChatProposal(current.id, proposal);
+      accepted = saved;
+      project.value = {
+        ...current,
+        versions: [
+          ...current.versions.filter(({ number }) => number !== saved.number),
+          saved,
+        ],
+      };
+      const scenarioName = proposal.draft.scenario?.name;
+      if (scenarioName) scenario.value = scenarioName;
+      await displayVersion(saved);
+    });
+    return accepted as VersionDetail | null;
+  }
+
+  // JAJ-148: los proveedores y planes del catálogo, una vez por sesión (no cambian)
+  const deploymentOptions = shallowRef<DeploymentOptions | null>(null);
+  async function loadDeploymentOptions() {
+    if (isMock || deploymentOptions.value || !("deploymentOptions" in api))
+      return;
+    try {
+      deploymentOptions.value = await api.deploymentOptions();
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
+  }
+
+  // JAJ-148: el plan elegido en el inspector crea una versión nueva con la operación del catálogo
+  async function changeDeployment(
+    ops: Record<string, unknown>[],
+    note: string,
+  ) {
+    const current = project.value;
+    const parent = version.value;
+    if (!current || !parent || isMock || !("applyOps" in api)) return false;
+    return request("Creando versión…", async () => {
+      const saved = await api.applyOps(current.id, parent.number, ops, note);
+      project.value = { ...current, versions: [...current.versions, saved] };
+      await displayVersion(saved);
+    });
+  }
+
+  async function simulate(overrides?: ScenarioOverrides) {
     const id = project.value?.id;
     const number = version.value?.number;
-    if (!id || number === undefined || !scenario.value) return;
+    if (!id || number === undefined || !scenario.value || pending.value) return;
+    const selectedScenario = scenario.value;
+    const label = version.value?.label ?? `v${number}`;
+    // la corrida anterior deja de verse: no se mezcla con la nueva
+    results.value = null;
+    runContext.value = null;
+    simulationError.value = "";
+    const show = (result: VersionResults) => {
+      if (scenario.value !== selectedScenario) return;
+      results.value = result;
+      runContext.value = {
+        version: label,
+        scenario: selectedScenario,
+        at: new Date(),
+      };
+    };
     await request("Simulando…", async () => {
-      run.value = await api.run(id, number, scenario.value);
+      if (!reportsApi) {
+        const result = await api.results(
+          id,
+          number,
+          selectedScenario,
+          overrides,
+        );
+        show(result);
+        return;
+      }
+      // Cada corrida es una simulación nueva con su reporte guardado (JAJ-127), con los mismos ajustes
+      // del escenario. El backend elige la semilla; el Run de esa semilla ya quedó guardado, así que
+      // pedir los resultados no vuelve a simular.
+      const { seed: _, ...params } = editorRunParams(
+        selectedScenario,
+        overrides,
+      );
+      const report = await reportsApi.create(id, number, params);
+      lastReport.value = report;
+      reportsVersion.value++;
+      const result = await api.results(
+        id,
+        number,
+        selectedScenario,
+        overrides,
+        report.scenario.seed,
+      );
+      show(result);
     });
+    if (error.value) {
+      simulationError.value = error.value;
+      error.value = "";
+    }
   }
 
   async function loadCosts() {
     if (version.value) await fetchCosts(version.value);
   }
 
-  async function compare(base: string, target: string) {
+  async function compare(
+    base: string,
+    target: string,
+    overrides?: ScenarioOverrides,
+  ) {
     const id = project.value?.id;
     if (!id || !base || !target || base === target || !scenario.value) return;
     await request("Comparando versiones…", async () => {
@@ -198,6 +384,7 @@ export function useEditorProject() {
         Number(base),
         Number(target),
         scenario.value,
+        overrides,
       );
     });
   }
@@ -205,8 +392,9 @@ export function useEditorProject() {
   watch(
     scenario,
     () => {
-      run.value = null;
+      results.value = null;
       comparison.value = null;
+      simulationError.value = "";
     },
     { flush: "sync" },
   );
@@ -218,22 +406,36 @@ export function useEditorProject() {
     projectGroup,
     version,
     graph,
+    parentGraph,
     run,
+    results,
     costs,
     costsError,
     comparison,
     scenario,
     scenarios,
+    savedScenarios,
     versions,
     pending,
     error,
+    simulationError,
+    runContext,
     loadModels,
     openProject,
     openSample,
     openVersion,
-    saveReplicas,
+    reloadVersions,
+    saveScenario,
+    createVersion,
+    acceptChatProposal,
+    changeDeployment,
+    deploymentOptions,
+    loadDeploymentOptions,
     simulate,
     loadCosts,
     compare,
+    lastReport,
+    reportsVersion,
+    reportsEnabled: reportsApi !== null,
   };
 }

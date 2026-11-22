@@ -68,12 +68,41 @@ class FailureCost:
         return asdict(self)
 
 
+# los datos del modelo que necesita el costo de fallar, con su nombre para mostrar (JAJ-128)
+FAILURE_INPUTS = {
+    "traffic.requests_per_session": "las requests por sesión",
+    "business.conversion": "la tasa de conversión",
+    "business.ticket_usd": "el ticket promedio",
+}
+
+
+def failure_missing(raw: dict[str, Any]) -> list[str]:
+    """Los datos de ``FAILURE_INPUTS`` que le faltan al modelo (por ruta, ej. ``business.conversion``).
+    Vacía si están todos: entonces ``failure_cost`` se puede calcular (JAJ-128)."""
+    missing = []
+    for path in FAILURE_INPUTS:
+        section, key = path.split(".")
+        x = (raw.get(section) or {}).get(key)
+        if not (isinstance(x, dict) and value(x)):
+            missing.append(path)
+    return missing
+
+
+def describe_failure_missing(missing: list[str]) -> str:
+    """'El costo de fallar no se calcula: al modelo le falta la tasa de conversión y el ticket promedio
+    (business.conversion, business.ticket_usd).'"""
+    names = [FAILURE_INPUTS[p] for p in missing]
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" y {names[-1]}"
+    return f"El costo de fallar no se calcula: al modelo le falta {listed} ({', '.join(missing)})."
+
+
 def failure_cost(raw: dict[str, Any], run: Run) -> FailureCost | None:
-    """Ventas en juego por hora del ``Run``. ``None`` si el modelo no trae conversión, ticket o requests por sesión."""
-    t, biz = raw.get("traffic", {}), raw.get("business", {})
-    per_session, conversion, ticket = t.get("requests_per_session"), biz.get("conversion"), biz.get("ticket_usd")
-    if not all(isinstance(x, dict) and value(x) for x in (per_session, conversion, ticket)):
+    """Ventas en juego por hora del ``Run``. ``None`` si el modelo no trae conversión, ticket o requests
+    por sesión (``failure_missing`` dice cuáles)."""
+    if failure_missing(raw):
         return None
+    t, biz = raw["traffic"], raw["business"]
+    per_session, conversion, ticket = t["requests_per_session"], biz["conversion"], biz["ticket_usd"]
     k, conv, tick = value(per_session), value(conversion), value(ticket)
 
     rps = run.requests / run.duration_s if run.duration_s else 0.0
@@ -88,6 +117,12 @@ def failure_cost(raw: dict[str, Any], run: Run) -> FailureCost | None:
         f"sesiones/hora × fracción que falla × conversión ({conv:g}) × ticket (US${tick:g}) (JAJ-11); "
         f"sesiones/hora = req/s del Run × 3600 / {k:g} requests por sesión"
     )
+    # de dónde salen la conversión y el ticket: del modelo o del escenario (JAJ-131)
+    origin = "; ".join(
+        f"{name}: {x['source']}" for name, x in (("conversión", conversion), ("ticket", ticket)) if x.get("source")
+    )
+    if origin:
+        src += f" ({origin})"
     lost = {
         "low": _num(round(sessions_h * low * value_per_session, 0), "US$/hora", label, f"{src}. Piso: fracción = e"),
         "high": _num(

@@ -44,7 +44,10 @@ export function githubErrorMessage(cause: unknown): string {
  * `immediate: false` no pide nada a GitHub hasta llamar `loadRepos()`: así una página que quizá
  * no use la conexión (el sheet de Nuevo proyecto, el onboarding que redirige) no gasta rate limit.
  */
-export function useGithubConnection({ immediate = true } = {}) {
+export function useGithubConnection({
+  immediate = true,
+  detectInstallation = false,
+} = {}) {
   const route = useRoute();
   const auth = useSupabaseAuth();
   const baseURL = useRuntimeConfig().public.apiBase.trim();
@@ -156,15 +159,54 @@ export function useGithubConnection({ immediate = true } = {}) {
     extras.value = extras.value.filter((extra) => extra.key !== key);
   }
 
-  async function loadRepos(quiet = false) {
-    if (!api) return;
+  const installationCheck = ref<"unknown" | "unavailable" | "empty" | "found">(
+    "unknown",
+  );
+
+  async function syncInstallations() {
+    if (!api) return false;
+    try {
+      const token = await auth.getGitHubProviderToken();
+      if (token) {
+        const found = (await api.syncInstallations(token)).length > 0;
+        installationCheck.value = found ? "found" : "empty";
+        return found;
+      }
+    } catch {
+      // Si venció el token de GitHub, se puede volver a iniciar sesión.
+    }
+    installationCheck.value = "unavailable";
+    return false;
+  }
+
+  let loadingRepos: Promise<void> | undefined;
+
+  function loadRepos(quiet = false) {
+    if (!api) return Promise.resolve();
+    loadingRepos ??= refreshRepos(api, quiet).finally(() => {
+      loadingRepos = undefined;
+    });
+    return loadingRepos;
+  }
+
+  async function refreshRepos(
+    api: ReturnType<typeof createGithubApi>,
+    quiet: boolean,
+  ) {
     if (!quiet) loading.value = true;
     error.value = "";
     try {
-      const snapshot = await api.connection();
+      let snapshot = await api.connection();
+      if (
+        detectInstallation &&
+        !snapshot.installations.length &&
+        (await syncInstallations())
+      )
+        snapshot = await api.connection();
       repos.value = snapshot.repos;
       installations.value = snapshot.installations;
       revoked.value = snapshot.revoked;
+      if (installations.value.length) awaitingGithub.value = false;
       if (!repos.value.some((item) => item.full_name === repo.value))
         repo.value = repos.value[0]?.full_name ?? "";
       if (installations.value.length && !installHref.value)
@@ -208,9 +250,27 @@ export function useGithubConnection({ immediate = true } = {}) {
     }
   }
 
+  async function continueConnection() {
+    if (!detectInstallation) return authorize();
+    await loadRepos();
+    if (installations.value.length || error.value) return;
+    if (installationCheck.value === "empty") {
+      error.value =
+        "Aún no encontramos una instalación autorizada. Revisa que diste acceso a Branchpoint en GitHub.";
+      return;
+    }
+    connecting.value = true;
+    try {
+      await auth.signInWithGitHub();
+    } catch (cause) {
+      error.value = githubErrorMessage(cause);
+      connecting.value = false;
+    }
+  }
+
   /** `connect()` instala la app en otra pestaña; `connect(true)` la liga a la cuenta. */
   function connect(alreadyInstalled = false) {
-    return alreadyInstalled ? authorize() : install();
+    return alreadyInstalled ? continueConnection() : install();
   }
 
   useEventListener(
@@ -246,7 +306,49 @@ export function useGithubConnection({ immediate = true } = {}) {
     alive = false;
   });
 
-  async function analyze({ useBranchpointKey = false } = {}) {
+  function startJob(
+    useBranchpointKey: boolean,
+    projectId?: string,
+    parent?: number,
+  ) {
+    if (!api) throw new Error("No hay backend configurado.");
+    if (projectId)
+      return api.addRepositories(
+        projectId,
+        selection.value,
+        parent,
+        provider.value,
+        useBranchpointKey,
+      );
+    // varios repos (IA-10): el principal lo simula el motor; los demás quedan como dependencias
+    if (extras.value.length)
+      return api.startMultiIngestion(
+        selection.value,
+        primaryRepo.value,
+        provider.value,
+        useBranchpointKey,
+      );
+    return api.startIngestion(
+      repo.value,
+      branch.value,
+      provider.value,
+      useBranchpointKey,
+    );
+  }
+
+  /**
+   * Analiza la selección. Con `projectId`, los repos se suman a ese proyecto en una versión nueva hija de
+   * `parent`, en vez de crear un proyecto.
+   */
+  async function analyze({
+    useBranchpointKey = false,
+    projectId,
+    parent,
+  }: {
+    useBranchpointKey?: boolean;
+    projectId?: string;
+    parent?: number;
+  } = {}) {
     if (!api || selectionError.value || running.value) return;
     error.value = "";
     keyProblem.value = false;
@@ -255,20 +357,7 @@ export function useGithubConnection({ immediate = true } = {}) {
     try {
       let job: Ingestion;
       try {
-        // varios repos (IA-10): el principal lo simula el motor; los demás quedan como dependencias
-        job = extras.value.length
-          ? await api.startMultiIngestion(
-              selection.value,
-              primaryRepo.value,
-              provider.value,
-              useBranchpointKey,
-            )
-          : await api.startIngestion(
-              repo.value,
-              branch.value,
-              provider.value,
-              useBranchpointKey,
-            );
+        job = await startJob(useBranchpointKey, projectId, parent);
       } catch (cause) {
         const status = (cause as { statusCode?: number }).statusCode;
         keyProblem.value = status === 422 || status === 429;
@@ -282,8 +371,9 @@ export function useGithubConnection({ immediate = true } = {}) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (!alive) return;
         if (Date.now() > deadline) {
-          error.value =
-            "El análisis está tardando más de lo esperado. Vuelve más tarde: el proyecto aparecerá en Mis proyectos al terminar.";
+          error.value = projectId
+            ? "El análisis está tardando más de lo esperado. Vuelve más tarde: la versión nueva aparecerá en el historial al terminar."
+            : "El análisis está tardando más de lo esperado. Vuelve más tarde: el proyecto aparecerá en Mis proyectos al terminar.";
           ingestion.value = null;
           return;
         }

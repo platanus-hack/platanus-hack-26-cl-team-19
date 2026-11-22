@@ -28,6 +28,14 @@ export function useSupabaseAuth() {
     return result?.data.session?.access_token;
   }
 
+  async function getGitHubProviderToken() {
+    const result = await getClient()?.auth.getSession();
+    const session = result?.data.session;
+    return session?.user.app_metadata?.provider === "github"
+      ? session.provider_token
+      : undefined;
+  }
+
   async function signInWithGitHub() {
     const client = getClient();
     if (!client) throw new Error("Supabase Auth requiere configuración.");
@@ -57,6 +65,7 @@ export function useSupabaseAuth() {
     hasSession,
     getSessionUser,
     getAccessToken,
+    getGitHubProviderToken,
     signInWithGitHub,
     finishSignIn,
     signOut,

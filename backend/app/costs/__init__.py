@@ -8,6 +8,16 @@
 """
 
 from app.costs.estimate import CostDelta, CostEstimate, CostLine, cost_delta, estimate_cost
-from app.costs.failure import FailureCost, failure_cost
+from app.costs.failure import FailureCost, describe_failure_missing, failure_cost, failure_missing
 
-__all__ = ["CostDelta", "CostEstimate", "CostLine", "FailureCost", "cost_delta", "estimate_cost", "failure_cost"]
+__all__ = [
+    "CostDelta",
+    "CostEstimate",
+    "CostLine",
+    "FailureCost",
+    "cost_delta",
+    "describe_failure_missing",
+    "estimate_cost",
+    "failure_cost",
+    "failure_missing",
+]

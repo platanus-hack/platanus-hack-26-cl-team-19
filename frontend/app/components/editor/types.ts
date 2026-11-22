@@ -1,3 +1,5 @@
+import type { ChatProposal } from "@/services/chat-stream";
+import type { NodeTech } from "@/services/tech-stack";
 import type {
   MetricProvenance,
   MetricReading,
@@ -13,7 +15,7 @@ export interface Repository {
   version: string;
 }
 
-export type EditorSection = "scenarios" | "components" | "versions";
+export type EditorSection = "scenarios" | "components" | "versions" | "reports";
 
 export interface Scenario {
   id: string;
@@ -96,6 +98,16 @@ export type ChatMessage =
       status: ToolCallStatus;
       output?: string;
       detail?: string;
+      /** La versión que creó la herramienta (JAJ-141): se puede abrir y simular. */
+      version?: number;
+    }
+  | {
+      id: string;
+      role: "chat-proposal";
+      proposal: ChatProposal;
+      state: ProposalState;
+      version?: string;
+      error?: string;
     }
   | {
       id: string;
@@ -119,6 +131,8 @@ export type ComponentKind =
   | "queue"
   | "worker"
   | "external"
+  // dónde se sirve el frontend (JAJ-143): no se simula, suma su costo
+  | "frontend"
   // de la IA (ADR 0002) y de los repos secundarios (IA-5)
   | "service"
   | "storage"
@@ -136,6 +150,14 @@ export interface DiagramNode {
   repo?: string;
   /** false: viene de un repo secundario y el motor no lo simula. Sin el campo, se simula. */
   simulated?: boolean;
+  /** Logos de su tecnología y de dónde corre (tech-stack.ts). */
+  tech?: NodeTech;
+  /** Requests en espera en los recursos del nodo, en el segundo que se muestra. */
+  queue?: number;
+  /** El nodo dueño del recurso que es el cuello de botella de la corrida. */
+  bottleneck?: boolean;
+  /** Frente a la versión padre (JAJ-141): no estaba, o cambió de tamaño o de plan. */
+  change?: "new" | "changed";
 }
 
 export interface DiagramEdge {
@@ -144,10 +166,42 @@ export interface DiagramEdge {
   label?: string;
 }
 
+/**
+ * Flujo de un conector en un segundo de la corrida (JAJ-129). Es una estimación: el motor no entrega
+ * req/s por arista (JAJ-136), así que sale de las llegadas del segundo y de la mezcla de endpoints.
+ */
+export interface DiagramFlow {
+  from: string;
+  to: string;
+  /** req/s estimados que pasan por el conector. */
+  rps: number;
+  /** Fracción del flujo que termina en error (0 a 1). */
+  errorShare: number;
+  /** Fracción del pico de la corrida (0 a 1): define cuántas partículas se dibujan. */
+  intensity: number;
+}
+
 export interface Bottleneck {
   title: string;
   description: string;
   source?: SourceReference;
+  /** El nodo del diagrama dueño del recurso. */
+  nodeId?: string;
+}
+
+/** Qué se simuló en la corrida que se muestra (JAJ-129). */
+export interface RunContext {
+  version: string;
+  scenario: string;
+  rps?: number;
+  seed?: number;
+  at: Date;
+}
+
+export interface RunSummaryItem {
+  label: string;
+  value: string;
+  provenance: MetricProvenance;
 }
 
 export type VersionOrigin = "repo" | "manual" | "agent";
@@ -202,6 +256,7 @@ export interface NodeFrame {
 
 export interface SimulationSample {
   incoming: number;
+  targetRps?: number | null;
   successful: number;
   /** `null` cuando la carga está tan cerca del límite que el p95 no es fiable. */
   p95: number | null;

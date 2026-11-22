@@ -7,7 +7,7 @@ import json
 import tarfile
 import time
 import urllib.parse
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -176,6 +176,33 @@ def test_install_url_points_to_the_app(client):
     assert url.startswith("https://github.com/apps/branchpoint-test/installations/new?state=")
 
 
+def test_sync_installations_requires_a_session_and_filters_other_apps(client, github, monkeypatch):
+    provider_token = "github-user-token-de-prueba"
+    payload = {"provider_token": provider_token}
+    assert client.post("/github/sync-installations", json=payload).status_code == 401
+
+    client.app.dependency_overrides[current_user] = lambda: User(id="alice")
+    request = Mock(
+        return_value={
+            "installations": [
+                {"id": 42, "app_id": 1, "account": {"login": "alice-gh"}},
+                {"id": 99, "app_id": 2, "account": {"login": "otra-app"}},
+            ],
+        }
+    )
+    monkeypatch.setattr(github, "_request", request)
+
+    response = client.post("/github/sync-installations", json=payload)
+    assert response.status_code == 200
+    assert response.json() == [{"installation_id": 42, "account_login": "alice-gh"}]
+    assert provider_token not in response.text
+    request.assert_called_once_with("GET", "/user/installations?per_page=100&page=1", provider_token, what="user")
+    assert client.get("/github/connection").json()["repos"][0]["full_name"] == "acme/tienda"
+
+    client.app.dependency_overrides[current_user] = lambda: User(id="bob")
+    assert client.get("/github/connection").json()["installations"] == []
+
+
 def test_callback_saves_the_installation_for_the_state_user(client, store):
     assert client.get("/github/installations").json() == []
     connect(client)
@@ -256,6 +283,25 @@ def test_github_routes_answer_503_without_config(store):
 
 
 # ---------- repos y ramas ----------
+
+
+@pytest.mark.parametrize("page_sizes", [(100, 30), (100, 0), (0,)])
+def test_list_branches_fetches_every_page(monkeypatch, page_sizes):
+    github = GitHubApp(GitHubAppConfig("1", "branchpoint-test", "Iv1.test", SECRET, "sin-key"))
+    installation_token = Mock(return_value=TOKEN)
+    pages = [
+        [{"name": f"branch-{page * 100 + index}"} for index in range(size)] for page, size in enumerate(page_sizes)
+    ]
+    request = Mock(side_effect=pages)
+    monkeypatch.setattr(github, "installation_token", installation_token)
+    monkeypatch.setattr(github, "_request", request)
+
+    assert github.list_branches(42, "acme/tienda") == [f"branch-{index}" for index in range(sum(page_sizes))]
+    installation_token.assert_called_once_with(42, "tienda")
+    assert request.call_args_list == [
+        call("GET", f"/repos/acme/tienda/branches?per_page=100&page={page}", TOKEN, what="branches")
+        for page in range(1, len(page_sizes) + 1)
+    ]
 
 
 def test_repos_and_branches(client):

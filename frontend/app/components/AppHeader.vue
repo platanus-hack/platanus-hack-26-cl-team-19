@@ -1,16 +1,9 @@
 <script setup lang="ts">
 // Navbar de las páginas fuera del editor: logo y menú de cuenta.
-import {
-  Folder,
-  LogOut,
-  Monitor,
-  Moon,
-  Settings,
-  Sun,
-  User,
-} from "@lucide/vue";
+import { Folder, LogOut, Settings, User } from "@lucide/vue";
 import type { User as SessionUser } from "@supabase/supabase-js";
 import AppWordmark from "@/components/AppWordmark.vue";
+import ThemeOptions from "@/components/ThemeOptions.vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,8 +12,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -35,16 +26,9 @@ const props = defineProps<{
 
 const auth = useSupabaseAuth();
 const { isMock } = useProjectApi();
-const colorMode = useColorMode();
 const user = shallowRef<SessionUser | null>(null);
 const signingOut = ref(false);
 const signOutFailed = ref(false);
-
-const themes = [
-  { value: "system", label: "Sistema", icon: Monitor },
-  { value: "light", label: "Claro", icon: Sun },
-  { value: "dark", label: "Oscuro", icon: Moon },
-] as const;
 
 const userName = computed(() => {
   const name =
@@ -148,25 +132,14 @@ onMounted(async () => {
           </template>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <component
-                :is="
-                  themes.find((theme) => theme.value === colorMode.preference)
-                    ?.icon ?? Monitor
-                "
+              <span
+                class="size-4 rounded-full border border-border bg-background"
                 aria-hidden="true"
               />
               Tema
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup v-model="colorMode.preference">
-                <DropdownMenuRadioItem
-                  v-for="theme in themes"
-                  :key="theme.value"
-                  :value="theme.value"
-                >
-                  {{ theme.label }}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
+              <ThemeOptions />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSeparator />

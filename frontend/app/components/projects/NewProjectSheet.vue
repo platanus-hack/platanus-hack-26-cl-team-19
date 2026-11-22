@@ -29,8 +29,10 @@ import type { Ingestion } from "@/services/github-api";
 
 // Con backend, un proyecto nace de analizar un repo de GitHub (JAJ-57). Sin backend (demo), de
 // un modelo de ejemplo.
+const props = defineProps<{ fromSample?: boolean }>();
 const emit = defineEmits<{ created: [projectId: string] }>();
 const { api, isMock } = useProjectApi();
+const usesSample = computed(() => isMock || props.fromSample);
 const github = useGithubConnection({ immediate: false });
 const repoId = useId();
 const branchId = useId();
@@ -96,7 +98,7 @@ function updateOpen(value: boolean) {
   open.value = value;
   if (!value) return;
   finished.value = null;
-  if (!isMock) void github.loadRepos();
+  if (!usesSample.value) void github.loadRepos();
   else if (!models.value.length && !loading.value) void loadModels();
 }
 
@@ -125,9 +127,9 @@ async function createProject() {
 <template>
   <Sheet :open="open" @update:open="updateOpen">
     <SheetTrigger as-child>
-      <Button>
+      <Button :variant="fromSample ? 'outline' : 'default'">
         <Plus data-icon="inline-start" aria-hidden="true" />
-        Nuevo proyecto
+        {{ fromSample ? "Crear con un ejemplo" : "Nuevo proyecto" }}
       </Button>
     </SheetTrigger>
     <SheetContent class="w-full overflow-y-auto">
@@ -141,7 +143,7 @@ async function createProject() {
       </SheetHeader>
 
       <form
-        v-if="!isMock"
+        v-if="!usesSample"
         class="flex flex-col gap-5 px-4 pb-4"
         @submit.prevent="analyzeRepo"
       >

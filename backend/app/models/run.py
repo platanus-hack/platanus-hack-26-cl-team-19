@@ -52,6 +52,8 @@ class ResourceStats:
     max_queue: int
     final_queue: int
     timeouts: int
+    # espera media de todos los que pidieron el recurso (JAJ-135): quienes lo obtuvieron, hasta
+    # obtenerlo; quienes vencieron, hasta vencer; y quienes seguían en la cola, hasta el final
     mean_wait_ms: float
     # quién ocupa el recurso, de más a menos (JAJ-69); vacío si nadie lo usó
     by_endpoint: list[EndpointUsage] = field(default_factory=list)
@@ -215,6 +217,8 @@ class Run:
     traffic_profile: list[ProfileSegment] | None = None
     # JAJ-89: si quedaron requests sin respuesta al terminar (el motor siempre lo llena)
     saturation: Saturation | None = None
+    # JAJ-131: los reemplazos del escenario con que se simuló, una frase por cada uno; vacía sin ellos
+    overrides: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -1,4 +1,12 @@
-import type { ChatKeySource, ChatProvider, ChatTurn } from "./chat-stream";
+import type { DeploymentOptions } from "./deployment-options";
+import type {
+  ChatKeySource,
+  ChatProposal,
+  ChatProvider,
+  ChatTurn,
+} from "./chat-stream";
+import type { ChatMessage } from "@/components/editor/types";
+
 export interface ModelSummary {
   id: string;
   name: string;
@@ -14,12 +22,16 @@ export interface ModelNumber {
 }
 
 export interface ArchitectureModel {
+  version_scenarios?: Record<string, Partial<ProjectScenarioInput>>;
+  /** El peso de cada endpoint en el tráfico, en cualquier escala: el motor lo normaliza. */
+  endpoints?: { id: string; weight?: ModelNumber | number }[];
   checks?: unknown;
   assumptions?: unknown;
   deployment: {
     api: { replicas: ModelNumber; usd_month?: ModelNumber };
   };
   traffic: {
+    peak_rps?: ModelNumber;
     scenarios: Record<string, { rps: ModelNumber | number }>;
   };
 }
@@ -28,6 +40,8 @@ export interface ProjectVersion {
   number: number;
   label: string;
   origin: "repo" | "manual" | "agente";
+  /** La versión de la que salió; null en la primera. */
+  parent?: number | null;
   note: string | null;
 }
 
@@ -60,6 +74,7 @@ export interface GraphNode {
     | "queue"
     | "worker"
     | "external"
+    | "frontend"
     | "service"
     | "storage"
     | "search"
@@ -68,8 +83,13 @@ export interface GraphNode {
   resources: string[];
   details: {
     replicas?: number;
+    /** JAJ-143: dónde corre (proveedor y plan del catálogo) y cuánto cuesta al mes. */
+    provider?: string;
     plan?: string;
+    usd_month?: number;
+    /** JAJ-87: la tecnología (PostgreSQL 16, Express 4.19.2) y de dónde salió. */
     technology?: string;
+    technology_source?: { label?: string; source?: string; at?: string | null };
     endpoints?: number;
     error?: string;
   };
@@ -78,9 +98,39 @@ export interface GraphNode {
   simulated?: boolean;
 }
 
+export interface ScenarioOverrides {
+  endpoint_weights?: Record<string, number>;
+  slowdowns?: Record<string, number>;
+  business?: { conversion?: number; ticket_usd?: number };
+}
+
+export interface ScenarioTrafficStep {
+  at_s: number;
+  multiplier: number;
+  duration_s: number;
+}
+
+export interface ProjectScenarioInput extends ScenarioOverrides {
+  traffic_step?: ScenarioTrafficStep | null;
+  multiplier: number | null;
+  rps: number | null;
+  description: string | null;
+}
+
+export interface ProjectScenario extends ProjectScenarioInput {
+  name: string;
+}
+
+export interface GraphEndpoint {
+  id: string;
+  weight: number;
+}
+
 export interface Graph {
   nodes: GraphNode[];
   edges: { source: string; target: string; endpoints: string[] }[];
+  endpoints?: GraphEndpoint[];
+  slowdown_targets?: string[];
 }
 
 export interface RunResource {
@@ -88,9 +138,31 @@ export interface RunResource {
   label: string;
   utilization: number;
   by_line: { at: string }[];
+  max_queue?: number;
 }
 
+/** Lo que el backend entrega del ``Run`` (``branchpoint.run/v1``) y el editor usa; el resto se ignora. */
 export interface Run {
+  scenario?: string;
+  rps?: number;
+  seed?: number;
+  requests?: number;
+  ok?: number;
+  /** Errores por tipo: pool_timeout, client_timeout, queue_full, db_refused. */
+  errors?: Record<string, number>;
+  in_flight?: number;
+  error_rate?: number;
+  latency?: { p95_ms: number | null };
+  endpoints?: { id: string; requests: number }[];
+  queues?: { name: string; enqueued: number }[];
+  saturation?: {
+    saturated: boolean;
+    unanswered: number;
+    message: string | null;
+    label: string;
+    source: string | null;
+  } | null;
+  overrides?: string[];
   resources: RunResource[];
   bottleneck: {
     resource: string | null;
@@ -101,6 +173,7 @@ export interface Run {
   };
   series: {
     arrivals: number;
+    target_rps?: number | null;
     ok: number;
     errors: number;
     latency: { p95_ms: number | null };
@@ -116,6 +189,19 @@ export interface CostEstimate {
   lines: { id: string; label: string; usd_month: ModelNumber }[];
   unpriced: string[];
   warnings: string[];
+  missing: string[];
+}
+
+export interface FailureCost {
+  message: string;
+}
+
+export interface VersionResults {
+  run: Run;
+  cost: CostEstimate;
+  failure: FailureCost | null;
+  failure_missing: string[];
+  summary: string | null;
 }
 
 interface MetricDelta {
@@ -133,15 +219,25 @@ export interface Comparison {
   };
   cost_a: CostEstimate;
   cost_b: CostEstimate;
+  cost_delta: { a: number; b: number; missing: string[] };
+  failure_a: FailureCost | null;
+  failure_b: FailureCost | null;
+  failure_missing_a?: string[];
+  failure_missing_b?: string[];
   summary: string | null;
 }
 
-export function editorRunParams(scenario: string) {
+export function editorRunParams(
+  scenario: string,
+  overrides: ScenarioOverrides = {},
+  seed = 0,
+) {
   return {
     scenario,
-    seed: 0,
+    seed,
     duration_s: 60,
     traffic_profile: scenario === "cyberday" ? "pico" : null,
+    ...overrides,
   };
 }
 
@@ -178,12 +274,18 @@ export function createEditorApi(
       provider: ChatProvider,
       signal: AbortSignal,
       expectedSource?: ChatKeySource,
+      context?: { version?: number; scenario?: string },
     ) {
       const response = await fetchApi.raw<ReadableStream<Uint8Array>>(
         `${projectPath(id)}/chat`,
         {
           method: "POST",
-          body: { messages, provider, expected_source: expectedSource },
+          body: {
+            messages,
+            provider,
+            expected_source: expectedSource,
+            ...context,
+          },
           responseType: "stream",
           ignoreResponseError: true,
           signal,
@@ -206,9 +308,42 @@ export function createEditorApi(
     listModels: () => fetchApi<ModelSummary[]>("/models"),
     createProject: (sample: string, name?: string) =>
       post<Project>("/projects", { sample, name }),
+    // La conversación del panel, una por proyecto: se guarda al terminar cada turno.
+    getChat: (id: string) =>
+      fetchApi<{ messages: ChatMessage[] }>(`${projectPath(id)}/chat`),
+    saveChat: (id: string, messages: ChatMessage[]) =>
+      fetchApi(`${projectPath(id)}/chat`, {
+        method: "PUT",
+        body: { messages },
+      }),
+    acceptChatProposal: (id: string, proposal: ChatProposal) =>
+      post<VersionDetail>(
+        `${projectPath(id)}/chat/proposals/${encodeURIComponent(proposal.id)}/accept`,
+        proposal.draft,
+      ),
+    listScenarios: (id: string) =>
+      fetchApi<ProjectScenario[]>(`${projectPath(id)}/scenarios`),
+    saveScenario: (id: string, name: string, input: ProjectScenarioInput) =>
+      fetchApi<ProjectScenario>(
+        `${projectPath(id)}/scenarios/${encodeURIComponent(name)}`,
+        { method: "PUT", body: input },
+      ),
     getVersion: (id: string, version: number) =>
       fetchApi<VersionDetail>(versionPath(id, version)),
     getGraph: (model: ArchitectureModel) => post<Graph>("/graph", { model }),
+    // JAJ-148: proveedores y planes de cada componente, y la versión con el plan elegido en el editor
+    deploymentOptions: () => fetchApi<DeploymentOptions>("/catalog/deployment"),
+    applyOps: (
+      id: string,
+      version: number,
+      ops: Record<string, unknown>[],
+      note: string,
+    ) =>
+      post<VersionDetail>(`${versionPath(id, version)}/ops`, {
+        ops,
+        note,
+        origin: "manual",
+      }),
     saveVersion: (
       id: string,
       parent: number,
@@ -223,11 +358,29 @@ export function createEditorApi(
       }),
     run: (id: string, version: number, scenario: string) =>
       post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
+    // seed: la del reporte de la corrida (JAJ-127), así el Run sale del guardado y no se simula de nuevo
+    results: (
+      id: string,
+      version: number,
+      scenario: string,
+      overrides?: ScenarioOverrides,
+      seed = 0,
+    ) =>
+      post<VersionResults>(
+        `${versionPath(id, version)}/results`,
+        editorRunParams(scenario, overrides, seed),
+      ),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),
-    compare: (id: string, base: number, target: number, scenario: string) =>
+    compare: (
+      id: string,
+      base: number,
+      target: number,
+      scenario: string,
+      overrides?: ScenarioOverrides,
+    ) =>
       post<Comparison>(`${projectPath(id)}/compare`, {
-        ...editorRunParams(scenario),
+        ...editorRunParams(scenario, overrides),
         a: base,
         b: target,
       }),

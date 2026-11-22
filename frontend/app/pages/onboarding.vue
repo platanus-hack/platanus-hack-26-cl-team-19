@@ -2,6 +2,7 @@
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowRight, Check } from "@lucide/vue";
+import NewProjectSheet from "@/components/projects/NewProjectSheet.vue";
 import OnboardingActions from "@/components/onboarding/OnboardingActions.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,8 @@ definePageMeta({ middleware: "supabase-session" });
 useSeoMeta({ title: "Configura Branchpoint" });
 
 const { api, isMock } = useProjectApi();
-const { completeOnboarding, isOnboardingDone } = useOnboardingProgress();
+const { completeOnboarding, isOnboardingDone, markOnboardingDone } =
+  useOnboardingProgress();
 const route = useRoute();
 
 // El onboarding es solo para el primer ingreso. Después, las conexiones se cambian en
@@ -43,7 +45,15 @@ const repositoryState = ref<"idle" | "choose" | "added">("idle");
 const busy = ref(false);
 const error = ref(false);
 const demoRepo = "fastapi/full-stack-fastapi-template";
-const github = useGithubConnection({ immediate: false });
+const github = useGithubConnection({
+  immediate: false,
+  detectInstallation: true,
+});
+
+async function openCreatedProject(projectId: string) {
+  await markOnboardingDone();
+  return navigateTo({ path: "/editor", query: { project: projectId } });
+}
 
 async function addDemoRepository() {
   if (busy.value || repositoryState.value !== "choose") return;
@@ -65,13 +75,15 @@ async function addDemoRepository() {
     <AppHeader minimal />
 
     <main
-      class="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-6 pt-8 pb-20"
+      class="mx-auto flex w-full max-w-[32rem] flex-1 flex-col justify-center px-6 py-12 sm:pb-20"
     >
-      <div class="mb-6">
+      <div class="mb-5">
         <h1 class="text-3xl font-semibold tracking-tight">
           Conecta un repositorio
         </h1>
-        <p class="mt-2 text-sm text-muted-foreground">
+        <p
+          class="mt-2 max-w-[43ch] text-sm leading-relaxed text-muted-foreground"
+        >
           Trae el código de una rama para analizar su arquitectura.
         </p>
       </div>
@@ -127,25 +139,62 @@ async function addDemoRepository() {
             </p>
           </div>
           <OnboardingActions>
-            <Button @click="completeOnboarding">
-              Ir a Mis proyectos
+            <Button
+              v-if="github.done.value.project_id"
+              @click="openCreatedProject(github.done.value.project_id)"
+            >
+              Abrir proyecto
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Button>
+            <Button variant="outline" @click="completeOnboarding"
+              >Mis proyectos</Button
+            >
           </OnboardingActions>
+        </template>
+
+        <template
+          v-else-if="
+            !github.repos.value.length && github.installations.value.length
+          "
+        >
+          <p class="text-sm leading-relaxed text-muted-foreground">
+            GitHub ya está conectado. Dale acceso a un repositorio para poder
+            analizarlo.
+          </p>
+          <OnboardingActions>
+            <Button v-if="github.installHref.value" as-child>
+              <a
+                :href="github.installHref.value"
+                target="_blank"
+                rel="noopener"
+                @click="github.awaitingGithub.value = true"
+              >
+                <BrandIcon brand="github" data-icon="inline-start" /> Elegir
+                repos en GitHub
+              </a>
+            </Button>
+            <NewProjectSheet from-sample @created="openCreatedProject" />
+          </OnboardingActions>
+          <Button
+            variant="link"
+            class="h-auto self-start px-0!"
+            @click="completeOnboarding"
+            >Ir a Mis proyectos</Button
+          >
         </template>
 
         <template
           v-else-if="!github.repos.value.length && github.awaitingGithub.value"
         >
           <p class="text-sm text-muted-foreground">
-            Instala la app en la pestaña de GitHub que se abrió, elige los repos
-            y vuelve aquí para ligarla a tu cuenta.
+            Elige los repositorios en GitHub. La lista se actualizará al volver
+            a esta pestaña.
           </p>
           <OnboardingActions>
             <Button variant="outline" @click="github.connect()">
               Volver a abrir GitHub
             </Button>
-            <Button variant="link" class="self-end" @click="completeOnboarding">
+            <Button variant="link" @click="completeOnboarding">
               Omitir por ahora
             </Button>
             <Button
@@ -156,32 +205,22 @@ async function addDemoRepository() {
                 v-if="github.connecting.value"
                 data-icon="inline-start"
               />
-              Listo, ya la instalé
+              Buscar repositorios
             </Button>
+            <NewProjectSheet from-sample @created="openCreatedProject" />
           </OnboardingActions>
         </template>
 
         <template v-else-if="!github.repos.value.length">
-          <p class="text-sm text-muted-foreground">
-            Instala la GitHub App de Branchpoint y elige los repos que quieres
-            analizar. Solo pide permiso de lectura.
+          <p class="max-w-[44ch] text-sm leading-relaxed text-muted-foreground">
+            Instala la GitHub App de Branchpoint y elige los repositorios que
+            quieres analizar. La app pide acceso de lectura.
           </p>
           <OnboardingActions>
             <Button
-              variant="outline"
               :disabled="github.connecting.value"
-              @click="github.connect(true)"
+              @click="github.connect()"
             >
-              Ya instalé la app
-            </Button>
-            <Button variant="link" class="self-end" @click="completeOnboarding">
-              {{
-                github.revoked.value
-                  ? "Continuar a Mis proyectos"
-                  : "Omitir por ahora"
-              }}
-            </Button>
-            <Button @click="github.connect()">
               <BrandIcon brand="github" data-icon="inline-start" />
               {{
                 github.revoked.value
@@ -189,7 +228,24 @@ async function addDemoRepository() {
                   : "Conectar con GitHub"
               }}
             </Button>
+            <Button
+              variant="outline"
+              :disabled="github.connecting.value"
+              @click="github.connect(true)"
+            >
+              Ya instalé la app
+            </Button>
+            <NewProjectSheet from-sample @created="openCreatedProject" />
           </OnboardingActions>
+          <Button
+            variant="link"
+            class="h-auto self-start px-0!"
+            @click="completeOnboarding"
+          >
+            {{
+              github.revoked.value ? "Ir a Mis proyectos" : "Omitir por ahora"
+            }}
+          </Button>
         </template>
 
         <template v-else>
@@ -273,7 +329,6 @@ async function addDemoRepository() {
             <Button
               v-if="!github.running.value"
               variant="link"
-              class="self-end"
               @click="completeOnboarding"
             >
               Omitir por ahora
@@ -323,7 +378,6 @@ async function addDemoRepository() {
           <Button
             v-if="repositoryState !== 'added'"
             variant="link"
-            class="self-end"
             :disabled="busy"
             @click="completeOnboarding"
           >

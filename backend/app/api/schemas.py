@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.costs import CostDelta, CostEstimate, FailureCost
 from app.models.compare import RunDelta
@@ -25,6 +25,15 @@ class TrafficSegmentIn(BaseModel):
     duration_s: float = Field(gt=0, le=3600, description="Segundos que dura el tramo.")
     from_multiplier: float = Field(ge=0, le=100, description="Multiplicador de la tasa al inicio del tramo.")
     to_multiplier: float = Field(ge=0, le=100, description="Multiplicador de la tasa al final del tramo.")
+
+
+class ScenarioBusiness(BaseModel):
+    """Datos de negocio de un escenario (JAJ-131), para el costo de fallar de esa corrida (JAJ-74)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversion: float | None = Field(None, gt=0, le=1, description="Fracción de sesiones que compran. Ej. 0.03.")
+    ticket_usd: float | None = Field(None, gt=0, description="Ticket promedio en US$. Ej. 40.")
 
 
 class RunParams(BaseModel):
@@ -61,6 +70,33 @@ class RunParams(BaseModel):
             "tramos: la duración es la suma de los tramos y duration_s no se usa. Sin él, tasa constante."
         ),
     )
+    # JAJ-131: reemplazos del escenario. Cambian la situación, no la arquitectura: solo esta corrida, sin
+    # crear versión. Sin ellos se usan los del escenario del proyecto, si los tiene.
+    endpoint_weights: dict[str, Annotated[float, Field(ge=0)]] | None = Field(
+        None,
+        description=(
+            "Mezcla de endpoints: peso por id de endpoint (ej. {'POST /checkout': 3}). Los que no aparecen "
+            "conservan su peso; se normaliza como siempre."
+        ),
+    )
+    slowdowns: dict[str, Annotated[float, Field(gt=0, le=100)]] | None = Field(
+        None,
+        description=(
+            "Dependencias más lentas: multiplicador del tiempo de los pasos de un nodo del grafo (POST /graph): "
+            "db, cache, external o external:<servicio>. Ej. {'external:pagos': 10, 'db': 1.5}."
+        ),
+    )
+    business: ScenarioBusiness | None = Field(
+        None, description="Conversión y ticket promedio para el costo de fallar de esta corrida."
+    )
+
+    def override_args(self) -> dict[str, Any]:
+        """Los reemplazos del escenario para ``apply_overrides`` (JAJ-131)."""
+        return {
+            "endpoint_weights": self.endpoint_weights,
+            "slowdowns": self.slowdowns,
+            "business": self.business.model_dump(exclude_none=True) if self.business else None,
+        }
 
     def build_profile(self) -> TrafficProfile | None:
         if self.traffic_profile is None:
@@ -123,11 +159,15 @@ class ApplyOpsRequest(BaseModel):
         min_length=1,
         max_length=20,
         description=(
-            "Operaciones en orden: scale_api, change_db_plan, add_pooler, add_cache, move_to_queue "
-            "(ver app/agent/ops.py)."
+            "Operaciones en orden: scale_api, change_db_plan, change_api_host, change_frontend_host, add_pooler, "
+            "add_cache, move_to_queue... (ver app/agent/ops.py)."
         ),
     )
     note: str | None = Field(None, max_length=500, description="Por qué se propone. Por defecto, los cambios.")
+    origin: Literal["agente", "manual"] = Field(
+        "agente",
+        description="manual: el usuario eligió el cambio en el editor (JAJ-148). agente: lo propuso el agente.",
+    )
 
 
 class VersionSummary(BaseModel):
@@ -175,6 +215,32 @@ class ProjectDetail(BaseModel):
     )
 
 
+class ScenarioTrafficStep(BaseModel):
+    """Dos tramos constantes con un salto instantáneo en el medio (JAJ-142)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    at_s: int = Field(gt=0, lt=3600, strict=True)
+    multiplier: float = Field(10, gt=1, le=100)
+    duration_s: int = Field(60, gt=1, le=3600, strict=True)
+
+    @model_validator(mode="after")
+    def validate_jump_time(self) -> Self:
+        if self.at_s >= self.duration_s:
+            raise ValueError("El salto debe ocurrir antes del final de la simulación.")
+        return self
+
+    def profile(self) -> list[TrafficSegmentIn]:
+        return [
+            TrafficSegmentIn(duration_s=self.at_s, from_multiplier=1, to_multiplier=1),
+            TrafficSegmentIn(
+                duration_s=self.duration_s - self.at_s,
+                from_multiplier=self.multiplier,
+                to_multiplier=self.multiplier,
+            ),
+        ]
+
+
 class ScenarioIn(BaseModel):
     """Body de ``PUT /projects/{id}/scenarios/{name}`` (JAJ-76): una de las dos tasas."""
 
@@ -185,6 +251,11 @@ class ScenarioIn(BaseModel):
     )
     rps: float | None = Field(None, gt=0, description="O req/s fijas, iguales en todas las versiones.")
     description: str | None = Field(None, max_length=500, description="La situación en palabras del usuario.")
+    traffic_step: ScenarioTrafficStep | None = None
+    # JAJ-131: los reemplazos que trae el escenario (los mismos campos de RunParams)
+    endpoint_weights: dict[str, Annotated[float, Field(ge=0)]] | None = None
+    slowdowns: dict[str, Annotated[float, Field(gt=0, le=100)]] | None = None
+    business: ScenarioBusiness | None = None
 
 
 class ScenarioOut(BaseModel):
@@ -192,6 +263,10 @@ class ScenarioOut(BaseModel):
     multiplier: float | None
     rps: float | None
     description: str | None
+    traffic_step: ScenarioTrafficStep | None = None
+    endpoint_weights: dict[str, float] | None = None
+    slowdowns: dict[str, float] | None = None
+    business: ScenarioBusiness | None = None
 
 
 Region = Literal["us-east-1", "sa-east-1"]  # regiones con precios de AWS en el snapshot de JAJ-11
@@ -201,6 +276,29 @@ class CompareRequest(RunParams):
     a: int = Field(ge=1, description="Versión base (ej. 1).")
     b: int = Field(ge=1, description="Versión a comparar contra la base.")
     region: Region = Field("us-east-1", description="Región de AWS para los costos (JAJ-72).")
+
+
+class VersionResultsRequest(RunParams):
+    """Body de ``POST /projects/{id}/versions/{n}/results`` (JAJ-128): los de ``runs`` más la región."""
+
+    region: Region = Field("us-east-1", description="Región de AWS para los costos (JAJ-72).")
+
+
+class VersionResults(BaseModel):
+    """Todo lo que hace falta para leer el resultado de una versión, en una llamada (JAJ-128): la
+    simulación, el costo mensual con su desglose y el costo de fallar."""
+
+    version: VersionSummary
+    run: Run
+    # costo mensual en US$ (las unidades vienen en cada número), por componente, con región, fuente y
+    # procedencia. ``cost.missing`` dice qué componentes no tienen precio: el total es parcial (JAJ-88)
+    cost: CostEstimate
+    # ventas en juego por hora según la tasa de error del Run (JAJ-74); None sin datos de negocio
+    failure: FailureCost | None = None
+    failure_missing: list[str] = Field(
+        default_factory=list, description="Si failure es null, los datos que le faltan al modelo para calcularlo."
+    )
+    summary: str = Field(description="El resultado en una o dos frases, para mostrar tal cual.")
 
 
 class CompareResponse(BaseModel):
@@ -217,6 +315,9 @@ class CompareResponse(BaseModel):
     # no trae conversión, ticket o requests por sesión)
     failure_a: FailureCost | None = None
     failure_b: FailureCost | None = None
+    # JAJ-128: si failure_x es None, qué datos de negocio le faltan a ese modelo (ej. business.conversion)
+    failure_missing_a: list[str] = Field(default_factory=list)
+    failure_missing_b: list[str] = Field(default_factory=list)
     summary: str | None = Field(None, description="La comparación en una frase: costo extra y ventas que se evitan.")
 
 

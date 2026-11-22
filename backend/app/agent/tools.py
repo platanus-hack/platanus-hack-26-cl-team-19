@@ -42,9 +42,10 @@ from app.agent.logs import analyze_log
 from app.agent.ops import OpError, apply_ops, collect_assumptions, ops_json_schema
 from app.api.errors import ApiError
 from app.api.run_cache import cached_run
-from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
+from app.api.scenario_versions import version_scenario
+from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams, ScenarioTrafficStep
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
-from app.catalog import load_catalog
+from app.catalog import deploy, load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
 from app.costs.estimate import describe_missing
 from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai, replace_architecture
@@ -171,7 +172,10 @@ class SetTrafficArgs(VersionRef):
 
 class SetDeploymentArgs(VersionRef):
     field: Literal["api.replicas", "api.vcpu", "db.plan"]
-    value: str = Field(description="El valor que dijo el usuario (ej. '3', '0.5', 'db.m7g.large').")
+    value: str = Field(
+        description="El valor que dijo el usuario (ej. '3', '0.5', 'db.m7g.large', '1cu' para Neon 1 CU). Con "
+        "db.plan, el proveedor sale del plan si solo uno lo tiene."
+    )
     quote: str = Field(min_length=3, max_length=500, description="La frase textual del usuario.")
 
 
@@ -249,6 +253,11 @@ def _require_in_quote(value: float, quote: str, what: str, *, also: tuple[float,
 
 def _num(value: Any, unit: str, label: str, source: str, **extra: Any) -> dict[str, Any]:
     return {"value": value, "unit": unit, "label": label, "source": source, "date": date.today().isoformat(), **extra}
+
+
+def _compact(text: str) -> str:
+    """Sin espacios ni signos, para encontrar «1cu» en «Neon 1 CU» o «db.t4g.micro» en «db t4g micro»."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
 def _weakest(*labels: str) -> str:
@@ -375,6 +384,7 @@ def _version_label(v: Version) -> dict[str, Any]:
 # ---------- las tools ----------
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "propose_scenario": "Prepara un cambio de escenario para aprobar en el chat. Usa una fracción para la conversión.",
     "list_projects": "Lista los proyectos del usuario con sus versiones. Empieza por aquí para obtener project_id.",
     "get_model": "Resumen de una versión: despliegue, tráfico, escenarios, endpoints con archivo:línea, metas y "
     "cuántos SUPUESTO tiene. No incluye el JSON completo.",
@@ -503,10 +513,21 @@ class AgentTools:
         sc = scenarios.get(scenario)
         if sc is None:
             raise ToolError(f"El proyecto no tiene el escenario '{scenario}'. Hay: {', '.join(sorted(scenarios))}.")
+        sc = version_scenario(sc, model)
         try:
             rate = sc.rate_for(model)
         except ValueError as e:
             raise ToolError(str(e)) from None
+        if sc.traffic_step is not None:
+            step = ScenarioTrafficStep.model_validate(sc.traffic_step)
+            return RunParams(
+                scenario=scenario,
+                seed=seed,
+                rps=rate,
+                duration_s=step.duration_s,
+                traffic_profile=step.profile(),
+                **sc.overrides(),
+            )
         # Con mucho tráfico, 60 s superan el tope de requests por llamada: el servidor acorta la duración
         # (con un piso de 5 s). La procedencia del resultado dice cuántos segundos se simularon.
         duration = max(MIN_SIM_SECONDS, min(SIM_SECONDS, 0.95 * MAX_SIMULATED_REQUESTS / rate))
@@ -515,7 +536,7 @@ class AgentTools:
                 f"El escenario '{scenario}' pide {rate:,.0f} req/s: es más de lo que el motor simula en una llamada "
                 f"({MAX_SIMULATED_REQUESTS:,} requests en {MIN_SIM_SECONDS:g} s). Revisa el tráfico declarado."
             )
-        return RunParams(scenario=scenario, seed=seed, duration_s=round(duration, 1), rps=rate)
+        return RunParams(scenario=scenario, seed=seed, duration_s=round(duration, 1), rps=rate, **sc.overrides())
 
     def _run(self, project: Project, version: Version, scenario: str, seed: int) -> Run:
         params = self._params(project, version.model, scenario, seed)
@@ -569,7 +590,7 @@ class AgentTools:
                 ],
             },
             "traffic": {"peak_rps": traffic.get("peak_rps"), "declared": traffic.get("declared")},
-            "scenarios": self._list_scenarios(ProjectRef(project_id=project.id))["scenarios"],
+            "scenarios": [asdict(version_scenario(s, m)) for s in self.store.list_scenarios(project.id)],
             "endpoints": [
                 {
                     "id": e.get("id"),
@@ -625,16 +646,21 @@ class AgentTools:
         project = self._project(a.project_id)
         version = self._version(project, a.version)
         self.limiter.simulations(self.owner or "anon", 1)
-        run = self._run(project, version, a.scenario, a.seed)
+        from app.api.routes.reports import simulate_and_report  # cada simulación deja su reporte (JAJ-127)
+
+        params = self._params(project, version.model, a.scenario, a.seed)
+        run, report = simulate_and_report(self.store, project, version, params, custom_rps=False)
         cost = estimate_cost(version.model)
         return {
             "version": version.number,
+            "report_id": report["id"],
             **_run_summary(run, version.model),
             "goals": _goal_check(self.store.get_goals(project.id), run, cost.total["value"], cost.missing),
         }
 
     def _compare(self, a: CompareArgs) -> dict[str, Any]:
         from app.api.routes.projects import compare_summary  # el mismo texto que ve el editor
+        from app.api.routes.runs import scenario_model
 
         project = self._project(a.project_id)
         va, vb = self._version(project, a.a), self._version(project, a.b)
@@ -642,7 +668,9 @@ class AgentTools:
         run_a, run_b = self._run(project, va, a.scenario, a.seed), self._run(project, vb, a.scenario, a.seed)
         cost_a, cost_b = estimate_cost(va.model), estimate_cost(vb.model)
         cdelta = cost_delta(cost_a, cost_b)
-        fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)
+        model_a, _ = scenario_model(va.model, self._params(project, va.model, a.scenario, a.seed))
+        model_b, _ = scenario_model(vb.model, self._params(project, vb.model, a.scenario, a.seed))
+        fa, fb = failure_cost(model_a, run_a), failure_cost(model_b, run_b)
         d = run_delta(run_a, run_b, va.model, vb.model)
         goals = self.store.get_goals(project.id)
         return {
@@ -751,9 +779,13 @@ class AgentTools:
         project = self._project(a.project_id)
         base = self._version(project, a.version)
         if a.field == "db.plan":
-            if a.value.lower() not in a.quote.lower():
+            if _compact(a.value) not in _compact(a.quote):
                 raise ToolError(f"El plan '{a.value}' no aparece en quote ({a.quote!r}).")
-            ops = [{"op": "change_db_plan", "plan": a.value}]
+            plan_op: dict[str, Any] = {"op": "change_db_plan", "plan": a.value}
+            owners = [p for p, plans in deploy.db_providers().items() if a.value in plans]
+            if len(owners) == 1:  # «usamos Neon 1 CU»: el plan dice el proveedor (JAJ-143)
+                plan_op["provider"] = owners[0]
+            ops = [plan_op]
         else:
             try:
                 number = float(a.value.replace(",", "."))

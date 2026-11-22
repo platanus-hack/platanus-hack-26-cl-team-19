@@ -4,12 +4,10 @@ import {
   BookMarked,
   ChevronsUpDown,
   LogOut,
-  Monitor,
-  Moon,
   Plus,
-  Sun,
 } from "@lucide/vue";
 import AppWordmark from "@/components/AppWordmark.vue";
+import ThemeOptions from "@/components/ThemeOptions.vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -17,8 +15,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -54,7 +50,10 @@ const props = withDefaults(
     user?: SessionUser;
     projectsLink?: string;
     canConnect?: boolean;
+    /** El texto del botón +: «Agregar repositorio» cuando suma repos al proyecto abierto. */
+    connectLabel?: string;
     disabled?: boolean;
+    embedded?: boolean;
     variant?: "sidebar" | "inset" | "floating";
   }>(),
   {
@@ -62,6 +61,7 @@ const props = withDefaults(
     user: undefined,
     projectsLink: undefined,
     canConnect: true,
+    connectLabel: "Conectar repositorio",
     variant: "inset",
   },
 );
@@ -73,12 +73,6 @@ const emit = defineEmits<{
 }>();
 
 const { isMobile } = useSidebar();
-const colorMode = useColorMode();
-const themes = [
-  { value: "system", label: "Sistema", icon: Monitor },
-  { value: "light", label: "Claro", icon: Sun },
-  { value: "dark", label: "Oscuro", icon: Moon },
-] as const;
 
 const initials = computed(() =>
   (props.user?.name ?? "")
@@ -90,25 +84,31 @@ const initials = computed(() =>
 </script>
 
 <template>
-  <Sidebar collapsible="icon" :variant="variant">
+  <Sidebar
+    collapsible="icon"
+    :variant="variant"
+    :class="embedded ? 'absolute h-full' : undefined"
+  >
     <SidebarHeader>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            size="lg"
-            as-child
-            class="group-data-[collapsible=icon]:justify-center"
-          >
-            <NuxtLink to="/" aria-label="branchpoint">
-              <AppWordmark class="group-data-[collapsible=icon]:hidden" />
-              <AppWordmark
-                compact
-                class="hidden group-data-[collapsible=icon]:inline"
-              />
-            </NuxtLink>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      <div class="flex items-center gap-1">
+        <SidebarMenu class="min-w-0 flex-1">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              as-child
+              class="group-data-[collapsible=icon]:justify-center"
+            >
+              <NuxtLink to="/" aria-label="branchpoint">
+                <AppWordmark class="group-data-[collapsible=icon]:hidden" />
+                <AppWordmark
+                  compact
+                  class="hidden group-data-[collapsible=icon]:inline"
+                />
+              </NuxtLink>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </div>
     </SidebarHeader>
 
     <SidebarContent>
@@ -116,11 +116,13 @@ const initials = computed(() =>
         <SidebarGroupLabel>Repositorios</SidebarGroupLabel>
         <SidebarGroupAction
           v-if="canConnect"
-          title="Conectar repositorio"
+          as="button"
+          type="button"
+          :title="connectLabel"
           @click="emit('connect')"
         >
           <Plus aria-hidden="true" />
-          <span class="sr-only">Conectar repositorio</span>
+          <span class="sr-only">{{ connectLabel }}</span>
         </SidebarGroupAction>
         <SidebarGroupContent>
           <SidebarMenu>
@@ -147,14 +149,15 @@ const initials = computed(() =>
                   >principal</span
                 >
               </SidebarMenuButton>
+              <slot name="repository-children" :repository="repository" />
             </SidebarMenuItem>
             <SidebarMenuItem v-if="canConnect && !repositories.length">
               <SidebarMenuButton
-                tooltip="Conectar repositorio"
+                :tooltip="connectLabel"
                 @click="emit('connect')"
               >
                 <Plus aria-hidden="true" />
-                <span>Conectar repositorio</span>
+                <span>{{ connectLabel }}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -233,32 +236,20 @@ const initials = computed(() =>
                       @select="emit('connect')"
                     >
                       <Plus aria-hidden="true" />
-                      Conectar repositorio
+                      {{ connectLabel }}
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
-                    <component
-                      :is="
-                        themes.find(
-                          (theme) => theme.value === colorMode.preference,
-                        )?.icon ?? Monitor
-                      "
+                    <span
+                      class="size-4 rounded-full border border-border bg-background"
                       aria-hidden="true"
                     />
                     Tema
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                    <DropdownMenuRadioGroup v-model="colorMode.preference">
-                      <DropdownMenuRadioItem
-                        v-for="theme in themes"
-                        :key="theme.value"
-                        :value="theme.value"
-                      >
-                        {{ theme.label }}
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
+                    <ThemeOptions />
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
               </DropdownMenuGroup>

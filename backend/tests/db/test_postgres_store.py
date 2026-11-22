@@ -110,3 +110,19 @@ def test_goals_survive_a_restart(database_url, store, model):
     with pytest.raises(KeyError):
         store.set_goals("00000000-0000-0000-0000-000000000000", ProjectGoals(slo_p95_ms=1))
     assert store.get_goals("no-es-uuid") == ProjectGoals()
+
+
+def test_chat_survives_a_restart_and_keeps_its_order(database_url, store, model):
+    from app.db.postgres_store import PostgresProjectStore
+
+    project = store.create("chat", model, None)
+    messages = [{"id": str(i), "role": r, "text": f"m{i}"} for i, r in enumerate(["user", "tool", "agent"] * 5)]
+    store.save_chat(project.id, messages)
+    store.save_chat(project.id, messages)  # reemplaza, no duplica
+    reopened = PostgresProjectStore.from_url(database_url)
+    try:
+        assert reopened.get_chat(project.id) == messages
+    finally:
+        reopened.close()
+    store.save_chat(project.id, [])
+    assert store.get_chat(project.id) == []
