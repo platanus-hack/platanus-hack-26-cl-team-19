@@ -13,6 +13,7 @@ import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
 import EditorReportsPanel from "@/components/editor/EditorReportsPanel.vue";
+import EditorTrafficPanel from "@/components/editor/EditorTrafficPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
 import ProjectScenarioActions from "@/components/editor/ProjectScenarioActions.vue";
@@ -176,6 +177,7 @@ const sectionTitles = {
   components: "Componentes",
   versions: "Versiones",
   reports: "Reportes",
+  traffic: "Tráfico real",
 };
 const view = ref<"editor" | "compare">("editor");
 const selectedNode = ref<string | null>(null);
@@ -1004,6 +1006,14 @@ function openVersionDraft() {
             <ComponentList :nodes="nodes" />
           </section>
         </template>
+        <EditorTrafficPanel
+          v-else-if="section === 'traffic'"
+          :model="version?.model"
+          :version-label="version ? `v${version.number}` : undefined"
+          :busy="busy"
+          :readonly="isMock"
+          @apply="onChangeDeployment"
+        />
         <EditorReportsPanel
           v-else-if="section === 'reports'"
           :project-id="project?.id ?? null"

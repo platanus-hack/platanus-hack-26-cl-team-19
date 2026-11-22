@@ -15,7 +15,8 @@ export interface Repository {
   version: string;
 }
 
-export type EditorSection = "scenarios" | "components" | "versions" | "reports";
+export type EditorSection =
+  "scenarios" | "traffic" | "components" | "versions" | "reports";
 
 export interface Scenario {
   id: string;

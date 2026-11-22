@@ -86,6 +86,20 @@ class ChangeFrontendHost(_Op):
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él lo dijo.")
 
 
+class SetTrafficBase(_Op):
+    """Solo desde el editor: pico de req/s y peso de cada endpoint que escribió el usuario (JAJ-170).
+
+    Quedan SUPUESTO declarados por el usuario. Los escenarios se recalculan como pico × multiplicador y los
+    pesos se normalizan para que sumen 1."""
+
+    op: Literal["set_traffic_base"]
+    peak_rps: float | None = Field(None, gt=0, le=1_000_000, description="Requests por segundo en la hora pico.")
+    endpoint_weights: dict[str, float] | None = Field(
+        None, description="Peso de cada endpoint por id ('GET /items/'), en cualquier escala: se normaliza."
+    )
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si la dijo en el chat.")
+
+
 class AddPooler(_Op):
     """Pone un pooler en modo transacción (Supavisor en Supabase, PgBouncer en Neon) entre la app y la DB."""
 
@@ -170,6 +184,7 @@ Op = Annotated[
     | ChangeDbPlan
     | ChangeApiHost
     | ChangeFrontendHost
+    | SetTrafficBase
     | AddPooler
     | AddCache
     | MoveToQueue
@@ -204,11 +219,18 @@ def parse_ops(raw: list[Any]) -> list[Op]:
         raise OpError(f"Operaciones inválidas: {problems}") from None
 
 
-def apply_ops(model: dict[str, Any], ops: list[Any]) -> OpsResult:
-    """Aplica las operaciones en orden sobre una copia del modelo. No modifica ``model``."""
+def apply_ops(model: dict[str, Any], ops: list[Any], *, by_user: bool = False) -> OpsResult:
+    """Aplica las operaciones en orden sobre una copia del modelo. No modifica ``model``.
+
+    ``by_user``: las pidió el usuario en el editor (``origin: manual``). Solo así vale ``set_traffic_base``:
+    el agente declara tráfico con ``set_traffic``, que exige la frase del usuario (ADR 0001)."""
     parsed = parse_ops(list(ops))
     if not parsed:
         raise OpError("No hay operaciones que aplicar.")
+    if not by_user and any(isinstance(op, SetTrafficBase) for op in parsed):
+        raise OpError(
+            "set_traffic_base es solo para el editor. Para el tráfico que dijo el usuario, usa set_traffic con su frase."
+        )
     m = copy.deepcopy(model)
     # ``steps`` es opcional en el modelo (un endpoint sin pasos no consulta nada); las operaciones lo
     # recorren, así que se completa con [] en la copia (antes, add_cache respondía 500, JAJ-101)
@@ -338,6 +360,52 @@ def _change_frontend_host(
     warnings.append("El frontend no cambia la simulación: solo su costo.")
     was = f"{before['provider']} {before['plan']}" if before else "sin frontend"
     return f"Frontend: {was} → {op.provider} {op.plan} (US${value(dep['frontend']['usd_month']):,.2f}/mes)"
+
+
+# ---------- set_traffic_base (JAJ-170) ----------
+def _declared_by_user(quote: str | None) -> str:
+    return f"Declarado por el usuario: «{quote}»" if quote else "Declarado por el usuario en el editor"
+
+
+def _set_traffic_base(m: dict[str, Any], op: SetTrafficBase, catalog: dict[str, Any], warnings: list[str]) -> str:
+    if op.peak_rps is None and not op.endpoint_weights:
+        raise OpError("Manda peak_rps, endpoint_weights o los dos.")
+    source = _declared_by_user(op.quote)
+    changes = []
+    if op.peak_rps is not None:
+        traffic = m.setdefault("traffic", {})
+        before = value((traffic.get("peak_rps") or {}), None)
+        traffic["peak_rps"] = _num(op.peak_rps, "req/s", "SUPUESTO", source)
+        # todos los escenarios: pico × multiplicador, como set_traffic (JAJ-103)
+        for sc in (traffic.get("scenarios") or {}).values():
+            mult = sc.get("multiplier")
+            mult = mult.get("value") if isinstance(mult, dict) else mult
+            if mult:
+                sc["rps"] = _num(
+                    round(op.peak_rps * mult, 2), "req/s", "SUPUESTO", "pico × multiplicador", derived=True
+                )
+        changes.append(f"pico {before if before is not None else '—'} → {op.peak_rps:g} req/s")
+    if op.endpoint_weights:
+        endpoints = {e["id"]: e for e in m.get("endpoints", [])}
+        unknown = [eid for eid in op.endpoint_weights if eid not in endpoints]
+        if unknown:
+            raise OpError(f"No existen los endpoints {', '.join(unknown)}. Hay: {', '.join(endpoints)}.")
+        if any(w < 0 for w in op.endpoint_weights.values()):
+            raise OpError("Los pesos no pueden ser negativos.")
+        raw = {eid: op.endpoint_weights.get(eid, value(e.get("weight"), 0) or 0) for eid, e in endpoints.items()}
+        total = sum(raw.values())
+        if total <= 0:
+            raise OpError("Al menos un endpoint tiene que tener peso mayor que 0.")
+        for eid, e in endpoints.items():
+            w = round(raw[eid] / total, 4)
+            if eid in op.endpoint_weights:
+                e["weight"] = _num(w, "fracción", "SUPUESTO", f"{source}: peso del endpoint / suma de los pesos")
+            elif isinstance(e.get("weight"), dict):
+                e["weight"] = {**e["weight"], "value": w}
+            else:
+                e["weight"] = w
+        changes.append(f"peso de {len(op.endpoint_weights)} endpoint(s)")
+    return "Tráfico declarado: " + "; ".join(changes)
 
 
 # ---------- add_pooler ----------
@@ -641,6 +709,7 @@ _APPLY = {
     ChangeDbPlan: _change_db_plan,
     ChangeApiHost: _change_api_host,
     ChangeFrontendHost: _change_frontend_host,
+    SetTrafficBase: _set_traffic_base,
     AddPooler: _add_pooler,
     AddCache: _add_cache,
     MoveToQueue: _move_to_queue,

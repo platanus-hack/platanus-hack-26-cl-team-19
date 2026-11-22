@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Boxes, FileText, Gauge, History } from "@lucide/vue";
+import { Activity, Boxes, FileText, Gauge, History } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -15,6 +15,7 @@ const emit = defineEmits<{ change: [section: EditorSection] }>();
 
 const sections = [
   { id: "scenarios", label: "Escenarios", icon: Gauge },
+  { id: "traffic", label: "Tráfico real", icon: Activity },
   { id: "components", label: "Componentes", icon: Boxes },
   { id: "versions", label: "Versiones", icon: History },
   { id: "reports", label: "Reportes", icon: FileText },

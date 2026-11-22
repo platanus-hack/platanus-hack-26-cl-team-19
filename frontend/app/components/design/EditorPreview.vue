@@ -64,6 +64,7 @@ const sectionTitles: Record<EditorSection, string> = {
   components: "Componentes",
   versions: "Versiones",
   reports: "Reportes",
+  traffic: "Tráfico real",
 };
 
 const signedIn = ref(true);
