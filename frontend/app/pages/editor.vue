@@ -16,6 +16,8 @@ import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
 import ScenarioOverrideControls from "@/components/editor/ScenarioOverrideControls.vue";
 import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
+import SimulationRunStatus from "@/components/editor/SimulationRunStatus.vue";
+import SimulationRunSummary from "@/components/editor/SimulationRunSummary.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
 import type { EditorSection } from "@/components/editor/types";
@@ -50,7 +52,9 @@ import {
   toBottleneck,
   toComparisonRows,
   toEdges,
+  toFlows,
   toInspectedNode,
+  toRunSummary,
   toUnsimulatedNode,
   toNodes,
   toPlayback,
@@ -85,6 +89,8 @@ const {
   versions,
   pending,
   error,
+  simulationError,
+  runContext,
   loadModels,
   openSample,
   openProject,
@@ -129,11 +135,29 @@ const provenance = isMock
   ? { origin: "assumed" as const, source: "Datos de demostración" }
   : simulationProvenance;
 
+// El repo principal, para abrir en GitHub el archivo:línea del resultado (JAJ-129).
+const primaryRepository = computed(() => {
+  if (isMock) return undefined;
+  const group = projectGroup.value;
+  if (!group) return undefined;
+  const repos = group.repositories ?? [{ id: group.id, fullName: group.name }];
+  return repos.find((repo) => repo.primary) ?? repos[0];
+});
+// El diagrama sigue el segundo que se reproduce (JAJ-129).
 const nodes = computed(() =>
-  graph.value ? toNodes(graph.value, run.value) : [],
+  graph.value
+    ? toNodes(graph.value, run.value, run.value ? cursor.value : undefined)
+    : [],
 );
 const edges = computed(() => (graph.value ? toEdges(graph.value) : []));
-const bottleneck = computed(() => (run.value ? toBottleneck(run.value) : null));
+const flows = computed(() =>
+  graph.value && run.value ? toFlows(graph.value, run.value, cursor.value) : [],
+);
+const bottleneck = computed(() =>
+  run.value
+    ? toBottleneck(run.value, graph.value, primaryRepository.value)
+    : null,
+);
 const inspected = computed(() => {
   const node = graph.value?.nodes.find(
     (node) => node.id === selectedNode.value,
@@ -144,7 +168,7 @@ const inspected = computed(() => {
   )?.fullName;
   return (
     toUnsimulatedNode(node, primary) ??
-    toInspectedNode(node, run.value, provenance)
+    toInspectedNode(node, run.value, provenance, primaryRepository.value)
   );
 });
 const overrideDraft = ref(emptyScenarioOverrideDraft());
@@ -170,6 +194,44 @@ const canResume = computed(
     cursor.value < playback.value.frames.length - 1 &&
     lastRunOverrides.value === JSON.stringify(runOverrides.value),
 );
+const simulationState = computed(() => {
+  if (simulating.value) return "running";
+  if (simulationError.value) return "error";
+  return run.value ? "done" : "idle";
+});
+const simulatedContext = computed(() =>
+  runContext.value && run.value
+    ? {
+        ...runContext.value,
+        scenario:
+          scenarios.value.find((item) => item.id === runContext.value?.scenario)
+            ?.label ?? runContext.value.scenario,
+        rps: run.value.rps,
+        seed: run.value.seed,
+      }
+    : null,
+);
+const staleRun = computed(
+  () =>
+    !!run.value &&
+    lastRunOverrides.value !== JSON.stringify(runOverrides.value),
+);
+const runSummary = computed(() =>
+  run.value ? toRunSummary(run.value, provenance) : [],
+);
+const runSaturation = computed(() => {
+  const saturation = run.value?.saturation;
+  if (!saturation?.saturated || !saturation.message) return null;
+  return {
+    message: saturation.message,
+    provenance: {
+      origin: "assumed" as const,
+      source:
+        saturation.source ??
+        "Umbrales de saturación elegidos por el equipo de Branchpoint",
+    },
+  };
+});
 const simulationLabel = computed(() => {
   if (simulating.value) return "Simulando…";
   if (playing.value) return "Pausar";
@@ -243,6 +305,10 @@ function showCompare(baseId?: string) {
       versions.value.find((entry) => entry.id !== target.value)?.id ?? "";
   }
   view.value = "compare";
+}
+
+function retrySimulation() {
+  if (runOverrides.value && !busy.value) void simulate(runOverrides.value);
 }
 
 function toggleSimulation() {
@@ -636,6 +702,8 @@ async function saveVersion() {
         :nodes="nodes"
         :edges="edges"
         :bottleneck="bottleneck"
+        :flows="flows"
+        :animating="playing"
         :selected-id="selectedNode"
         @select="selectedNode = $event"
       />
@@ -774,6 +842,13 @@ async function saveVersion() {
         </TabsList>
         <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
           <div class="flex flex-col gap-3">
+            <SimulationRunStatus
+              :state="simulationState"
+              :context="simulatedContext"
+              :stale="staleRun"
+              :error="simulationError"
+              @retry="retrySimulation"
+            />
             <SimulationPanel
               v-if="playback"
               v-model:minute="cursor"
@@ -783,9 +858,17 @@ async function saveVersion() {
               :provenance="provenance"
               time-unit="second"
             />
-            <p v-else class="text-sm text-muted-foreground">
+            <p
+              v-else-if="simulationState === 'idle'"
+              class="text-sm text-muted-foreground"
+            >
               Elige un escenario y pulsa Simular para reproducir el resultado.
             </p>
+            <SimulationRunSummary
+              v-if="run"
+              :items="runSummary"
+              :saturation="runSaturation"
+            />
             <NuxtLink
               v-if="lastReport && project"
               :to="reportPath(project.id, lastReport.id)"

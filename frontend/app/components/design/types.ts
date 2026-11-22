@@ -16,4 +16,6 @@ export interface SourceReference {
   path: string;
   line: number;
   excerpt?: string;
+  /** Link al archivo en el repo, por ejemplo en GitHub (JAJ-129). */
+  url?: string;
 }

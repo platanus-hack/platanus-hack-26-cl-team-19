@@ -58,6 +58,14 @@ export function useEditorProject() {
   const scenario = ref("");
   const pending = ref("");
   const error = ref("");
+  // JAJ-129: la simulación tiene su propio error (se muestra en el panel con Reintentar) y recuerda
+  // qué versión y escenario se simularon
+  const simulationError = ref("");
+  const runContext = shallowRef<{
+    version: string;
+    scenario: string;
+    at: Date;
+  } | null>(null);
 
   const scenarios = computed(() =>
     version.value ? toScenarios(version.value.model) : [],
@@ -81,6 +89,7 @@ export function useEditorProject() {
 
   function resetResults() {
     results.value = null;
+    simulationError.value = "";
     costs.value = null;
     costsError.value = "";
     comparison.value = null;
@@ -187,8 +196,22 @@ export function useEditorProject() {
   async function simulate(overrides?: ScenarioOverrides) {
     const id = project.value?.id;
     const number = version.value?.number;
-    if (!id || number === undefined || !scenario.value) return;
+    if (!id || number === undefined || !scenario.value || pending.value) return;
     const selectedScenario = scenario.value;
+    const label = version.value?.label ?? `v${number}`;
+    // la corrida anterior deja de verse: no se mezcla con la nueva
+    results.value = null;
+    runContext.value = null;
+    simulationError.value = "";
+    const show = (result: VersionResults) => {
+      if (scenario.value !== selectedScenario) return;
+      results.value = result;
+      runContext.value = {
+        version: label,
+        scenario: selectedScenario,
+        at: new Date(),
+      };
+    };
     await request("Simulando…", async () => {
       if (!reportsApi) {
         const result = await api.results(
@@ -197,7 +220,7 @@ export function useEditorProject() {
           selectedScenario,
           overrides,
         );
-        if (scenario.value === selectedScenario) results.value = result;
+        show(result);
         return;
       }
       // Cada corrida es una simulación nueva con su reporte guardado (JAJ-127), con los mismos ajustes
@@ -217,8 +240,12 @@ export function useEditorProject() {
         overrides,
         report.scenario.seed,
       );
-      if (scenario.value === selectedScenario) results.value = result;
+      show(result);
     });
+    if (error.value) {
+      simulationError.value = error.value;
+      error.value = "";
+    }
   }
 
   async function loadCosts() {
@@ -248,6 +275,7 @@ export function useEditorProject() {
     () => {
       results.value = null;
       comparison.value = null;
+      simulationError.value = "";
     },
     { flush: "sync" },
   );
@@ -269,6 +297,8 @@ export function useEditorProject() {
     versions,
     pending,
     error,
+    simulationError,
+    runContext,
     loadModels,
     openProject,
     openSample,
