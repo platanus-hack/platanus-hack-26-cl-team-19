@@ -29,6 +29,10 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: "es" },
+      link: [
+        { rel: "icon", type: "image/svg+xml", href: "/logo.svg" },
+        { rel: "alternate icon", href: "/favicon.ico" },
+      ],
       script: [
         {
           id: "branchpoint-theme-init",
