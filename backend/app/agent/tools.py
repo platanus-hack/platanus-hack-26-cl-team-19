@@ -214,38 +214,138 @@ class ApplyLogArgs(VersionRef):
 
 # ---------- números dentro de la frase del usuario ----------
 
-_NUM = re.compile(r"(\d[\d.,]*)\s*(k|mil|millones|millón|million|m)?\b", re.IGNORECASE)
+# un número y lo que lo sigue: un multiplicador (100k, 2 millones) o una unidad (1 %, 300 ms, 2 s). No cuenta
+# los dígitos pegados a una letra: el 95 de «p95» o el 4 de «t4g» no son datos del usuario (JAJ-102).
+_NUM = re.compile(
+    r"(?<![\w.,])(\d[\d.,]*)\s*(%|ms\b|milisegundos?\b|seg(?:undos?)?\b|s\b|millones\b|millón\b|million\b|mil\b|k\b|m\b)?",
+    re.IGNORECASE,
+)
+_MULT = {"k": 1e3, "mil": 1e3, "m": 1e6, "millones": 1e6, "millón": 1e6, "million": 1e6}
+_UNIT = {"%": "%", "ms": "ms", "milisegundo": "ms", "milisegundos": "ms"} | dict.fromkeys(
+    ("s", "seg", "segundo", "segundos"), "s"
+)
+QuoteUnit = Literal["%", "ms", "s"] | None
+
+
+def _parse_number(raw: str) -> float | None:
+    """Un número escrito en español o en inglés, sin adivinar dos lecturas (JAJ-102).
+
+    Con un solo tipo de separador, grupos de exactamente tres dígitos son miles (100.000, 1,500, 1.234.567) y
+    cualquier otra cantidad es decimal (0,5, 2.5, 1,25). "0.500" es decimal: un número no empieza con 0 de
+    miles. Con los dos separadores, el último es el decimal (1.234,5 o 1,234.5)."""
+    raw = raw.rstrip(".,")
+    if "." in raw and "," in raw:
+        decimal = "." if raw.rfind(".") > raw.rfind(",") else ","
+        text = raw.replace("," if decimal == "." else ".", "").replace(decimal, ".")
+    elif "." in raw or "," in raw:
+        sep = "." if "." in raw else ","
+        head, *groups = raw.split(sep)
+        if all(len(g) == 3 for g in groups) and head != "0":
+            text = raw.replace(sep, "")
+        elif len(groups) == 1:
+            text = f"{head}.{groups[0]}"
+        else:
+            return None  # "1.2.3": no es un número
+    else:
+        text = raw
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _readings_in(quote: str) -> list[tuple[float, QuoteUnit]]:
+    """Los números de una frase con su unidad: «máximo 1 % de errores» → [(1.0, '%')], «p95 bajo 2 s» →
+    [(2.0, 's')], «100k usuarios» → [(100000.0, None)]."""
+    out: list[tuple[float, QuoteUnit]] = []
+    for raw, suffix in _NUM.findall(quote):
+        n = _parse_number(raw)
+        if n is None:
+            continue
+        word = (suffix or "").lower()
+        out.append((n * _MULT[word], None) if word in _MULT else (n, _UNIT.get(word)))
+    return out
 
 
 def _numbers_in(quote: str) -> list[float]:
     """Los números de una frase en español o inglés: 100.000, 100,000, 1,5, 100k, 2 millones, 0.5, 300 ms."""
-    out = []
-    for raw, suffix in _NUM.findall(quote):
-        raw = raw.rstrip(".,")
-        candidates = set()
-        for thousands, decimal in ((".", ","), (",", ".")):
-            t = raw.replace(thousands, "").replace(decimal, ".")
-            try:
-                candidates.add(float(t))
-            except ValueError:
-                pass
-        mult = {"k": 1e3, "mil": 1e3, "m": 1e6, "millones": 1e6, "millón": 1e6, "million": 1e6}.get(
-            (suffix or "").lower(), 1
-        )
-        out += [c * mult for c in candidates]
-    return out
+    return [n for n, _ in _readings_in(quote)]
 
 
-def _require_in_quote(value: float, quote: str, what: str, *, also: tuple[float, ...] = ()) -> None:
-    """``value`` (o una forma equivalente, como 1 % = 0.01) tiene que aparecer en la frase del usuario."""
-    targets = (value, *also)
-    for n in _numbers_in(quote):
-        if any(abs(n - t) <= 1e-9 * max(1, abs(t)) for t in targets):
+def _as_is(n: float, unit: QuoteUnit) -> list[float]:
+    return [n]
+
+
+def _as_ms(n: float, unit: QuoteUnit) -> list[float]:
+    """Una meta de latencia en ms: «300 ms» o «300» son 300; «2 s» son 2000. Un porcentaje no sirve."""
+    return [n * 1000] if unit == "s" else [n] if unit in (None, "ms") else []
+
+
+def _as_fraction(n: float, unit: QuoteUnit) -> list[float]:
+    """Una tasa como fracción: «1 %» es 0,01 (nunca 1, que sería 100 %); «0,01» sin unidad es 0,01."""
+    return [n / 100] if unit == "%" else [n] if unit is None else []
+
+
+def _require_in_quote(value: float, quote: str, what: str, *, read: Any = _as_is) -> None:
+    """``value`` tiene que aparecer en la frase del usuario, leído con su unidad: ``read(número, unidad)`` da
+    los valores que ese número respalda (``_as_ms``, ``_as_fraction``). Así «1 %» respalda 0,01 y no 1."""
+    for n, unit in _readings_in(quote):
+        if any(abs(c - value) <= 1e-9 * max(1, abs(value)) for c in read(n, unit)):
             return
     raise ToolError(
-        f"{what} = {value:g} no aparece en quote ({quote!r}). Los números del usuario se copian de su frase: "
-        "si no lo dijo, pregúntaselo en vez de suponerlo."
+        f"{what} = {value:g} no aparece en quote ({quote!r}) con esa unidad. Los números del usuario se copian "
+        "de su frase (1 % = 0.01; 2 s = 2000 ms): si no lo dijo, pregúntaselo en vez de suponerlo."
     )
+
+
+def _sync_mau(
+    traffic: dict[str, Any], a: Any, volume: dict[str, Any], peak: float, k_hour: dict[str, Any], label: str
+) -> list[str]:
+    """Deja ``traffic.mau`` de acuerdo con el pico nuevo, porque el costo (transferencia, balanceador) lo lee
+    de ahí (JAJ-103). Sin esto, pasar de 100.000 a 1.000.000 usuarios al mes no cambiaba el costo.
+
+    * Con ``users_per_month``, ``mau`` es lo que dijo el usuario.
+    * Con otra unidad, se deriva del pico con la fórmula inversa (pico / K_hora × segundos del mes /
+      (sesiones/mes × requests/sesión)), con la etiqueta más débil. Sin perfil de uso no se puede: ``mau``
+      queda como estaba y el cambio lo dice.
+    """
+    if a.unit == "users_per_month":
+        traffic["mau"] = {**volume, "unit": "usuarios/mes"}
+        return []
+    spm = (traffic.get("profile") or {}).get("sessions_per_month")
+    rps_session = (traffic.get("requests_per_session") or {}).get("value")
+    if not spm or not rps_session:
+        return [
+            "Usuarios al mes sin cambiar: el modelo no tiene perfil de uso para derivarlos, así que el costo de "
+            "transferencia y balanceador no sigue al tráfico nuevo"
+        ]
+    mau = peak / k_hour["value"] * SECONDS_MONTH / (spm * rps_session)
+    traffic["mau"] = _num(
+        round(mau),
+        "usuarios/mes",
+        _weakest(label, traffic.get("profile", {}).get("label", "SUPUESTO")),
+        "pico / K_hora × segundos del mes / (sesiones/mes × requests/sesión): derivado del tráfico declarado",
+        derived=True,
+    )
+    return [f"Usuarios al mes derivados del pico: {round(mau):,}"]
+
+
+def _sync_scenario_rates(traffic: dict[str, Any], peak: float, label: str) -> None:
+    """``scenarios.*.rps`` = pico × multiplicador en todos los escenarios del modelo (JAJ-103). Antes solo se
+    actualizaba el del evento: ``POST /runs`` con el modelo nuevo seguía simulando las req/s viejas."""
+    for sc in (traffic.get("scenarios") or {}).values():
+        mult = (
+            (sc.get("multiplier") or {}).get("value")
+            if isinstance(sc.get("multiplier"), dict)
+            else sc.get("multiplier")
+        )
+        if mult:
+            sc["rps"] = _num(round(peak * mult, 2), "req/s", label, "pico × multiplicador", derived=True)
+
+
+def _normalized(text: str) -> str:
+    """Para buscar la frase citada en los mensajes: sin mayúsculas, espacios repetidos ni comillas alrededor."""
+    return re.sub(r"\s+", " ", text.casefold()).strip(" \"'«»“”‘’.,;:")
 
 
 # ---------- utilidades ----------
@@ -433,12 +533,21 @@ class AgentTools:
     """Las tools de un usuario. ``owner`` es su id (o ``None`` sin login); solo ve sus proyectos."""
 
     def __init__(
-        self, store: ProjectStore, owner: str | None, limiter: Limiter | None = None, attachments: Any = None
+        self,
+        store: ProjectStore,
+        owner: str | None,
+        limiter: Limiter | None = None,
+        attachments: Any = None,
+        *,
+        user_messages: list[str] | None = None,
     ) -> None:
         self.store = store
         self.owner = owner
         self.limiter = limiter or Limiter()
         self.attachments = attachments  # AttachmentStorage del chat (IA-7); None en MCP
+        # lo que escribió el usuario en el chat, para comprobar que cada quote la dijo él (JAJ-102). None en
+        # MCP: ahí el backend no ve la conversación y la quote queda a cargo de la CLI.
+        self.user_messages = [_normalized(m) for m in user_messages] if user_messages is not None else None
         self._args = {
             "list_projects": ListProjects,
             "get_model": VersionRef,
@@ -498,6 +607,18 @@ class AgentTools:
             return {"error": f"Error interno de Branchpoint ({type(e).__name__}): {e}"}
 
     # -- helpers --
+
+    def _require_said(self, quote: str | None) -> None:
+        """En el chat, ``quote`` tiene que estar en algún mensaje del usuario (JAJ-102): la escribe el LLM, y
+        sin esto podía citar una frase que nadie dijo. Se compara sin mayúsculas ni espacios repetidos."""
+        if quote is None or self.user_messages is None:
+            return
+        said = _normalized(quote)
+        if not any(said in m for m in self.user_messages):
+            raise ToolError(
+                f"La frase {quote!r} no está en lo que escribió el usuario. Copia sus palabras textuales; si no "
+                "dio el dato, pregúntaselo."
+            )
 
     def _project(self, project_id: str) -> Project:
         project = self.store.get(project_id, self.owner)
@@ -723,6 +844,7 @@ class AgentTools:
 
     def _set_traffic(self, a: SetTrafficArgs) -> dict[str, Any]:
         project = self._project(a.project_id)
+        self._require_said(a.quote)
         base = self._version(project, a.version)
         _require_in_quote(a.volume, a.quote, "volume")
         if a.peak_factor is not None:
@@ -767,20 +889,22 @@ class AgentTools:
         traffic["declared"] = {"volume": volume, "quote": a.quote}
         traffic["peak_rps"] = _num(round(peak, 2), "req/s", label, f"{formula}. {quote_src}", derived=True)
         changes = [f"Tráfico: {a.volume:g} {a.unit} → pico de {peak:,.1f} req/s ({formula})"]
+        changes += _sync_mau(traffic, a, volume, peak, k_hour, label)
         if a.peak_factor is not None:
             mult = _num(a.peak_factor, "×", "SUPUESTO", quote_src)
-            sc = traffic.setdefault("scenarios", {})
-            sc[a.scenario] = {
-                "multiplier": mult,
-                "rps": _num(round(peak * a.peak_factor, 2), "req/s", label, "pico × multiplicador", derived=True),
-            }
-            self.store.upsert_scenario(project.id, ProjectScenario(a.scenario, a.peak_factor, None, a.quote))
+            traffic.setdefault("scenarios", {})[a.scenario] = {"multiplier": mult}
             changes.append(f"Escenario {a.scenario}: ×{a.peak_factor:g} = {peak * a.peak_factor:,.1f} req/s")
+        _sync_scenario_rates(traffic, traffic["peak_rps"]["value"], label)  # todos, no solo el del evento (JAJ-103)
+        # primero la versión y después el escenario del proyecto: si guardar falla, el escenario no cambia
+        # para las demás versiones (JAJ-103)
         version = self._save(project, base, m, "; ".join(changes))
+        if a.peak_factor is not None:
+            self.store.upsert_scenario(project.id, ProjectScenario(a.scenario, a.peak_factor, None, a.quote))
         return {"version": version.number, "parent": base.number, "changes": changes, "peak_rps": traffic["peak_rps"]}
 
     def _set_deployment(self, a: SetDeploymentArgs) -> dict[str, Any]:
         project = self._project(a.project_id)
+        self._require_said(a.quote)
         base = self._version(project, a.version)
         if a.field == "db.plan":
             if _compact(a.value) not in _compact(a.quote):
@@ -795,6 +919,8 @@ class AgentTools:
                 number = float(a.value.replace(",", "."))
             except ValueError:
                 raise ToolError(f"{a.field} tiene que ser un número (llegó {a.value!r}).") from None
+            if a.field == "api.replicas" and not number.is_integer():  # 2.7 se truncaba a 2 sin avisar (JAJ-102)
+                raise ToolError(f"api.replicas tiene que ser un número entero de réplicas (llegó {a.value!r}).")
             _require_in_quote(number, a.quote, a.field)
             api = base.model.get("deployment", {}).get("api", {})
             replicas = int(number) if a.field == "api.replicas" else int(api.get("replicas", {}).get("value", 1))
@@ -851,12 +977,13 @@ class AgentTools:
 
     def _set_goals(self, a: SetGoalsArgs) -> dict[str, Any]:
         project = self._project(a.project_id)
+        self._require_said(a.quote)
         if a.slo_p95_ms is None and a.slo_error_rate is None and a.budget_usd_month is None:
             raise ToolError("Manda al menos una meta: slo_p95_ms, slo_error_rate o budget_usd_month.")
         if a.slo_p95_ms is not None:
-            _require_in_quote(a.slo_p95_ms, a.quote, "slo_p95_ms", also=(a.slo_p95_ms / 1000,))  # 300 ms o 0,3 s
+            _require_in_quote(a.slo_p95_ms, a.quote, "slo_p95_ms", read=_as_ms)  # 300 ms o 0,3 s, nunca 2 s → 2
         if a.slo_error_rate is not None:
-            _require_in_quote(a.slo_error_rate, a.quote, "slo_error_rate", also=(a.slo_error_rate * 100,))  # 1 %
+            _require_in_quote(a.slo_error_rate, a.quote, "slo_error_rate", read=_as_fraction)  # 1 % → 0,01, no 1
         if a.budget_usd_month is not None:
             _require_in_quote(a.budget_usd_month, a.quote, "budget_usd_month")
         current = self.store.get_goals(project.id)

@@ -516,7 +516,17 @@ El agente es un loop de tool use (ADR 0001): el LLM pide tools y el backend las 
 
 Reglas, iguales en los dos modos:
 
-- **Ningún número libre del LLM.** `set_traffic`, `set_deployment` y `set_goals` piden `quote`, la frase textual del usuario, y cada número tiene que aparecer en ella (se aceptan 100.000, 100k, 1 % = 0,01, 300 ms = 0,3 s). `simulate` y `compare` no reciben req/s ni duración: la tasa sale del escenario, y la duración la fija el servidor (60 s, o menos si la tasa no cabe en el tope de requests por llamada).
+- **Ningún número libre del LLM.** `set_traffic`, `set_deployment` y `set_goals` piden `quote`, la frase textual del usuario, y cada número tiene que aparecer en ella (se aceptan 100.000, 100k, 1 % = 0,01, 300 ms = 0,3 s).
+  - **Cada número se lee con su unidad y una sola vez** (JAJ-102):
+    - «1 %» respalda una meta de errores de 0,01, nunca 1, que sería el 100 %. «2 s» respalda 2000 ms, nunca 2 ms.
+    - Tres dígitos después del separador son miles (100.000, 1.500); cualquier otra cantidad es decimal, así que «0,5» es 0,5 y nunca 5.
+    - Los dígitos pegados a una letra (el 95 de «p95») no cuentan.
+    - Las réplicas tienen que ser un número entero.
+  - **En el chat, la `quote` tiene que estar en algún mensaje del usuario**, comparada sin mayúsculas ni espacios repetidos. Vale para `set_goals` y para las operaciones de `propose_version`. En MCP no se comprueba, porque el backend no ve la conversación.
+- **`set_traffic` deja coherente todo el bloque `traffic`** (JAJ-103):
+  - **`mau`:** con `users_per_month` es lo que dijo el usuario. Con otra unidad se deriva del pico con la fórmula inversa, como `derived`; sin perfil de uso queda como estaba, y el cambio lo dice. El costo de transferencia y del balanceador sigue al tráfico nuevo.
+  - **Escenarios:** todos los del modelo se recalculan como pico × multiplicador.
+  - **Orden:** primero se guarda la versión y después el escenario del proyecto, para que un error al guardar no lo cambie. `simulate` y `compare` no reciben req/s ni duración: la tasa sale del escenario, y la duración la fija el servidor (60 s, o menos si la tasa no cabe en el tope de requests por llamada).
 - **Procedencia en cada resultado** (`label`, fuente con escenario, semilla, req/s y segundos simulados) y todas las advertencias del motor.
 - **Errores con la forma `{"error": "..."}`,** también para argumentos desconocidos o mal tipados. En MCP, un middleware los rechaza antes de la tool, porque el SDK los descarta en silencio.
 - **Límites por usuario:** 60 llamadas por minuto y 300 simulaciones por día (`compare` cuenta 2). Son en memoria, por instancia de la API.
