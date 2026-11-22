@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import AppHeader from "@/components/AppHeader.vue";
-import {
-  ArrowUpRight,
-  GitBranch,
-  Search,
-  SlidersHorizontal,
-  Trash2,
-} from "@lucide/vue";
+import { GitBranch, Search, SlidersHorizontal, Trash2 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import DeleteProjectDialog from "@/components/projects/DeleteProjectDialog.vue";
 import NewProjectDialog from "@/components/projects/NewProjectDialog.vue";
@@ -226,7 +220,7 @@ onMounted(loadProjects);
                 ? `Abrir editor de ${project.name}`
                 : undefined
             "
-            class="group/project block py-3 ps-4 pe-13 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+            class="block py-3 ps-4 pe-12 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
             :class="{ 'hover:bg-muted/50': project.versions.length }"
           >
             <div class="flex items-center gap-3">
@@ -259,11 +253,6 @@ onMounted(loadProjects);
                 class="shrink-0 font-mono text-[0.625rem] text-muted-foreground"
                 >{{ latestVersion(project)?.label ?? "Sin versión" }}</span
               >
-              <ArrowUpRight
-                v-if="project.versions.length"
-                class="size-3.5 shrink-0 text-muted-foreground group-hover/project:text-foreground"
-                aria-hidden="true"
-              />
             </div>
 
             <ul
@@ -295,7 +284,7 @@ onMounted(loadProjects);
           <Button
             variant="ghost"
             size="icon-sm"
-            class="absolute end-3 top-3 text-muted-foreground hover:text-destructive"
+            class="absolute end-2 top-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             :aria-label="`Borrar ${project.name}`"
             title="Borrar proyecto"
             @click="projectToDelete = project"
