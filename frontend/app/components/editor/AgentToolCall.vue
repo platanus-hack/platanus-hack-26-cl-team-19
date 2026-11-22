@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ChevronRight } from "@lucide/vue";
+import { ChevronRight, Play } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import type { ToolCallStatus } from "./types";
 
@@ -9,7 +10,11 @@ const props = defineProps<{
   status: ToolCallStatus;
   output?: string;
   detail?: string;
+  /** Versión creada por la herramienta (JAJ-141). */
+  version?: number;
 }>();
+
+const emit = defineEmits<{ openVersion: [version: number] }>();
 
 const actions: Record<string, [running: string, done: string]> = {
   list_projects: ["Buscando tus proyectos", "Revisé tus proyectos"],
@@ -92,4 +97,15 @@ const technicalDetail = computed(() =>
       class="ms-4 mt-1 overflow-x-auto border-s border-border ps-2 text-muted-foreground"
     ><code>{{ technicalDetail }}</code></pre>
   </details>
+  <Button
+    v-if="status === 'done' && version !== undefined"
+    type="button"
+    size="xs"
+    variant="outline"
+    class="ms-4 mt-1 self-start"
+    @click="emit('openVersion', version)"
+  >
+    <Play data-icon="inline-start" aria-hidden="true" />
+    Abrir y simular v{{ version }}
+  </Button>
 </template>

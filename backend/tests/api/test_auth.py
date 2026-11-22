@@ -181,6 +181,8 @@ def test_bob_cannot_see_or_touch_alices_project(client):
         ("get", f"/projects/{pid}/versions/1/costs", None),
         ("get", f"/projects/{pid}/scenarios", None),
         ("put", f"/projects/{pid}/scenarios/x", {"rps": 5}),
+        ("get", f"/projects/{pid}/chat", None),
+        ("put", f"/projects/{pid}/chat", {"messages": []}),
     ]
     for method, path, body in attempts:
         r = client.request(method, path, json=body, headers=b)

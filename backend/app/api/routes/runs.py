@@ -7,6 +7,8 @@ versión de un proyecto sí se guardan (``app/api/run_cache.py``, JAJ-75). Con 6
 
 from __future__ import annotations
 
+import dataclasses
+
 from fastapi import APIRouter
 
 from app.api.errors import INVALID_MODEL, INVALID_PARAMETERS, RUN_TOO_LARGE, UNKNOWN_SCENARIO, ApiError
@@ -15,6 +17,7 @@ from app.engine import simulate
 from app.engine.kernel import SimulationTooLarge
 from app.models import load_model
 from app.models.architecture import ArchitectureModel
+from app.models.overrides import OverrideError, apply_overrides
 from app.models.run import Run
 
 router = APIRouter(tags=["runs"])
@@ -28,7 +31,11 @@ def create_run(req: RunRequest) -> Run:
 
 
 def run_model(raw: dict, req: RunParams) -> Run:
-    """Valida el modelo y los parámetros y simula. Lo usan ``POST /runs`` y las rutas de proyectos."""
+    """Valida el modelo y los parámetros y simula. Lo usan ``POST /runs`` y las rutas de proyectos.
+
+    Los reemplazos del escenario (JAJ-131) se aplican a una copia del modelo antes de cargarlo, y el
+    ``Run`` dice cuáles se usaron (``overrides``)."""
+    raw, notes = scenario_model(raw, req)
     model = load_or_422(raw)
     if req.rps is None and req.scenario not in model.scenarios:
         available = sorted(model.scenarios)
@@ -55,7 +62,7 @@ def run_model(raw: dict, req: RunParams) -> Run:
             max_requests=MAX_SIMULATED_REQUESTS,
         )
     try:
-        return simulate(
+        run = simulate(
             model,
             req.scenario,
             seed=req.seed,
@@ -71,6 +78,15 @@ def run_model(raw: dict, req: RunParams) -> Run:
         raise ApiError(422, RUN_TOO_LARGE, str(e), max_events=e.max_events) from e
     except ValueError as e:  # ej. un escenario con 0 req/s o vCPU en 0
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from e
+    return dataclasses.replace(run, overrides=notes) if notes else run
+
+
+def scenario_model(raw: dict, req: RunParams) -> tuple[dict, list[str]]:
+    """El modelo con los reemplazos del escenario (JAJ-131) y sus frases; 422 si uno no calza."""
+    try:
+        return apply_overrides(raw, **req.override_args())
+    except OverrideError as e:
+        raise ApiError(422, INVALID_PARAMETERS, str(e), available=e.available) from e
 
 
 def load_or_422(raw: dict) -> ArchitectureModel:

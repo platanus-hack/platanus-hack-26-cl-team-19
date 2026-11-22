@@ -101,7 +101,7 @@ def _traffic(raw: dict[str, Any]) -> tuple[float | None, float | None, str | Non
     mau, profile = t.get("mau"), t.get("profile")
     if not isinstance(mau, dict) or not isinstance(profile, dict):
         return None, None, None
-    sessions, per_session = profile.get("sessions_per_month"), profile.get("requests_per_session")
+    sessions, per_session = value(profile.get("sessions_per_month")), value(profile.get("requests_per_session"))
     if not sessions or not per_session or not value(mau):
         return value(mau), None, _label(mau)
     return value(mau), value(mau) * sessions * per_session, _weakest(_label(mau), _label(profile))
@@ -313,6 +313,21 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
         lines.append(_transfer_line(region, requests_month, traffic_label))
     else:
         unpriced.append("Balanceador y transferencia: el modelo no trae usuarios mensuales ni perfil de uso.")
+
+    # JAJ-140: las réplicas de lectura traen su costo de add_read_replica (catálogo × réplicas)
+    replicas = raw["deployment"]["db"].get("read_replicas")
+    if replicas and isinstance(replicas.get("usd_month"), dict):
+        n = value(replicas.get("count"))
+        lines.append(
+            CostLine(
+                "db_replica",
+                f"Réplicas de lectura ({n} × {replicas.get('plan')})",
+                "db_replica",
+                replicas["usd_month"],
+                "costo del plan por réplica × réplicas",
+                {"count": n, "plan": replicas.get("plan")},
+            )
+        )
 
     has_cache = any(s.get("resource") == "cache" for e in raw["endpoints"] for s in e.get("steps", []))
     if has_cache:

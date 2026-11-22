@@ -120,6 +120,24 @@ class ScaleWorkers(_Op):
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió los workers.")
 
 
+class AddReadReplica(_Op):
+    """Agrega réplicas de lectura de la DB: las lecturas van a las réplicas y las escrituras a la primaria.
+
+    Supone que la app separa lecturas y escrituras (SUPUESTO). No simula el retraso de replicación.
+    """
+
+    op: Literal["add_read_replica"]
+    count: int = Field(ge=1, le=5, description="Réplicas de lectura. Si ya hay, se reemplaza el número.")
+    plan: str | None = Field(None, description="Plan de cada réplica, del catálogo. Sin valor, el de la primaria.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió estos números.")
+
+
+class RemoveReadReplica(_Op):
+    """Quita las réplicas de lectura: todas las consultas vuelven a la primaria."""
+
+    op: Literal["remove_read_replica"]
+
+
 Op = Annotated[
     ScaleApi
     | ChangeDbPlan
@@ -129,7 +147,9 @@ Op = Annotated[
     | RemoveCache
     | RemovePooler
     | MoveToSync
-    | ScaleWorkers,
+    | ScaleWorkers
+    | AddReadReplica
+    | RemoveReadReplica,
     Field(discriminator="op"),
 ]
 _OPS = TypeAdapter(list[Op])
@@ -161,6 +181,10 @@ def apply_ops(model: dict[str, Any], ops: list[Any]) -> OpsResult:
     if not parsed:
         raise OpError("No hay operaciones que aplicar.")
     m = copy.deepcopy(model)
+    # ``steps`` es opcional en el modelo (un endpoint sin pasos no consulta nada); las operaciones lo
+    # recorren, así que se completa con [] en la copia (antes, add_cache respondía 500, JAJ-101)
+    for e in m.get("endpoints", []):
+        e.setdefault("steps", [])
     catalog = load_catalog()
     changes: list[str] = []
     warnings: list[str] = []
@@ -522,8 +546,72 @@ def _scale_workers(m: dict[str, Any], op: ScaleWorkers, catalog: dict[str, Any],
     return f"Cola '{op.queue}': {before} → {op.workers} workers"
 
 
+# ---------- réplicas de lectura (JAJ-140) ----------
+def _add_read_replica(m: dict[str, Any], op: AddReadReplica, catalog: dict[str, Any], warnings: list[str]) -> str:
+    db = m["deployment"]["db"]
+    plans = catalog["db_plans"]
+    provider = db.get("provider", "local")
+    if provider not in plans or provider.startswith("_") or not isinstance(plans[provider], dict):
+        known = ", ".join(k for k, v in plans.items() if isinstance(v, dict) and not k.startswith("_"))
+        raise OpError(f"La DB está en '{provider}', que no está en el catálogo. Hay: {known}.")
+    name = op.plan or db.get("plan")
+    plan = plans[provider].get(name) if name else None
+    if plan is None:
+        raise OpError(f"{provider} no tiene el plan '{name}' en el catálogo. Hay: {', '.join(plans[provider])}.")
+    src = f"{plans['_sources'][provider]}. Réplica {provider} {name}"
+    if provider == "supabase":
+        per, formula = plan["compute_usd_month"], "Supabase: compute del plan por réplica"
+    else:
+        per, formula = plan["usd_hour"] * HOURS_MONTH, f"US$/hora × {HOURS_MONTH} por réplica"
+    before = (db.get("read_replicas") or {}).get("count")
+    db["read_replicas"] = {
+        "count": _design(op.count, "réplicas", f"{op.count} réplica(s) de lectura", op.quote),
+        "plan": name,
+        "vcpu": _num(plan["vcpu"], "vCPU", plan["vcpu_label"], src),
+        "max_connections": _num(plan["max_connections"], "conexiones", "ESTIMADO", src),
+        "cpu_core_factor": _core_factor(catalog, plan, f"Réplica {provider} {name}"),
+        "usd_month": _num(round(per * op.count, 2), "US$/mes", "ESTIMADO", f"{src}. {formula} × réplicas"),
+        "routing": _num(
+            "reads_to_replicas",
+            "",
+            "SUPUESTO",
+            "Propuesta del agente: la app envía las lecturas a la réplica y las escrituras a la primaria",
+            needs_review=True,
+        ),
+    }
+    base = catalog["burstable_baseline_per_vcpu"].get(name)
+    if base is not None:  # créditos de CPU, como la primaria en change_db_plan
+        sustained = round(plan["vcpu"] * base["value"], 3)
+        db["read_replicas"]["cpu_credits"] = {
+            "baseline_per_vcpu": {**base},
+            "sustained_vcpu": _num(
+                sustained,
+                "vCPU",
+                _weakest(plan["vcpu_label"], base["label"]),
+                f"vCPU × base por vCPU: lo que rinde {name} con carga sostenida",
+                derived=True,
+            ),
+        }
+    warnings.append(
+        "Las réplicas suponen que la app envía las lecturas a la réplica (hoy el código usa una sola DB). "
+        "No se simula el retraso de replicación."
+    )
+    was = f"{value(before)} → " if before else ""
+    return f"DB: réplicas de lectura {was}{op.count} × {provider} {name} (US${per * op.count:,.2f}/mes)"
+
+
+def _remove_read_replica(m: dict[str, Any], op: RemoveReadReplica, catalog: dict[str, Any], warnings: list[str]) -> str:
+    db = m["deployment"]["db"]
+    replicas = db.pop("read_replicas", None)
+    if replicas is None:
+        raise OpError("La DB no tiene réplicas de lectura.")
+    return f"DB: sin réplicas de lectura ({value(replicas.get('count'))} menos); todo vuelve a la primaria"
+
+
 _APPLY = {
     ScaleApi: _scale_api,
+    AddReadReplica: _add_read_replica,
+    RemoveReadReplica: _remove_read_replica,
     ChangeDbPlan: _change_db_plan,
     AddPooler: _add_pooler,
     AddCache: _add_cache,

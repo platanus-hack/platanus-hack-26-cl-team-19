@@ -15,7 +15,7 @@ defineProps<{ changes: ProposalChange[] }>();
         <span class="sr-only">Antes:</span>
         {{ change.target }}.{{ change.field }}: {{ change.from }}
       </p>
-      <p class="flex gap-2 bg-secondary px-3 py-0.5 font-medium">
+      <p class="flex gap-2 bg-highlight/15 px-3 py-0.5 font-medium">
         <span aria-hidden="true">+</span>
         <span class="sr-only">Después:</span>
         {{ change.target }}.{{ change.field }}: {{ change.to }}

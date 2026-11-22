@@ -8,12 +8,18 @@ import {
   Plus,
   TriangleAlert,
 } from "@lucide/vue";
-import { useElementSize } from "@vueuse/core";
+import { useElementSize, usePreferredReducedMotion } from "@vueuse/core";
 import type { SaturationStatus } from "@/components/design/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { componentKinds } from "./component-kinds";
-import type { Bottleneck, DiagramEdge, DiagramNode } from "./types";
+import TechIcon from "./TechIcon.vue";
+import type {
+  Bottleneck,
+  DiagramEdge,
+  DiagramFlow,
+  DiagramNode,
+} from "./types";
 
 const props = defineProps<{
   nodes: DiagramNode[];
@@ -21,6 +27,10 @@ const props = defineProps<{
   selectedId?: string | null;
   bottleneck?: Bottleneck | null;
   canExplain?: boolean;
+  /** Flujo estimado por conector en el segundo que se muestra (JAJ-129). */
+  flows?: DiagramFlow[];
+  /** true mientras se reproduce la corrida: las partículas se mueven. */
+  animating?: boolean;
 }>();
 
 const emit = defineEmits<{ select: [id: string | null]; explain: [] }>();
@@ -181,10 +191,65 @@ const paths = computed(() =>
         d,
         start: { x: x1, y: y1 },
         end: { x: x2, y: y2 },
+        length: Math.abs(x2 - x1) + Math.abs(y2 - y1),
       },
     ];
   }),
 );
+
+// Partículas del flujo (JAJ-129): representan flujo agregado, no requests individuales (JAJ-38).
+// La densidad sigue al req/s estimado y la velocidad es fija.
+const MAX_PARTICLES = 8;
+const PARTICLE_SPEED = 90; // px/s
+const reducedMotion = usePreferredReducedMotion();
+const rpsFormat = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 });
+const percentFormat = new Intl.NumberFormat("es-CL", {
+  style: "percent",
+  maximumFractionDigits: 0,
+});
+
+const particles = computed(() => {
+  const flows = new Map(
+    (props.flows ?? []).map((flow) => [`${flow.from}-${flow.to}`, flow]),
+  );
+  return paths.value.flatMap((path) => {
+    const flow = flows.get(path.key);
+    if (!flow) return [];
+    const count =
+      flow.rps > 0
+        ? Math.max(1, Math.round(flow.intensity * MAX_PARTICLES))
+        : 0;
+    const duration = Math.max(0.8, path.length / PARTICLE_SPEED);
+    const failing = (index: number) =>
+      Math.floor((index + 1) * flow.errorShare) >
+      Math.floor(index * flow.errorShare);
+    return [
+      {
+        ...path,
+        flow,
+        duration,
+        title:
+          `≈ ${rpsFormat.format(flow.rps)} req/s, estimado a partir de la mezcla de endpoints` +
+          (flow.errorShare > 0
+            ? ` · ${percentFormat.format(flow.errorShare)} con error`
+            : ""),
+        dots: Array.from({ length: count }, (_, index) => ({
+          index,
+          error: failing(index),
+          begin: -(index / count) * duration,
+        })),
+      },
+    ];
+  });
+});
+
+const flowLayer = useTemplateRef<SVGSVGElement>("flowLayer");
+watchEffect(() => {
+  const layer = flowLayer.value;
+  if (!layer) return;
+  if (props.animating) layer.unpauseAnimations();
+  else layer.pauseAnimations();
+});
 
 const viewport = useTemplateRef<HTMLElement>("viewport");
 const { width: viewportWidth, height: viewportHeight } =
@@ -304,7 +369,7 @@ const alertOf = (status?: SaturationStatus) =>
               <path
                 :d="path.d"
                 fill="none"
-                class="stroke-input"
+                class="stroke-info/60"
                 stroke-width="1"
               />
               <circle
@@ -319,6 +384,60 @@ const alertOf = (status?: SaturationStatus) =>
                 r="3"
                 class="fill-muted-foreground"
               />
+            </g>
+          </svg>
+
+          <svg
+            v-if="particles.length"
+            ref="flowLayer"
+            class="pointer-events-none absolute inset-0 overflow-visible"
+            :width="layout.width"
+            :height="layout.height"
+            data-testid="diagram-flow"
+          >
+            <g v-for="item in particles" :key="item.key">
+              <path
+                :d="item.d"
+                fill="none"
+                stroke="transparent"
+                stroke-width="10"
+                pointer-events="stroke"
+              >
+                <title>{{ item.title }}</title>
+              </path>
+              <path
+                v-if="reducedMotion === 'reduce'"
+                :d="item.d"
+                fill="none"
+                class="stroke-primary"
+                stroke-width="2"
+                :stroke-opacity="0.25 + item.flow.intensity * 0.75"
+                :stroke-dasharray="item.flow.errorShare > 0 ? '4 3' : undefined"
+              />
+              <template v-else>
+                <g
+                  v-for="dot in item.dots"
+                  :key="dot.index"
+                  :data-error="dot.error || undefined"
+                >
+                  <rect
+                    v-if="dot.error"
+                    x="-2.5"
+                    y="-2.5"
+                    width="5"
+                    height="5"
+                    transform="rotate(45)"
+                    class="fill-status-down-foreground"
+                  />
+                  <circle v-else r="2.5" class="fill-primary" />
+                  <animateMotion
+                    :path="item.d"
+                    :dur="`${item.duration}s`"
+                    :begin="`${dot.begin}s`"
+                    repeatCount="indefinite"
+                  />
+                </g>
+              </template>
             </g>
           </svg>
 
@@ -357,17 +476,23 @@ const alertOf = (status?: SaturationStatus) =>
             >
               <button
                 type="button"
-                class="flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
+                class="relative flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
                 :class="
                   node.simulated === false
                     ? 'border-dashed bg-muted/40 text-muted-foreground'
-                    : alertOf(node.status)?.border
+                    : [
+                        alertOf(node.status)?.border,
+                        node.bottleneck &&
+                          'ring-2 ring-status-saturated-border ring-offset-2 ring-offset-background',
+                      ]
                 "
                 :aria-pressed="node.id === selectedId"
                 :title="
                   [
                     node.name,
                     componentKinds[node.kind].label,
+                    node.tech?.main?.label,
+                    ...(node.tech?.platforms ?? []).map(({ label }) => label),
                     node.detail,
                     node.simulated === false ? 'No simulado' : undefined,
                   ]
@@ -376,8 +501,15 @@ const alertOf = (status?: SaturationStatus) =>
                 "
                 @click="emit('select', node.id === selectedId ? null : node.id)"
               >
+                <TechIcon
+                  v-if="node.tech?.main"
+                  :name="node.tech.main.icon"
+                  class="size-4 shrink-0"
+                  :class="{ 'opacity-60': node.simulated === false }"
+                />
                 <component
                   :is="componentKinds[node.kind].icon"
+                  v-else
                   class="size-4 shrink-0 text-muted-foreground"
                   aria-hidden="true"
                 />
@@ -396,8 +528,28 @@ const alertOf = (status?: SaturationStatus) =>
                     >{{ node.detail }}</span
                   >
                 </span>
+                <span
+                  v-if="node.tech?.platforms.length"
+                  class="pointer-events-none absolute end-1.5 top-1 flex items-center gap-1 opacity-70"
+                >
+                  <TechIcon
+                    v-for="platform in node.tech.platforms"
+                    :key="platform.icon"
+                    :name="platform.icon"
+                    class="h-2.5 w-auto max-w-4"
+                    :class="{
+                      'opacity-60': node.simulated === false,
+                    }"
+                  />
+                </span>
                 <span class="sr-only">{{
-                  componentKinds[node.kind].label
+                  [
+                    componentKinds[node.kind].label,
+                    node.tech?.main?.label,
+                    ...(node.tech?.platforms ?? []).map(({ label }) => label),
+                  ]
+                    .filter(Boolean)
+                    .join(", ")
                 }}</span>
                 <template v-if="alertOf(node.status)">
                   <component
@@ -409,6 +561,32 @@ const alertOf = (status?: SaturationStatus) =>
                   <span class="sr-only">{{ alertOf(node.status)!.label }}</span>
                 </template>
               </button>
+              <span
+                v-if="node.bottleneck"
+                class="absolute -top-2.5 left-2 rounded-sm border border-status-saturated-border bg-card px-1 text-[0.625rem] leading-4 text-status-saturated-foreground"
+                >Cuello de botella</span
+              >
+              <span
+                v-if="node.change"
+                class="absolute -bottom-2.5 left-2 rounded-sm border px-1 text-[0.625rem] leading-4"
+                :class="
+                  node.change === 'new'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-foreground'
+                "
+                :title="
+                  node.change === 'new'
+                    ? 'No estaba en la versión anterior'
+                    : 'Cambió respecto de la versión anterior'
+                "
+                >{{ node.change === "new" ? "Nuevo" : "Cambiado" }}</span
+              >
+              <span
+                v-if="node.queue"
+                class="absolute -right-2 -bottom-2.5 rounded-sm border border-border bg-card px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground tabular-nums"
+                :title="`${node.queue} requests en espera en este segundo`"
+                >{{ node.queue }} en cola</span
+              >
             </li>
           </ul>
         </div>
@@ -421,17 +599,34 @@ const alertOf = (status?: SaturationStatus) =>
           class="shrink-0 text-status-saturated-foreground"
           aria-hidden="true"
         />
-        <AlertTitle
-          class="min-w-0 flex-1 truncate"
-          :title="bottleneck.description"
-        >
-          {{ bottleneck.title }}
+        <AlertTitle class="min-w-0 flex-1 truncate">
+          <button
+            v-if="bottleneck.nodeId"
+            type="button"
+            class="max-w-full truncate text-left underline-offset-4 hover:underline"
+            :title="bottleneck.description"
+            @click="emit('select', bottleneck.nodeId)"
+          >
+            {{ bottleneck.title }}
+          </button>
+          <span v-else :title="bottleneck.description">{{
+            bottleneck.title
+          }}</span>
         </AlertTitle>
         <AlertDescription class="sr-only">{{
           bottleneck.description
         }}</AlertDescription>
+        <a
+          v-if="bottleneck.source?.url"
+          :href="bottleneck.source.url"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="hidden shrink-0 font-mono text-xs underline underline-offset-4 @lg/canvas:inline"
+          :title="`Abrir ${bottleneck.source.path}:${bottleneck.source.line} en GitHub`"
+          >{{ bottleneck.source.path }}:{{ bottleneck.source.line }}</a
+        >
         <code
-          v-if="bottleneck.source"
+          v-else-if="bottleneck.source"
           class="hidden shrink-0 text-xs @lg/canvas:inline"
           >{{ bottleneck.source.path }}:{{ bottleneck.source.line }}</code
         >

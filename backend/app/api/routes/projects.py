@@ -9,15 +9,18 @@ Todas las rutas piden sesión cuando la API tiene login (JAJ-78, ``get_store``).
 from __future__ import annotations
 
 import re
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
+from app.agent.proposals import ProposalDraft, prepare_proposal
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
 from app.api.routes.models import sample_or_404
-from app.api.routes.runs import load_or_422
+from app.api.routes.runs import load_or_422, scenario_model
 from app.api.run_cache import RUN_CACHE_HEADER, cached_run
+from app.api.scenario_versions import version_scenario
 from app.api.schemas import (
     ApplyOpsRequest,
     CompareRequest,
@@ -31,11 +34,23 @@ from app.api.schemas import (
     RunParams,
     ScenarioIn,
     ScenarioOut,
+    ScenarioTrafficStep,
     VersionDetail,
+    VersionResults,
+    VersionResultsRequest,
     VersionSummary,
 )
 from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
-from app.costs import CostDelta, CostEstimate, FailureCost, cost_delta, estimate_cost, failure_cost
+from app.costs import (
+    CostDelta,
+    CostEstimate,
+    FailureCost,
+    cost_delta,
+    describe_failure_missing,
+    estimate_cost,
+    failure_cost,
+    failure_missing,
+)
 from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
@@ -147,6 +162,20 @@ def apply_version_ops(
     )
 
 
+@router.post("/{project_id}/chat/proposals/{proposal_id}/accept", response_model=VersionDetail, status_code=201)
+def accept_chat_proposal(
+    project_id: str, proposal_id: UUID, draft: ProposalDraft, store: ProjectStore = Depends(get_store)
+) -> VersionDetail:
+    base = _version(store, _project(store, project_id), draft.base)
+    try:
+        prepared = prepare_proposal(base.model, draft, store.list_scenarios(project_id))
+    except ValueError as e:
+        raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
+    note = draft.note or "; ".join(prepared.changes)
+    version = store.add_version(project_id, prepared.model, "agente", draft.base, note[:500], proposal_id=proposal_id)
+    return VersionDetail(**_summary(version).model_dump(), model=version.model)
+
+
 @router.get("/{project_id}/versions/{number}", response_model=VersionDetail, summary="Una versión con su modelo")
 def get_version(project_id: str, number: int, store: ProjectStore = Depends(get_store)) -> VersionDetail:
     version = _version(store, _project(store, project_id), number)
@@ -174,6 +203,60 @@ def run_version(
     return run
 
 
+@router.post(
+    "/{project_id}/versions/{number}/results",
+    response_model=VersionResults,
+    summary="Resultados de una versión: simulación, costo mensual y costo de fallar (JAJ-128)",
+)
+def version_results(
+    project_id: str,
+    number: int,
+    req: VersionResultsRequest,
+    response: Response,
+    store: ProjectStore = Depends(get_store),
+) -> VersionResults:
+    """Lo que necesita la pantalla de resultados en una llamada. El ``Run`` es el mismo de
+    ``…/runs`` (con los mismos parámetros sale del guardado, JAJ-75); el costo, el de ``…/costs``; y el
+    costo de fallar, el que antes solo traía ``compare`` (JAJ-74)."""
+    version = _version(store, _project(store, project_id), number)
+    params = _with_scenario_rate(store, project_id, version.model, RunParams(**req.model_dump(exclude={"region"})))
+    run, hit = cached_run(store, project_id, number, version.model, params, _label(req))
+    _cache_header(response, hit)
+    cost = estimate_cost(version.model, req.region)
+    # el costo de fallar con el negocio del escenario, si trae (JAJ-131); el costo de infraestructura no cambia
+    biz_model, _ = scenario_model(version.model, params)
+    failure = failure_cost(biz_model, run)
+    missing = failure_missing(biz_model)
+    return VersionResults(
+        version=_summary(version),
+        run=run,
+        cost=cost,
+        failure=failure,
+        failure_missing=missing,
+        summary=results_summary(version.number, cost, failure, missing, run),
+    )
+
+
+def results_summary(
+    number: int, cost: CostEstimate, failure: FailureCost | None, missing: list[str], run: Run | None = None
+) -> str:
+    """'v2 cuesta US$148.67/mes en us-east-1. Con 3.2 % de errores, US$1,200 a US$9,800 por hora en
+    ventas en juego…' (JAJ-128). Dice cuándo el total es parcial (componentes sin precio, JAJ-88), por
+    qué no hay costo de fallar, y si la versión no alcanza a atender el tráfico (JAJ-89)."""
+    text = f"v{number} cuesta US${cost.total['value']:,.2f}/mes en {cost.region}"
+    if cost.missing:
+        text += f" sin contar {describe_missing(cost.missing)} (despliegue local o proveedor sin precios)"
+    text += "."
+    text += " " + (failure.message if failure is not None else describe_failure_missing(missing))
+    return text + _saturation_sentence(number, number, run, None) + _overrides_sentence(run)
+
+
+def _overrides_sentence(run: Run | None) -> str:
+    """Con qué reemplazos del escenario se simuló (JAJ-131): sin esto, un resultado con pagos ×10 se lee
+    como el de la arquitectura tal cual."""
+    return (" " + " ".join(run.overrides)) if run is not None and run.overrides else ""
+
+
 def _label(req: RunParams) -> str | None:
     """Con la tasa sacada de la tabla, el ``Run`` se llama como el escenario ("cyberday") y no como
     una tasa a mano ("cyberday (262.4 req/s)", lo que pone el motor cuando recibe ``rps``)."""
@@ -187,6 +270,10 @@ def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, param
     cualquier versión, y ``cyberday`` ×20 da más req/s en una versión con más pico. Las req/s quedan
     en ``rps``, que entra en la ``cache_key`` (JAJ-75): si alguien edita el escenario, la clave cambia
     y no se devuelve un run con la tasa vieja. Con ``rps`` en la request, el escenario es solo un nombre.
+
+    JAJ-131: también trae los reemplazos que guarda el escenario (mezcla de endpoints, dependencias más
+    lentas, negocio). Cada uno que mande la request reemplaza al del escenario. Quedan en los params, así
+    que también entran en la ``cache_key``.
     """
     if params.rps is not None:
         return params
@@ -201,15 +288,35 @@ def _with_scenario_rate(store: ProjectStore, project_id: str, model: dict, param
             + (f"Hay: {', '.join(available)}." if available else "No tiene ninguno: créalo o manda rps."),
             available=available,
         )
+    scenario = version_scenario(scenario, model)
     try:
         rate = scenario.rate_for(model)
     except ValueError as e:
         raise ApiError(422, INVALID_PARAMETERS, str(e)) from None
-    return params.model_copy(update={"rps": rate})
+    update: dict = {"rps": rate}
+    # Un perfil explícito por tramos puede reemplazar el guardado. El preset "pico" del editor
+    # para cyberday cede al escenario elástico si el usuario editó ese escenario.
+    if scenario.traffic_step is not None and not isinstance(params.traffic_profile, list):
+        step = ScenarioTrafficStep.model_validate(scenario.traffic_step)
+        update.update(traffic_profile=step.profile(), duration_s=step.duration_s)
+    for field, saved in scenario.overrides().items():
+        if getattr(params, field) is None:
+            update[field] = saved
+    # model_validate y no model_copy: business guardado es un dict y tiene que volver a ScenarioBusiness
+    return RunParams.model_validate({**params.model_dump(), **update})
 
 
 def _scenario_out(s: ProjectScenario) -> ScenarioOut:
-    return ScenarioOut(name=s.name, multiplier=s.multiplier, rps=s.rps, description=s.description)
+    return ScenarioOut(
+        name=s.name,
+        multiplier=s.multiplier,
+        rps=s.rps,
+        description=s.description,
+        traffic_step=ScenarioTrafficStep.model_validate(s.traffic_step) if s.traffic_step is not None else None,
+        endpoint_weights=s.endpoint_weights,
+        slowdowns=s.slowdowns,
+        business=s.business,
+    )
 
 
 @router.get("/{project_id}/scenarios", response_model=list[ScenarioOut], summary="Los escenarios del proyecto (JAJ-76)")
@@ -242,7 +349,21 @@ def put_scenario(project_id: str, name: str, req: ScenarioIn, store: ProjectStor
         )
     if (req.multiplier is None) == (req.rps is None):
         raise ApiError(422, INVALID_PARAMETERS, "Manda multiplier (× el pico) o rps (req/s fijas), uno de los dos.")
-    saved = store.upsert_scenario(project_id, ProjectScenario(name, req.multiplier, req.rps, req.description))
+    if req.traffic_step is not None and req.rps is None:
+        raise ApiError(422, INVALID_PARAMETERS, "Define la tasa base en req/s para un escenario elástico.")
+    if req.business is not None and not req.business.model_dump(exclude_none=True):
+        req = req.model_copy(update={"business": None})  # {} es lo mismo que no mandarlo
+    scenario = ProjectScenario(
+        name,
+        req.multiplier,
+        req.rps,
+        req.description,
+        traffic_step=req.traffic_step.model_dump() if req.traffic_step is not None else None,
+        endpoint_weights=req.endpoint_weights or None,
+        slowdowns=req.slowdowns or None,
+        business=req.business.model_dump(exclude_none=True) if req.business else None,
+    )
+    saved = store.upsert_scenario(project_id, scenario)
     return _scenario_out(saved)
 
 
@@ -266,7 +387,9 @@ def compare(
     _cache_header(response, hit_a, hit_b)
     cost_a, cost_b = estimate_cost(va.model, req.region), estimate_cost(vb.model, req.region)
     delta = cost_delta(cost_a, cost_b)
-    fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)  # JAJ-74
+    biz_a, _ = scenario_model(va.model, params_a)  # con el negocio del escenario, si trae (JAJ-131)
+    biz_b, _ = scenario_model(vb.model, params_b)
+    fa, fb = failure_cost(biz_a, run_a), failure_cost(biz_b, run_b)  # JAJ-74
     return CompareResponse(
         a=_summary(va),
         b=_summary(vb),
@@ -278,6 +401,8 @@ def compare(
         cost_delta=delta,
         failure_a=fa,
         failure_b=fb,
+        failure_missing_a=failure_missing(biz_a),
+        failure_missing_b=failure_missing(biz_b),
         summary=compare_summary(va.number, vb.number, delta, fa, fb, run_a, run_b),
     )
 
@@ -299,7 +424,7 @@ def compare_summary(
     Con los ``Run``, agrega si alguna versión no alcanza a atender el tráfico (JAJ-89): su tasa de
     error no cuenta las requests que siguen en fila, y sin este aviso una versión colapsada se lee sana.
     """
-    return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b)
+    return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b) + _overrides_sentence(run_a)
 
 
 def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:

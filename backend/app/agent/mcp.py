@@ -41,7 +41,7 @@ INSTRUCTIONS = (
     "réplicas) van en set_traffic, set_goals y set_deployment con su frase textual en quote; si no los dijo, "
     "pregúntaselos. Para cambiar la arquitectura usa propose_version con operaciones de ops_schema y después "
     "compare con la versión anterior. Cita el archivo:línea del cuello de botella. Si el cambio que piden no está "
-    "en ops_schema (por ejemplo una réplica de lectura, una CDN o cambiar de base de datos), di que Branchpoint "
+    "en ops_schema (por ejemplo una CDN, sharding o cambiar de base de datos), di que Branchpoint "
     "todavía no lo simula. No lo aproximes con otra operación sin avisar. "
     "Si el usuario quiere analizar un repo que tienes en local, léelo tú, sea del framework que sea: busca las "
     "rutas, sigue cada handler y clasifica sus accesos a la DB, caché, servicios externos y colas, con "

@@ -6,6 +6,7 @@ import type {
   Graph,
   ModelNumber,
   Project,
+  ProjectScenario,
   Run,
   VersionDetail,
 } from "./editor-api";
@@ -61,16 +62,26 @@ function mockSecond(arrivals: number, capacity: number): Run["series"][number] {
   };
 }
 
-function mockSeries(model: ArchitectureModel, scenario: string) {
+function mockSeries(
+  model: ArchitectureModel,
+  scenario: string,
+  rate: number,
+  step?: ProjectScenario["traffic_step"],
+) {
   const params = editorRunParams(scenario);
-  const rps = model.traffic.scenarios[scenario]?.rps;
-  const peak = typeof rps === "number" ? rps : (rps?.value ?? 0);
   const capacity = model.deployment.api.replicas.value * 125;
-  return Array.from({ length: params.duration_s }, (_, index) => {
-    const progress = (index + 0.5) / params.duration_s;
-    const multiplier =
-      params.traffic_profile === "pico" ? peakMultiplier(progress) : 1;
-    return mockSecond(Math.round(peak * multiplier), capacity);
+  const duration = step?.duration_s ?? params.duration_s;
+  return Array.from({ length: duration }, (_, index) => {
+    const progress = (index + 0.5) / duration;
+    const multiplier = step
+      ? index < step.at_s
+        ? 1
+        : step.multiplier
+      : params.traffic_profile === "pico"
+        ? peakMultiplier(progress)
+        : 1;
+    const target = rate * multiplier;
+    return { ...mockSecond(Math.round(target), capacity), target_rps: target };
   });
 }
 
@@ -87,8 +98,7 @@ function summarizeMockSeries(series: Run["series"]) {
   };
 }
 
-function mockRun(model: ArchitectureModel, scenario: string): Run {
-  const series = mockSeries(model, scenario);
+function mockRun(series: Run["series"]): Run {
   const { utilization } = summarizeMockSeries(series);
   return {
     bottleneck: {
@@ -116,11 +126,35 @@ function mockCosts(model: ArchitectureModel): CostEstimate {
       { id: "db", label: "Base de datos", usd_month: assumed(25, "US$/mes") },
     ],
     unpriced: [],
+    missing: [],
     warnings: [],
   };
 }
 
-type DemoProject = Omit<Project, "versions"> & { versions: VersionDetail[] };
+const demoFailureMissing = [
+  "traffic.requests_per_session",
+  "business.conversion",
+  "business.ticket_usd",
+];
+
+type DemoProject = Omit<Project, "versions"> & {
+  versions: VersionDetail[];
+  scenarios?: ProjectScenario[];
+};
+
+function demoScenarios(project: DemoProject): ProjectScenario[] {
+  return (
+    project.scenarios ??
+    Object.entries(project.versions[0]?.model.traffic.scenarios ?? {}).map(
+      ([name, { rps }]) => ({
+        name,
+        rps: typeof rps === "number" ? rps : rps.value,
+        multiplier: null,
+        description: null,
+      }),
+    )
+  );
+}
 
 const initialVersion: VersionDetail = {
   number: 1,
@@ -130,6 +164,7 @@ const initialVersion: VersionDetail = {
   model: {
     deployment: { api: { replicas: assumed(1, "réplicas") } },
     traffic: {
+      peak_rps: assumed(13, "req/s"),
       scenarios: { pico_normal: { rps: 13 }, cyberday: { rps: 262 } },
     },
   },
@@ -146,8 +181,11 @@ function makeProject(id: string, fullName = sample.name): DemoProject {
 }
 
 export function createMockEditorApi(
-  storage?: Storage,
-): Omit<ReturnType<typeof createEditorApi>, "chat"> {
+  storage?: Pick<Storage, "getItem" | "setItem">,
+): Omit<
+  ReturnType<typeof createEditorApi>,
+  "chat" | "acceptChatProposal" | "getChat" | "saveChat"
+> {
   const primary = makeProject("fastapi-template");
   const worker = makeProject(
     "fastapi-worker",
@@ -161,6 +199,11 @@ export function createMockEditorApi(
 
   const storeKey = "branchpoint:demo-projects";
   const entries = readSaved(storage?.getItem(storeKey)) ?? [primary, worker];
+  for (const entry of entries) {
+    for (const version of entry.versions) {
+      version.model.traffic.peak_rps ??= assumed(13, "req/s");
+    }
+  }
   const projects = new Map(entries.map((entry) => [entry.id, entry]));
   const existingPrimary = projects.get(primary.id);
   if (existingPrimary) existingPrimary.repositories = primary.repositories;
@@ -184,6 +227,17 @@ export function createMockEditorApi(
     return version;
   }
 
+  function seriesFor(id: string, scenario: string, model: ArchitectureModel) {
+    const saved = demoScenarios(getProject(id)).find(
+      ({ name }) => name === scenario,
+    );
+    if (!saved) throw new Error("El escenario no existe.");
+    const rate =
+      saved.rps ??
+      (saved.multiplier ?? 0) * (model.traffic.peak_rps?.value ?? 13);
+    return mockSeries(model, scenario, rate, saved.traffic_step);
+  }
+
   return {
     listModels: () => Promise.resolve([sample]),
     listProjects: async () =>
@@ -199,6 +253,18 @@ export function createMockEditorApi(
       projects.set(project.id, project);
       persist();
       return structuredClone(project);
+    },
+    listScenarios: async (id) => structuredClone(demoScenarios(getProject(id))),
+    saveScenario: async (id, name, input) => {
+      const project = getProject(id);
+      const saved = { ...input, name };
+      const scenarios = new Map(
+        demoScenarios(project).map((item) => [item.name, item]),
+      );
+      scenarios.set(name, saved);
+      project.scenarios = [...scenarios.values()];
+      persist();
+      return structuredClone(saved);
     },
     getVersion: async (id, number) => getVersion(id, number),
     getGraph: (model) => Promise.resolve(mockGraph(model)),
@@ -216,19 +282,33 @@ export function createMockEditorApi(
       persist();
       return saved;
     },
-    run: async (id, number, scenario) =>
-      mockRun(getVersion(id, number).model, scenario),
+    run: async (id, number, scenario) => {
+      const { model } = getVersion(id, number);
+      return mockRun(seriesFor(id, scenario, model));
+    },
+    results: async (id, number, scenario) => {
+      const { model } = getVersion(id, number);
+      return {
+        run: mockRun(seriesFor(id, scenario, model)),
+        cost: mockCosts(model),
+        failure: null,
+        failure_missing: demoFailureMissing,
+        summary: null,
+      };
+    },
     getCosts: async (id, number) => mockCosts(getVersion(id, number).model),
     compare: async (id, base, target, scenario) => {
       const a = getVersion(id, base).model;
       const b = getVersion(id, target).model;
-      const before = summarizeMockSeries(mockSeries(a, scenario));
-      const after = summarizeMockSeries(mockSeries(b, scenario));
+      const before = summarizeMockSeries(seriesFor(id, scenario, a));
+      const after = summarizeMockSeries(seriesFor(id, scenario, b));
       const replicas = {
         path: "deployment.api.replicas",
         a: a.deployment.api.replicas.value,
         b: b.deployment.api.replicas.value,
       };
+      const costA = mockCosts(a);
+      const costB = mockCosts(b);
       return {
         delta: {
           p95_ms: { a: before.p95, b: after.p95 },
@@ -240,8 +320,13 @@ export function createMockEditorApi(
           model_changes: replicas.a === replicas.b ? [] : [replicas],
           model_changes_truncated: false,
         },
-        cost_a: mockCosts(a),
-        cost_b: mockCosts(b),
+        cost_a: costA,
+        cost_b: costB,
+        cost_delta: { a: costA.total.value, b: costB.total.value, missing: [] },
+        failure_a: null,
+        failure_b: null,
+        failure_missing_a: demoFailureMissing,
+        failure_missing_b: demoFailureMissing,
         summary: null,
       };
     },

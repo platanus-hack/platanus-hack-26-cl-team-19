@@ -162,14 +162,25 @@ def _line(mapping: dict, key: str) -> int:
 # ---------- workers en comandos ----------
 
 
-def _workers_in(cmd: str) -> int | None:
+def _workers_in(cmd: str, warnings: list[str] | None = None) -> int | None:
     """Procesos del servidor: ``--workers N`` (uvicorn, gunicorn, Puma...) o ``pm2 -i N``. Sin la opción,
-    los servidores de ``API_CMD`` levantan un solo proceso."""
+    los servidores de ``API_CMD`` levantan un solo proceso.
+
+    ``--workers 0`` no levanta procesos que atiendan requests: se descarta (``None``, queda el valor por
+    defecto, por revisar) y, si se pasa ``warnings``, se avisa ahí (JAJ-108)."""
     if not API_CMD.search(cmd) and not WORKER_CMD.search(cmd):
         return None
     m = PM2_INSTANCES.search(cmd) or WORKERS_FLAG.search(cmd)
     if m:
-        return int(m.group(1))
+        n = int(m.group(1))
+        if n < 1:
+            if warnings is not None:
+                warnings.append(
+                    f"«{cmd}» pide {n} procesos: se ignora, porque con 0 la API no atiende requests. "
+                    "Queda el valor por defecto, por revisar."
+                )
+            return None
+        return n
     return 1 if not WORKER_CMD.search(cmd) else None
 
 
@@ -294,7 +305,7 @@ def read_compose(path: Path, rel: str, repo: Path, findings: Findings) -> None:
                 findings.services.append(existing)
             elif image and not existing.image:  # un override completa al archivo base
                 existing.image = image
-            w = _workers_in(command)
+            w = _workers_in(command, findings.warnings)
             if w:
                 existing.workers = num(w, "procesos", _workers_source(w, command, cmd_where), cmd_at)
             if command:
@@ -354,7 +365,7 @@ def read_kubernetes(path: Path, rel: str, findings: Findings) -> None:
                     svc.vcpu = num(c, "vCPU", f"resources.{part}.cpu de {name}", f"{rel}:{_line(r, 'cpu')}")
                 if svc.memory_gb is None and "memory" in r and (g := _memory_gb(r["memory"])) is not None:
                     svc.memory_gb = num(g, "GB", f"resources.{part}.memory de {name}", f"{rel}:{_line(r, 'memory')}")
-            w = _workers_in(command)
+            w = _workers_in(command, findings.warnings)
             if w:
                 svc.workers = num(w, "procesos", _workers_source(w, command, f"el contenedor de {name}"), at)
             svc.queue = _dedicated_celery_queue(command)
@@ -442,7 +453,7 @@ def read_render(path: Path, rel: str, findings: Findings) -> None:
                     f"numInstances de {s.name}",
                     f"{rel}:{_line(svc, 'numInstances')}",
                 )
-            w = _workers_in(_cmd_text(svc.get("startCommand")))
+            w = _workers_in(_cmd_text(svc.get("startCommand")), findings.warnings)
             if w:
                 cmd = _cmd_text(svc.get("startCommand"))
                 s.workers = num(
@@ -556,7 +567,7 @@ def read_procfile(path: Path, rel: str, findings: Findings) -> None:
             else "other"
         )
         s = Service(kind.strip(), role, f"{rel}:{i}", source_file=f"procfile:{rel}")
-        w = _workers_in(cmd)
+        w = _workers_in(cmd, findings.warnings)
         if w:
             s.workers = num(w, "procesos", _workers_source(w, cmd, f"el Procfile ({kind.strip()})"), f"{rel}:{i}")
         findings.services.append(s)
@@ -628,7 +639,7 @@ def scan_deployment(repo: Path) -> Findings:
             hit = dockerfile_cmd(path, rel)
             if hit and API_CMD.search(hit[0]):
                 svc = Service("app", "api", hit[1], source_file=f"dockerfile:{rel}")
-                w = _workers_in(hit[0])
+                w = _workers_in(hit[0], findings.warnings)
                 if w:
                     svc.workers = num(w, "procesos", _workers_source(w, hit[0], "el CMD del Dockerfile"), hit[1])
                 findings.services.append(svc)

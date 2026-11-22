@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
-import { Ellipsis, Loader2, Play } from "@lucide/vue";
+import { Ellipsis, GitCompare, Loader2, Pause, Play } from "@lucide/vue";
+import { until } from "@vueuse/core";
+import AddRepositoryDialog from "@/components/editor/AddRepositoryDialog.vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
+import EditorFailureCost from "@/components/editor/EditorFailureCost.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
+import EditorReportsPanel from "@/components/editor/EditorReportsPanel.vue";
 import EditorToolRail from "@/components/editor/EditorToolRail.vue";
 import EditorVersionCosts from "@/components/editor/EditorVersionCosts.vue";
+import ProjectScenarioActions from "@/components/editor/ProjectScenarioActions.vue";
+import ScenarioTreePrototype from "@/components/editor/ScenarioTreePrototype.vue";
 import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
-import ScenarioSelect from "@/components/editor/ScenarioSelect.vue";
+import ScenarioOverrideControls from "@/components/editor/ScenarioOverrideControls.vue";
+import ScenarioHeader from "@/components/editor/ScenarioHeader.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
+import SimulationRunStatus from "@/components/editor/SimulationRunStatus.vue";
+import SimulationRunSummary from "@/components/editor/SimulationRunSummary.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
 import type { EditorSection } from "@/components/editor/types";
@@ -27,6 +36,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import type { ProjectScenarioInput } from "@/services/editor-api";
+import { MAX_REPOS } from "@/services/github-api";
 import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
@@ -39,18 +51,37 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { reportPath } from "@/services/reports-api";
+import {
+  costComponentLabel,
   simulationProvenance,
   toBottleneck,
   toComparisonRows,
   toEdges,
+  toFlows,
   toInspectedNode,
+  toRunDelta,
+  toRunSummary,
   toUnsimulatedNode,
   toNodes,
   toPlayback,
   toVersionChanges,
 } from "@/services/editor-view";
+
+import {
+  draftFromScenario,
+  effectiveScenario,
+  toScenarioOverrides,
+} from "@/services/scenario-overrides";
 
 definePageMeta({
   middleware: "supabase-session",
@@ -65,23 +96,33 @@ const {
   projectGroup,
   version,
   graph,
+  parentGraph,
   scenario,
   run,
+  results,
   costs,
   costsError,
   comparison,
   scenarios,
+  savedScenarios,
   versions,
   pending,
   error,
+  simulationError,
+  runContext,
   loadModels,
   openSample,
   openProject,
   openVersion,
-  saveReplicas,
+  reloadVersions,
+  saveScenario,
+  createVersion,
+  acceptChatProposal,
   simulate,
   loadCosts,
   compare,
+  lastReport,
+  reportsVersion,
 } = useEditorProject();
 
 const section = ref<EditorSection>("scenarios");
@@ -89,6 +130,7 @@ const sectionTitles = {
   scenarios: "Escenarios",
   components: "Componentes",
   versions: "Versiones",
+  reports: "Reportes",
 };
 const view = ref<"editor" | "compare">("editor");
 const selectedNode = ref<string | null>(null);
@@ -97,29 +139,51 @@ const cursor = ref(0);
 const playing = ref(false);
 const base = ref("");
 const target = ref("");
-const replicas = ref<string | number>("");
-const currentReplicas = computed(
-  () => version.value?.model.deployment.api.replicas.value,
+
+const activeScenario = computed(() =>
+  savedScenarios.value.find(({ name }) => name === scenario.value),
 );
-const canSave = computed(() => {
+const hasPeak = computed(
+  () => (version.value?.model.traffic.peak_rps?.value ?? 0) > 0,
+);
+const versionForm = ref(false);
+const versionNote = ref("");
+const replicas = ref<string | number>("");
+const canSaveVersion = computed(() => {
   const count = Number(replicas.value);
-  return (
-    Number.isInteger(count) &&
-    count >= 1 &&
-    count <= 50 &&
-    count !== currentReplicas.value
-  );
+  return Number.isInteger(count) && count >= 1 && count <= 50;
 });
 const busy = computed(() => !!pending.value);
 const provenance = isMock
   ? { origin: "assumed" as const, source: "Datos de demostración" }
   : simulationProvenance;
 
+// El repo principal, para abrir en GitHub el archivo:línea del resultado (JAJ-129).
+const primaryRepository = computed(() => {
+  if (isMock) return undefined;
+  const group = projectGroup.value;
+  if (!group) return undefined;
+  const repos = group.repositories ?? [{ id: group.id, fullName: group.name }];
+  return repos.find((repo) => repo.primary) ?? repos[0];
+});
+// El diagrama sigue el segundo que se reproduce (JAJ-129).
 const nodes = computed(() =>
-  graph.value ? toNodes(graph.value, run.value) : [],
+  graph.value
+    ? toNodes(graph.value, run.value, version.value?.model, {
+        second: run.value ? cursor.value : undefined,
+        parent: parentGraph.value,
+      })
+    : [],
 );
 const edges = computed(() => (graph.value ? toEdges(graph.value) : []));
-const bottleneck = computed(() => (run.value ? toBottleneck(run.value) : null));
+const flows = computed(() =>
+  graph.value && run.value ? toFlows(graph.value, run.value, cursor.value) : [],
+);
+const bottleneck = computed(() =>
+  run.value
+    ? toBottleneck(run.value, graph.value, primaryRepository.value)
+    : null,
+);
 const inspected = computed(() => {
   const node = graph.value?.nodes.find(
     (node) => node.id === selectedNode.value,
@@ -130,10 +194,102 @@ const inspected = computed(() => {
   )?.fullName;
   return (
     toUnsimulatedNode(node, primary) ??
-    toInspectedNode(node, run.value, provenance)
+    toInspectedNode(node, run.value, provenance, primaryRepository.value)
   );
 });
+// Los campos muestran los valores que el escenario tiene en la versión abierta (con lo aceptado en el chat).
+const versionScenario = computed(() =>
+  effectiveScenario(activeScenario.value, version.value?.model),
+);
+const baseDraft = computed(() =>
+  draftFromScenario(versionScenario.value, version.value?.model),
+);
+const overrideDraft = ref(structuredClone(toRaw(baseDraft.value)));
+watch(baseDraft, (value) => {
+  overrideDraft.value = structuredClone(toRaw(value));
+});
+const runOverrides = computed(() =>
+  toScenarioOverrides(
+    overrideDraft.value,
+    baseDraft.value.weights as Record<string, number>,
+  ),
+);
+const dependencies = computed(() =>
+  (graph.value?.nodes ?? []).filter(({ id }) =>
+    graph.value?.slowdown_targets?.includes(id),
+  ),
+);
+const selectedDependency = computed(() =>
+  dependencies.value.find(({ id }) => id === selectedNode.value),
+);
+const overrideError =
+  "Usa pesos desde 0, una demora mayor que 0 y hasta ×100, una conversión mayor que 0 y hasta 100 % y un ticket mayor que 0.";
+
+const displayedCosts = computed(() => results.value?.cost ?? costs.value);
 const playback = computed(() => (run.value ? toPlayback(run.value) : null));
+const simulating = computed(() => pending.value === "Simulando…");
+const lastRunOverrides = ref<string>();
+const canResume = computed(
+  () =>
+    !!playback.value &&
+    cursor.value < playback.value.frames.length - 1 &&
+    lastRunOverrides.value === JSON.stringify(runOverrides.value),
+);
+const simulationState = computed(() => {
+  if (simulating.value) return "running";
+  if (simulationError.value) return "error";
+  return run.value ? "done" : "idle";
+});
+const simulatedContext = computed(() =>
+  runContext.value && run.value
+    ? {
+        ...runContext.value,
+        scenario:
+          scenarios.value.find((item) => item.id === runContext.value?.scenario)
+            ?.label ?? runContext.value.scenario,
+        rps: run.value.rps,
+        seed: run.value.seed,
+      }
+    : null,
+);
+const staleRun = computed(
+  () =>
+    !!run.value &&
+    lastRunOverrides.value !== JSON.stringify(runOverrides.value),
+);
+const runSummary = computed(() =>
+  run.value ? toRunSummary(run.value, provenance) : [],
+);
+const runSaturation = computed(() => {
+  const saturation = run.value?.saturation;
+  if (!saturation?.saturated || !saturation.message) return null;
+  return {
+    message: saturation.message,
+    provenance: {
+      origin: "assumed" as const,
+      source:
+        saturation.source ??
+        "Umbrales de saturación elegidos por el equipo de Branchpoint",
+    },
+  };
+});
+// JAJ-141: la corrida que estaba en pantalla antes de abrir una versión del agente
+const baseline = shallowRef<{
+  version: number;
+  label: string;
+  run: NonNullable<typeof run.value>;
+} | null>(null);
+const parentNumber = computed(() => version.value?.parent ?? null);
+const runDelta = computed(() =>
+  baseline.value && run.value && baseline.value.version === parentNumber.value
+    ? toRunDelta(baseline.value.run, run.value)
+    : [],
+);
+const simulationLabel = computed(() => {
+  if (simulating.value) return "Simulando…";
+  if (playing.value) return "Pausar";
+  return canResume.value ? "Reanudar" : "Simular";
+});
 const rows = computed(() =>
   comparison.value ? toComparisonRows(comparison.value, provenance) : [],
 );
@@ -142,6 +298,12 @@ const changes = computed(() =>
 );
 
 const route = useRoute();
+const scenarioTreePreview = computed(
+  () =>
+    import.meta.dev &&
+    route.query.escenarios !== "selector" &&
+    !!projectId.value,
+);
 const projectId = computed(() =>
   typeof route.query.project === "string" ? route.query.project : "",
 );
@@ -161,11 +323,38 @@ const repositories = computed(() => {
   }));
 });
 
+// Sumar repos (JAJ-125): solo a un proyecto que salió de un repo, hasta MAX_REPOS, con la API real.
+const addingRepository = ref(false);
+const projectRepoNames = computed(() =>
+  (projectGroup.value?.repositories ?? []).map((repo) => repo.fullName),
+);
+const canAddRepository = computed(
+  () =>
+    !isMock &&
+    !!projectId.value &&
+    projectRepoNames.value.length > 0 &&
+    projectRepoNames.value.length < MAX_REPOS,
+);
+const primaryRepoName = computed(
+  () =>
+    projectGroup.value?.repositories?.find((repo) => repo.primary)?.fullName,
+);
+
+async function repositoryAdded() {
+  if (projectId.value) await openProject(projectId.value, repoId.value);
+}
+
 function selectRepository(id: string) {
   if (id === project.value?.id || !projectId.value) return;
   return navigateTo({
     path: "/editor",
-    query: { project: projectId.value, repo: id },
+    query: {
+      project: projectId.value,
+      repo: id,
+      ...(route.query.escenarios === "selector"
+        ? { escenarios: "selector" }
+        : {}),
+    },
   });
 }
 
@@ -183,8 +372,13 @@ watch([base, target], () => {
 watch(run, (value) => {
   cursor.value = 0;
   playing.value = !!value;
+  lastRunOverrides.value = value
+    ? JSON.stringify(runOverrides.value)
+    : undefined;
 });
 watch(version, (detail) => {
+  versionForm.value = false;
+  versionNote.value = "";
   selectedNode.value = null;
   replicas.value = detail?.model.deployment.api.replicas.value ?? "";
 });
@@ -198,6 +392,65 @@ function showCompare(baseId?: string) {
       versions.value.find((entry) => entry.id !== target.value)?.id ?? "";
   }
   view.value = "compare";
+}
+
+/** Lo que estaba en pantalla antes de abrir una versión del chat: la corrida y los ajustes. */
+function snapshotRun() {
+  return {
+    before:
+      version.value && run.value
+        ? {
+            version: version.value.number,
+            label: version.value.label,
+            run: run.value,
+          }
+        : null,
+    draft: structuredClone(toRaw(overrideDraft.value)),
+  };
+}
+
+/**
+ * JAJ-141: con la versión nueva ya abierta, se simula con los mismos ajustes (abrir una versión los
+ * limpia) y se recuerda la corrida anterior para el antes y después.
+ */
+async function simulateOpened(
+  snapshot: ReturnType<typeof snapshotRun>,
+  keepOverrides = true,
+) {
+  if (keepOverrides) overrideDraft.value = snapshot.draft;
+  baseline.value = snapshot.before;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (runOverrides.value) await simulate(runOverrides.value);
+}
+
+/**
+ * El agente creó una versión (JAJ-141): se abre y se simula con el mismo escenario y ajustes, para
+ * ver el efecto en el diagrama. También lo usa el botón «Abrir y simular» de cada versión del chat.
+ */
+async function openAndSimulate(number: number) {
+  const snapshot = snapshotRun();
+  await until(busy).toBe(false);
+  await reloadVersions();
+  await openVersion(number);
+  if (version.value?.number !== number) return;
+  await simulateOpened(snapshot);
+}
+
+function retrySimulation() {
+  if (runOverrides.value && !busy.value) void simulate(runOverrides.value);
+}
+
+function toggleSimulation() {
+  if (playing.value) {
+    playing.value = false;
+    return;
+  }
+  if (!runOverrides.value || busy.value) return;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (canResume.value) playing.value = true;
+  else void simulate(runOverrides.value);
 }
 
 async function createExample(sample: string) {
@@ -227,8 +480,15 @@ const {
   evidence,
   send,
   reset,
+  persist: persistChat,
   dismissEvidence,
-} = useEditorChat(computed(() => project.value?.id));
+} = useEditorChat(
+  computed(() => project.value?.id),
+  {
+    // JAJ-141: una herramienta que guarda una versión (ej. apply_log_traffic) la abre y la simula
+    onVersion: (number) => void openAndSimulate(number),
+  },
+);
 // adjuntos del chat (IA-9): imágenes y logs que el agente usa como evidencia
 const chatAttachments = useChatAttachments(computed(() => project.value?.id));
 const attachNotice = ref("");
@@ -268,16 +528,71 @@ async function sendChat(text: string) {
   }));
   chatAttachments.clear();
   attachNotice.value = "";
-  await send(text, usingPersonalKey.value ? "personal" : "team", attached);
+  await send(text, usingPersonalKey.value ? "personal" : "team", attached, {
+    version: version.value?.number,
+    scenario: scenario.value || undefined,
+  });
   await refreshChatSettings();
 }
-async function saveVersion() {
-  if (canSave.value) await saveReplicas(Number(replicas.value));
+async function applyChatProposal(id: string) {
+  const message = messages.value.find((item) => item.id === id);
+  if (
+    message?.role !== "chat-proposal" ||
+    message.state !== "idle" ||
+    busy.value
+  )
+    return;
+  if (version.value?.number !== message.proposal.draft.base) {
+    message.error =
+      "La versión base cambió. Abre esa versión o pide una propuesta actualizada.";
+    return;
+  }
+  message.error = undefined;
+  message.state = "pending";
+  const snapshot = snapshotRun();
+  const accepted = await acceptChatProposal(message.proposal);
+  message.state = accepted ? "applied" : "idle";
+  message.version = accepted?.label;
+  if (!accepted)
+    message.error = error.value || "No se pudo aplicar la propuesta.";
+  await persistChat();
+  // JAJ-141: la versión aceptada se simula sola; si la propuesta cambió el escenario, sin los ajustes
+  // anteriores, que eran del escenario de antes
+  if (accepted)
+    await simulateOpened(snapshot, !message.proposal.draft.scenario);
+}
+
+function discardChatProposal(id: string) {
+  const message = messages.value.find((item) => item.id === id);
+  if (message?.role === "chat-proposal" && message.state === "idle") {
+    message.error = undefined;
+    message.state = "discarded";
+    void persistChat();
+  }
+}
+
+async function submitScenario(name: string, input: ProjectScenarioInput) {
+  if (!(await saveScenario(name, input)))
+    return error.value || "No se pudo guardar el escenario.";
+}
+async function submitVersion() {
+  if (
+    canSaveVersion.value &&
+    (await createVersion(Number(replicas.value), versionNote.value))
+  ) {
+    versionForm.value = false;
+  }
+}
+function openVersionDraft() {
+  replicas.value = version.value?.model.deployment.api.replicas.value ?? "";
+  versionNote.value = "";
+  versionForm.value = true;
 }
 </script>
 
 <template>
   <EditorShell
+    :sidebar-default-open="scenarioTreePreview ? true : undefined"
     :repository-name="
       repositories.find((repo) => repo.id === project?.id)?.name ??
       project?.name
@@ -285,6 +600,40 @@ async function saveVersion() {
     :version="version?.label"
     title="Editores"
   >
+    <template v-if="project && version" #version>
+      <Select
+        :model-value="String(version.number)"
+        :disabled="busy"
+        @update:model-value="openVersion(Number($event))"
+      >
+        <SelectTrigger
+          aria-label="Versión"
+          size="sm"
+          class="gap-1 border-0 bg-transparent! px-1.5 font-mono text-sm text-muted-foreground shadow-none hover:text-foreground dark:bg-transparent!"
+        >
+          <SelectValue>{{ version.label }}</SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end" class="max-w-80">
+          <SelectGroup>
+            <SelectItem
+              v-for="entry in versions"
+              :key="entry.id"
+              :value="entry.id"
+              :text-value="entry.label"
+            >
+              <span class="flex min-w-0 flex-col items-start">
+                <span class="font-mono">{{ entry.label }}</span>
+                <span
+                  v-if="entry.summary"
+                  class="max-w-64 truncate text-xs text-muted-foreground"
+                  >{{ entry.summary }}</span
+                >
+              </span>
+            </SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </template>
     <template v-if="project" #nav>
       <Tabs :model-value="view" @update:model-value="changeView">
         <TabsList variant="line" aria-label="Vista">
@@ -294,6 +643,26 @@ async function saveVersion() {
           </TabsTrigger>
         </TabsList>
       </Tabs>
+      <Button
+        size="sm"
+        class="w-8 sm:w-28"
+        :disabled="busy || (!playing && (!scenario || !graph || !runOverrides))"
+        @click="toggleSimulation"
+      >
+        <Loader2
+          v-if="simulating"
+          data-icon="inline-start"
+          class="animate-spin"
+          aria-hidden="true"
+        />
+        <Pause
+          v-else-if="playing"
+          data-icon="inline-start"
+          aria-hidden="true"
+        />
+        <Play v-else data-icon="inline-start" aria-hidden="true" />
+        <span class="sr-only sm:not-sr-only">{{ simulationLabel }}</span>
+      </Button>
     </template>
 
     <template v-if="projectId" #sidebar>
@@ -301,9 +670,33 @@ async function saveVersion() {
         :repositories="repositories"
         :active-id="project?.id"
         :disabled="busy"
-        :can-connect="false"
+        :can-connect="canAddRepository"
+        connect-label="Agregar repositorio"
         projects-link="/projects"
         @select="selectRepository"
+        @connect="addingRepository = true"
+      >
+        <template
+          v-if="scenarioTreePreview"
+          #repository-children="{ repository }"
+        >
+          <!-- los escenarios son del proyecto: cuelgan solo del repo principal -->
+          <ScenarioTreePrototype
+            v-if="repository.id === project?.id && repository.primary !== false"
+            v-model="scenario"
+            :scenarios="scenarios"
+            :disabled="busy"
+          />
+        </template>
+      </RepositorySidebar>
+      <AddRepositoryDialog
+        v-if="canAddRepository"
+        v-model:open="addingRepository"
+        :project-id="projectId"
+        :parent="version ?? undefined"
+        :existing="projectRepoNames"
+        :primary="primaryRepoName"
+        @added="repositoryAdded"
       />
     </template>
 
@@ -319,7 +712,7 @@ async function saveVersion() {
 
     <template #status>
       <p
-        v-if="pending"
+        v-if="pending && !simulating"
         role="status"
         class="border-b border-border px-4 py-2 text-sm text-muted-foreground"
       >
@@ -389,10 +782,20 @@ async function saveVersion() {
         :disabled="busy"
       >
         <div class="flex flex-col gap-3">
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
           <Button
             class="self-start"
-            :disabled="busy || !scenario"
-            @click="compare(base, target)"
+            :disabled="busy || !scenario || !runOverrides"
+            @click="runOverrides && compare(base, target, runOverrides)"
           >
             Ejecutar comparación
           </Button>
@@ -406,6 +809,40 @@ async function saveVersion() {
             El backend devolvió solo los primeros 100 cambios.
           </p>
         </div>
+        <template v-if="comparison" #results>
+          <p
+            v-if="comparison.cost_delta.missing.length"
+            class="text-sm text-muted-foreground"
+          >
+            La diferencia de costo incluye solo los componentes con precio en
+            ambas versiones. Quedan fuera:
+            {{
+              comparison.cost_delta.missing.map(costComponentLabel).join(", ")
+            }}.
+          </p>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <section
+              class="flex min-w-0 flex-col gap-4 rounded-md border border-border p-4"
+            >
+              <h3 class="font-mono text-sm font-semibold">v{{ base }}</h3>
+              <EditorVersionCosts :costs="comparison.cost_a" />
+              <EditorFailureCost
+                :failure="comparison.failure_a"
+                :missing="comparison.failure_missing_a"
+              />
+            </section>
+            <section
+              class="flex min-w-0 flex-col gap-4 rounded-md border border-border p-4"
+            >
+              <h3 class="font-mono text-sm font-semibold">v{{ target }}</h3>
+              <EditorVersionCosts :costs="comparison.cost_b" />
+              <EditorFailureCost
+                :failure="comparison.failure_b"
+                :missing="comparison.failure_missing_b"
+              />
+            </section>
+          </div>
+        </template>
       </VersionCompare>
     </template>
 
@@ -414,31 +851,43 @@ async function saveVersion() {
     </template>
 
     <template #panel>
-      <EditorToolPanel :title="sectionTitles[section]">
+      <EditorToolPanel
+        :title="sectionTitles[section]"
+        :hide-title="section === 'scenarios'"
+      >
         <template v-if="section === 'scenarios'">
-          <ScenarioSelect
+          <ScenarioHeader
             v-model="scenario"
             :options="scenarios"
             :disabled="busy"
-            hide-label
-          />
-          <Button
-            :disabled="busy || !scenario || !graph"
-            @click="
-              panel = 'simulation';
-              simulate();
-            "
           >
-            <Loader2
-              v-if="pending === 'Simulando…'"
-              data-icon="inline-start"
-              class="animate-spin"
-              aria-hidden="true"
-            />
-            <Play v-else data-icon="inline-start" aria-hidden="true" />
-            {{ pending === "Simulando…" ? "Simulando…" : "Simular" }}
-          </Button>
+            <template #actions>
+              <ProjectScenarioActions
+                v-if="version"
+                :active="activeScenario"
+                :names="savedScenarios.map(({ name }) => name)"
+                :has-peak="hasPeak"
+                :busy="busy"
+                :save="submitScenario"
+              />
+            </template>
+          </ScenarioHeader>
+          <ScenarioOverrideControls
+            v-if="!isMock && graph"
+            v-model="overrideDraft"
+            :endpoints="graph.endpoints ?? []"
+            :dependencies="dependencies"
+            :disabled="busy"
+          />
+          <p v-if="!runOverrides" role="alert" class="text-xs text-destructive">
+            {{ overrideError }}
+          </p>
         </template>
+        <EditorReportsPanel
+          v-else-if="section === 'reports'"
+          :project-id="project?.id ?? null"
+          :refresh-key="reportsVersion"
+        />
         <ComponentList
           v-else-if="section === 'components'"
           :nodes="nodes"
@@ -454,11 +903,22 @@ async function saveVersion() {
             @open="openVersion(Number($event))"
             @compare="showCompare"
           />
-          <form
-            v-if="version"
-            class="flex flex-col gap-2 border-t border-border pt-4"
-            @submit.prevent="saveVersion"
+          <Button
+            v-if="version && !versionForm"
+            variant="outline"
+            :disabled="busy"
+            @click="openVersionDraft"
           >
+            Nueva versión
+          </Button>
+          <form
+            v-if="version && versionForm"
+            class="flex flex-col gap-2 border-t border-border pt-4"
+            @submit.prevent="submitVersion"
+          >
+            <p class="text-xs text-muted-foreground">
+              Versión base {{ version.label }}
+            </p>
             <Label for="api-replicas">Réplicas de la API</Label>
             <Input
               id="api-replicas"
@@ -470,9 +930,29 @@ async function saveVersion() {
               required
               :disabled="busy"
             />
-            <Button type="submit" variant="outline" :disabled="busy || !canSave"
-              >Guardar versión</Button
-            >
+            <Label for="version-note">Nota de la versión</Label>
+            <Textarea
+              id="version-note"
+              v-model="versionNote"
+              maxlength="500"
+              :disabled="busy"
+            />
+            <div class="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                :disabled="busy"
+                @click="versionForm = false"
+                >Cancelar</Button
+              >
+              <Button
+                type="submit"
+                size="sm"
+                :disabled="busy || !canSaveVersion"
+                >Crear versión</Button
+              >
+            </div>
           </form>
         </template>
       </EditorToolPanel>
@@ -489,6 +969,25 @@ async function saveVersion() {
             : "Simula un escenario para ver el uso del componente."
         }}
       </p>
+      <div
+        v-if="!isMock && selectedDependency"
+        class="flex flex-col gap-2 border-t border-border p-4"
+      >
+        <Label for="editor-node-delay">Demora en la corrida (×)</Label>
+        <Input
+          id="editor-node-delay"
+          v-model="overrideDraft.slowdowns[selectedDependency.id]"
+          type="number"
+          min="0"
+          max="100"
+          step="any"
+          placeholder="Base"
+          :disabled="busy"
+        />
+        <p class="text-xs text-muted-foreground">
+          {{ selectedDependency.label }} · Mayor que 0 y hasta ×100
+        </p>
+      </div>
     </template>
 
     <template #canvas>
@@ -497,6 +996,8 @@ async function saveVersion() {
         :nodes="nodes"
         :edges="edges"
         :bottleneck="bottleneck"
+        :flows="flows"
+        :animating="playing"
         :selected-id="selectedNode"
         @select="selectedNode = $event"
       />
@@ -605,6 +1106,7 @@ async function saveVersion() {
         <EditorAgentPanel
           :messages="messages"
           :thinking="thinking"
+          :proposal-busy="busy"
           :disabled="chatDisabled"
           :attachments="chatAttachments.drafts.value"
           :can-attach="chatAttachments.enabled"
@@ -614,6 +1116,9 @@ async function saveVersion() {
           @remove-attachment="chatAttachments.remove"
           @dismiss-evidence="dismissRequest"
           @send="sendChat"
+          @apply="applyChatProposal"
+          @discard="discardChatProposal"
+          @open-version="openAndSimulate"
           @reset="reset"
         >
           <template #intro>
@@ -624,35 +1129,111 @@ async function saveVersion() {
     </template>
 
     <template #metrics>
-      <Tabs v-model="panel" class="gap-0">
-        <TabsList variant="line" aria-label="Panel de análisis" class="mx-4">
+      <Tabs v-model="panel" class="min-h-0 flex-1 gap-0">
+        <TabsList
+          variant="line"
+          aria-label="Panel de análisis"
+          class="mx-4 shrink-0"
+        >
           <TabsTrigger value="simulation">Simulación</TabsTrigger>
           <TabsTrigger value="costs">Costos</TabsTrigger>
         </TabsList>
-        <TabsContent value="simulation" class="flex flex-col gap-3 p-4">
-          <SimulationPanel
-            v-if="playback"
-            v-model:minute="cursor"
-            v-model:playing="playing"
-            :frames="playback.frames"
-            :phases="playback.phases"
-            :provenance="provenance"
-            time-unit="second"
-          />
-          <p v-else class="text-sm text-muted-foreground">
-            Elige un escenario y pulsa Simular para reproducir el resultado.
-          </p>
-          <ul
-            v-if="run?.warnings.length"
-            class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
-          >
-            <li v-for="warning in run.warnings" :key="warning">
-              {{ warning }}
-            </li>
-          </ul>
+        <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
+          <div class="flex flex-col gap-3">
+            <SimulationRunStatus
+              :state="simulationState"
+              :context="simulatedContext"
+              :stale="staleRun"
+              :error="simulationError"
+              @retry="retrySimulation"
+            />
+            <section
+              v-if="
+                simulationState === 'done' && (runDelta.length || parentNumber)
+              "
+              aria-label="Frente a la versión anterior"
+              class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+            >
+              <template v-if="runDelta.length">
+                <span class="text-muted-foreground"
+                  >Frente a {{ baseline?.label }}:</span
+                >
+                <span
+                  v-for="row in runDelta"
+                  :key="row.label"
+                  class="font-mono tabular-nums"
+                  >{{ row.label }} {{ row.before }} →
+                  <span class="font-semibold">{{ row.after }}</span></span
+                >
+              </template>
+              <Button
+                v-if="parentNumber && versions.length > 1"
+                type="button"
+                size="xs"
+                variant="outline"
+                :disabled="busy"
+                @click="showCompare(String(parentNumber))"
+              >
+                <GitCompare data-icon="inline-start" aria-hidden="true" />
+                Ver comparación con v{{ parentNumber }}
+              </Button>
+            </section>
+            <SimulationPanel
+              v-if="playback"
+              v-model:minute="cursor"
+              v-model:playing="playing"
+              :frames="playback.frames"
+              :phases="playback.phases"
+              :provenance="provenance"
+              time-unit="second"
+            />
+            <p
+              v-else-if="simulationState === 'idle'"
+              class="text-sm text-muted-foreground"
+            >
+              Elige un escenario y pulsa Simular para reproducir el resultado.
+            </p>
+            <SimulationRunSummary
+              v-if="run"
+              :items="runSummary"
+              :saturation="runSaturation"
+            />
+            <NuxtLink
+              v-if="lastReport && project"
+              :to="reportPath(project.id, lastReport.id)"
+              class="text-sm font-medium underline underline-offset-4"
+            >
+              Ver el reporte de esta corrida
+            </NuxtLink>
+            <section v-if="run?.overrides?.length" class="flex flex-col gap-1">
+              <h3 class="text-sm font-semibold">Ajustes aplicados</h3>
+              <ul
+                class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+              >
+                <li v-for="adjustment in run.overrides" :key="adjustment">
+                  {{ adjustment }}
+                </li>
+              </ul>
+            </section>
+            <ul
+              v-if="run?.warnings.length"
+              class="list-disc space-y-1 ps-4 text-xs text-muted-foreground"
+            >
+              <li v-for="warning in run.warnings" :key="warning">
+                {{ warning }}
+              </li>
+            </ul>
+          </div>
         </TabsContent>
-        <TabsContent value="costs" class="p-4">
-          <EditorVersionCosts v-if="costs" :costs="costs" />
+        <TabsContent value="costs" class="min-h-0 overflow-y-auto p-4">
+          <div v-if="displayedCosts" class="flex flex-col gap-4">
+            <EditorVersionCosts :costs="displayedCosts" />
+            <EditorFailureCost
+              v-if="results"
+              :failure="results.failure"
+              :missing="results.failure_missing"
+            />
+          </div>
           <div v-else-if="costsError" class="flex flex-col items-start gap-3">
             <p class="text-sm text-muted-foreground">{{ costsError }}</p>
             <Button variant="outline" @click="loadCosts">Reintentar</Button>

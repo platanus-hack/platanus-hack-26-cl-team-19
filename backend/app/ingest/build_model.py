@@ -28,12 +28,18 @@ from app.catalog import load_catalog
 RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
 HOURS_MONTH = 730
 SECONDS_MONTH = 30 * 86400
-TODAY = date.today().isoformat()
+
+
+def today() -> str:
+    """La fecha de hoy, al momento de armar el número. Antes era una constante del módulo: en un servidor
+    con días arriba, los modelos ingeridos salían con la fecha en que arrancó (JAJ-109)."""
+    return date.today().isoformat()
 
 
 # ---------- números con procedencia ----------
 def num(value, unit, label, source, *, default=False, **extra) -> dict:
-    out = {"value": value, "unit": unit, "label": label, "source": source, "date": extra.pop("date", TODAY)}
+    when = extra.pop("date") if "date" in extra else today()
+    out = {"value": value, "unit": unit, "label": label, "source": source, "date": when}
     if label == "SUPUESTO" and default:
         out["needs_review"] = True  # valor por defecto sin respaldo: la UI lo resalta hasta que el usuario lo confirme
     out.update(extra)
@@ -47,7 +53,7 @@ def from_catalog(entry: dict, **over) -> dict:
         over.pop("label", entry["label"]),
         over.pop("source", entry["source"]),
         default=True,
-        date=entry.get("date", TODAY),
+        date=entry["date"] if "date" in entry else today(),
         **over,
     )
 
@@ -649,7 +655,8 @@ def checks(model: dict) -> dict:
     for name, sc in t["scenarios"].items():
         rps = sc["rps"]["value"]
         valid = {k: v for k, v in caps.items() if v["value"]}
-        bottleneck = min(valid, key=lambda k: valid[k]["value"])
+        # sin ninguna capacidad con valor (ej. sin consultas y sin CPU), no hay cuello que nombrar (JAJ-108)
+        bottleneck = min(valid, key=lambda k: valid[k]["value"]) if valid else None
         sessions_h = rps * 3600 / t["requests_per_session"]["value"]
         at_stake = derived(
             round(sessions_h * biz["conversion"]["value"] * biz["ticket_usd"]["value"], 0),
@@ -768,7 +775,7 @@ def build_from_graph(graph: dict, repo_name: str, answers: dict, *, iac: dict, w
         "schema": "branchpoint.model/v1",
         "repo": {
             "path": repo_name,
-            "extracted_at": TODAY,
+            "extracted_at": today(),
             "stats": {k: v for k, v in graph["stats"].items() if not k.startswith("seconds")},
         },
         "deployment": deployment,

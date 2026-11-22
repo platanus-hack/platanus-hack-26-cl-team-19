@@ -70,10 +70,9 @@ def _secondary_service(r: RepoResult) -> dict[str, Any]:
     return service
 
 
-def merge_repos(primary: RepoResult, secondaries: list[RepoResult]) -> dict[str, Any]:
-    """El modelo del proyecto: el del principal, con los secundarios como servicios no simulados."""
-    model = copy.deepcopy(primary.model)
-    assert model is not None, "el principal tiene que tener modelo"
+def _attach(model: dict[str, Any], primary_full_name: str, secondaries: list[RepoResult]) -> list[str]:
+    """Suma los secundarios al modelo (lo cambia): su servicio, sus componentes que el modelo no tenga ya y
+    los pasos externos que los nombran. Devuelve los enlaces ``"paso → repo"`` que armó."""
     dep = model.setdefault("deployment", {})
     services: list[dict[str, Any]] = dep.setdefault("services", [])
     taken = {(str(s.get("name", "")).lower(), s.get("role")) for s in services}
@@ -112,22 +111,42 @@ def merge_repos(primary: RepoResult, secondaries: list[RepoResult]) -> dict[str,
 
     for s in services:
         if s.get("repo") is None and s.get("origin"):
-            s.setdefault("repo", primary.full_name)
+            s.setdefault("repo", primary_full_name)
+    return linked
+
+
+def _source(r: RepoResult, primary: bool) -> dict[str, Any]:
+    return {
+        "full_name": r.full_name,
+        "branch": r.branch,
+        "commit": r.commit,
+        "primary": primary,
+        "analysis": ((r.model or {}).get("repo") or {}).get("source", {}).get("analysis"),
+        **({"error": r.error} if r.error else {}),
+    }
+
+
+def merge_repos(primary: RepoResult, secondaries: list[RepoResult]) -> dict[str, Any]:
+    """El modelo del proyecto: el del principal, con los secundarios como servicios no simulados."""
+    model = copy.deepcopy(primary.model)
+    assert model is not None, "el principal tiene que tener modelo"
+    linked = _attach(model, primary.full_name, secondaries)
     repo = model.setdefault("repo", {})
-    repo["sources"] = [
-        {
-            "full_name": r.full_name,
-            "branch": r.branch,
-            "commit": r.commit,
-            "primary": r is primary,
-            "analysis": ((r.model or {}).get("repo") or {}).get("source", {}).get("analysis"),
-            **({"error": r.error} if r.error else {}),
-        }
-        for r in (primary, *secondaries)
-    ]
+    repo["sources"] = [_source(r, r is primary) for r in (primary, *secondaries)]
     if linked:
         repo["links"] = linked
     return model
+
+
+def add_repos(model: dict[str, Any], primary_full_name: str, secondaries: list[RepoResult]) -> dict[str, Any]:
+    """Una copia del modelo de una versión con más repos secundarios: los que ya tenía se conservan."""
+    merged = copy.deepcopy(model)
+    linked = _attach(merged, primary_full_name, secondaries)
+    repo = merged.setdefault("repo", {})
+    repo["sources"] = [*(repo.get("sources") or []), *(_source(r, False) for r in secondaries)]
+    if linked:
+        repo["links"] = [*(repo.get("links") or []), *linked]
+    return merged
 
 
 def single_repo_sources(model: dict[str, Any], full_name: str, branch: str, commit: str | None) -> None:

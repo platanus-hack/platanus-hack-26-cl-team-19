@@ -16,6 +16,14 @@ export const currency = new Intl.NumberFormat("es-CL", {
   maximumFractionDigits: 0,
 });
 
+const currencyWithCents = new Intl.NumberFormat("es-CL", {
+  style: "currency",
+  currency: "USD",
+  currencyDisplay: "narrowSymbol",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+});
+
 /** US$1.234, con signo menos tipográfico para valores negativos. */
-export const usd = (value: number) =>
-  `${value < 0 ? "−" : ""}US${currency.format(Math.abs(value))}`;
+export const usd = (value: number, cents = false) =>
+  `${value < 0 ? "−" : ""}US${(cents ? currencyWithCents : currency).format(Math.abs(value))}`;
