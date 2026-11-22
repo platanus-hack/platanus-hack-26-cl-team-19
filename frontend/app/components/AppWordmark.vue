@@ -1,11 +1,12 @@
 <script setup lang="ts">
-defineProps<{ compact?: boolean }>();
+defineProps<{ compact?: boolean; loading?: boolean }>();
 </script>
 
 <template>
-  <span class="wordmark whitespace-nowrap text-2xl leading-none">{{
-    compact ? "b." : "branchpoint."
-  }}</span>
+  <span class="wordmark whitespace-nowrap text-2xl leading-none"
+    >{{ compact ? "b" : "branchpoint"
+    }}<span :class="{ 'motion-safe:animate-pulse': loading }">.</span></span
+  >
 </template>
 
 <style scoped>
