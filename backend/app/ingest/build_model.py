@@ -24,8 +24,8 @@ from datetime import date
 from pathlib import Path
 
 from app.catalog import deploy, load_catalog
+from app.catalog.deploy import weakest
 
-RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
 SECONDS_MONTH = 30 * 86400
 
 
@@ -59,10 +59,6 @@ def from_catalog(entry: dict, **over) -> dict:
 
 def declared(value, unit, what: str) -> dict:
     return num(value, unit, "SUPUESTO", f"Declarado por el usuario: {what}")
-
-
-def weakest(*labels: str) -> str:
-    return max(labels, key=lambda lab: RANK[lab])
 
 
 def derived(value, unit, source, *parts: dict) -> dict:

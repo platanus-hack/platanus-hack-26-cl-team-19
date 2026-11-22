@@ -66,7 +66,6 @@ MAX_GREP_MATCHES = 100
 DEFAULT_ERROR_RATE = 0.01  # piso de errores cuando el usuario no declaró uno (SUPUESTO, se avisa)
 SECONDS_DAY = 86_400
 SECONDS_MONTH = 30 * SECONDS_DAY
-RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
 
 
 class ToolError(Exception):
@@ -361,7 +360,7 @@ def _compact(text: str) -> str:
 
 
 def _weakest(*labels: str) -> str:
-    return max(labels, key=lambda lab: RANK.get(lab, 3))
+    return max(labels, key=lambda lab: deploy.RANK.get(lab, 3))
 
 
 def _provenance(model: dict[str, Any], run: Run) -> dict[str, Any]:
