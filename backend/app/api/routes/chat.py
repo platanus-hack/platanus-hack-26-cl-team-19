@@ -97,7 +97,13 @@ def chat(
     factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
     llm: LLM = factory(key)
     tools = ChatAgentTools(
-        store, owner, limiter, storage if user is not None else None, project_id=project_id, base_version=base
+        store,
+        owner,
+        limiter,
+        storage if user is not None else None,
+        project_id=project_id,
+        base_version=base,
+        user_messages=[m.content for m in req.messages if m.role == "user"],  # para comprobar cada quote (JAJ-102)
     )
 
     def events() -> Iterator[bytes]:
