@@ -12,6 +12,7 @@ withDefaults(
     version?: string;
     title?: string;
     sidebarDefaultOpen?: boolean;
+    embedded?: boolean;
   }>(),
   {
     repositoryName: undefined,
@@ -25,18 +26,29 @@ withDefaults(
 <template>
   <SidebarProvider
     :default-open="sidebarDefaultOpen"
-    class="h-svh min-h-0 overflow-hidden"
+    :persist-state="!embedded"
+    :sidebar-width="embedded ? '12rem' : undefined"
+    class="overflow-hidden"
+    :class="
+      embedded
+        ? 'relative h-[min(80svh,48rem)] min-h-0 lg:h-[min(90svh,58rem)]'
+        : 'h-svh min-h-0'
+    "
   >
     <slot name="sidebar" />
 
     <SidebarInset
+      :as="embedded ? 'div' : 'main'"
       class="@container min-h-0 min-w-0 overflow-hidden md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-border md:peer-data-[variant=inset]:shadow-none"
     >
       <header
         class="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3"
       >
         <SidebarTrigger v-if="$slots.sidebar" />
-        <h1 class="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+        <component
+          :is="embedded ? 'p' : 'h1'"
+          class="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
+        >
           <span v-if="repositoryName" class="truncate text-muted-foreground">{{
             repositoryName
           }}</span>
@@ -49,7 +61,7 @@ withDefaults(
           <span v-if="!$slots.nav" class="truncate font-medium">{{
             title
           }}</span>
-        </h1>
+        </component>
         <div class="flex shrink-0 items-center gap-2">
           <slot name="version">
             <span
@@ -72,7 +84,9 @@ withDefaults(
         class="grid min-h-0 flex-1 overflow-y-auto @3xl:overflow-hidden"
         :class="
           $slots.agent
-            ? '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)_19rem] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)_24rem]'
+            ? embedded
+              ? '@3xl:grid-cols-[2.75rem_11.5rem_minmax(0,1fr)_minmax(14rem,24%)] @6xl:grid-cols-[3rem_13rem_minmax(0,1fr)_minmax(18rem,24%)]'
+              : '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)_19rem] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)_24rem]'
             : '@3xl:grid-cols-[3rem_14rem_minmax(0,1fr)] @6xl:grid-cols-[3rem_16rem_minmax(0,1fr)]'
         "
       >
@@ -100,7 +114,8 @@ withDefaults(
           <template v-if="$slots.metrics">
             <Separator />
             <div
-              class="@container/canvas flex min-h-0 flex-col @3xl:h-[40%] @3xl:shrink-0"
+              class="@container/canvas flex min-h-0 flex-col @3xl:shrink-0"
+              :class="embedded ? '@3xl:h-[49%]' : '@3xl:h-[40%]'"
             >
               <slot name="metrics" />
             </div>

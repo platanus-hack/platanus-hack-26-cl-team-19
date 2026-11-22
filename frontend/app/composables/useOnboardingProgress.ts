@@ -14,10 +14,19 @@ export function useOnboardingProgress() {
     return (await isOnboardingDone()) ? "/projects" : "/onboarding";
   }
 
-  async function completeOnboarding() {
+  async function markOnboardingDone() {
     localStorage.setItem(await storageKey(), "done");
+  }
+
+  async function completeOnboarding() {
+    await markOnboardingDone();
     return navigateTo("/projects", { replace: true });
   }
 
-  return { isOnboardingDone, nextAfterLogin, completeOnboarding };
+  return {
+    isOnboardingDone,
+    nextAfterLogin,
+    completeOnboarding,
+    markOnboardingDone,
+  };
 }

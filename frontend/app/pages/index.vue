@@ -1,27 +1,37 @@
 <script setup lang="ts">
-import BrandIcon from "@/components/BrandIcon.vue";
+import { ArrowDown } from "@lucide/vue";
 import AppWordmark from "@/components/AppWordmark.vue";
+import ThemeSwitcher from "@/components/ThemeSwitcher.vue";
+import HeroLandscape from "@/components/landing/HeroLandscape.vue";
+import LandingFlow from "@/components/landing/LandingFlow.vue";
+import LandingAccess from "@/components/landing/LandingAccess.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 
-useSeoMeta({ title: "Branchpoint" });
+useSeoMeta({
+  title: "Branchpoint | Simula tu arquitectura",
+  description:
+    "Conecta tu repositorio, simula escenarios de tráfico y compara la latencia y el costo de tus cambios.",
+});
 
 // La home es también el login: quien entra sin sesión a una ruta protegida vuelve aquí.
 const { enabled, hasSession, signInWithGitHub } = useSupabaseAuth();
-const { nextAfterLogin } = useOnboardingProgress();
 const pending = ref(false);
 const error = ref(false);
 
 onMounted(async () => {
   if (enabled && (await hasSession()))
-    await navigateTo(await nextAfterLogin(), { replace: true });
+    await navigateTo("/projects", { replace: true });
 });
 
 async function continueWithGitHub() {
   pending.value = true;
   error.value = false;
   try {
+    if (await hasSession()) {
+      await navigateTo("/projects");
+      return;
+    }
     await signInWithGitHub();
   } catch {
     error.value = true;
@@ -31,32 +41,105 @@ async function continueWithGitHub() {
 </script>
 
 <template>
-  <main class="flex min-h-svh flex-col justify-center gap-5 p-6 sm:px-[12vw]">
-    <div class="flex flex-wrap items-center gap-3">
-      <h1><AppWordmark class="text-6xl" /></h1>
-      <ThemeSwitcher />
-    </div>
-    <p class="max-w-md text-base text-muted-foreground">
-      Simula cómo responde una arquitectura al tráfico y compara el impacto de
-      tus cambios.
-    </p>
-    <Alert v-if="error" class="max-w-md" variant="destructive">
-      <AlertDescription
-        >No pudimos abrir GitHub. Inténtalo de nuevo.</AlertDescription
+  <div class="relative">
+    <header class="absolute inset-x-0 top-0 z-20 backdrop-blur-sm">
+      <div
+        class="mx-auto grid h-16 max-w-[90rem] grid-cols-[1fr_auto_1fr] items-center gap-2 px-5 sm:px-10 lg:px-14"
       >
-    </Alert>
-    <div v-if="enabled" class="flex flex-col items-start gap-2">
-      <Button :disabled="pending" @click="continueWithGitHub">
-        <Spinner v-if="pending" data-icon="inline-start" />
-        <BrandIcon v-else brand="github" data-icon="inline-start" />
-        {{ pending ? "Abriendo GitHub…" : "Continuar con GitHub" }}
-      </Button>
-      <p class="text-xs text-muted-foreground">
-        Crea tu cuenta o inicia sesión con GitHub.
-      </p>
-    </div>
-    <Button v-else class="self-start" as-child>
-      <NuxtLink to="/projects">Ver proyectos</NuxtLink>
-    </Button>
-  </main>
+        <div class="justify-self-start"><ThemeSwitcher /></div>
+        <NuxtLink to="/" aria-label="Branchpoint, inicio"
+          ><AppWordmark
+        /></NuxtLink>
+        <nav
+          v-if="enabled"
+          class="justify-self-end"
+          aria-label="Navegación principal"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="pending"
+            :aria-busy="pending"
+            @click="continueWithGitHub"
+          >
+            Iniciar sesión
+          </Button>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <HeroLandscape>
+        <div
+          class="mx-auto w-full max-w-[51rem] px-5 pt-20 pb-4 sm:px-8 sm:pb-5"
+        >
+          <h1 class="landing-title">
+            Simula cómo responde tu
+            <span class="landing-title-pixel">arquitectura</span>.
+          </h1>
+          <p
+            class="mt-3 max-w-[62ch] text-sm leading-relaxed text-foreground/85 sm:text-base"
+          >
+            Conecta tu repo y simula escenarios para descubrir qué se satura y
+            cuánto cuesta resolverlo.
+          </p>
+          <div class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <LandingAccess
+              :enabled="enabled"
+              :pending="pending"
+              :aria-describedby="enabled ? undefined : 'github-config'"
+              @sign-in="continueWithGitHub"
+            />
+            <Button variant="ghost" as-child>
+              <a href="#como-funciona"
+                >Explorar funciones <ArrowDown data-icon="inline-end"
+              /></a>
+            </Button>
+          </div>
+          <p
+            v-if="!enabled"
+            id="github-config"
+            class="mt-2 text-xs text-muted-foreground"
+          >
+            GitHub no está configurado en este entorno.
+          </p>
+          <Alert v-if="error" variant="destructive" class="mt-2">
+            <AlertDescription
+              >No pudimos abrir GitHub. Inténtalo de nuevo.</AlertDescription
+            >
+          </Alert>
+        </div>
+      </HeroLandscape>
+
+      <div class="mx-auto max-w-[90rem] px-5 sm:px-10 lg:px-14">
+        <LandingFlow />
+      </div>
+    </main>
+
+    <footer>
+      <div
+        class="mx-auto flex max-w-[90rem] items-center justify-between gap-4 px-5 py-8 sm:px-10 lg:px-14"
+      >
+        <NuxtLink to="/" aria-label="Branchpoint, inicio"
+          ><AppWordmark
+        /></NuxtLink>
+      </div>
+    </footer>
+  </div>
 </template>
+
+<style scoped>
+.landing-title {
+  font-family: "IBM Plex Sans Variable", sans-serif;
+  font-size: clamp(2rem, 4.6vw, 3.75rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+
+.landing-title-pixel {
+  font-family: "Geist Pixel Variable", monospace;
+  font-weight: 400;
+  font-variation-settings: "ELSH" 1;
+}
+</style>

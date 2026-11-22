@@ -137,12 +137,20 @@ class GitHubApp:
         user_token = granted.get("access_token")
         if not user_token:
             raise GitHubError(401, "GitHub rechazó la autorización (el código venció o ya se usó). Vuelve a conectar.")
+        return self.visible_installations(user_token)
+
+    def visible_installations(self, user_token: str, *, require_app_match: bool = False) -> dict[int, str]:
+        """Lista las instalaciones que GitHub permite ver con un token de usuario."""
         found: dict[int, str] = {}
         page = 1
         while True:  # un usuario puede ver varias instalaciones (su cuenta y sus orgs)
             data = self._request("GET", f"/user/installations?per_page=100&page={page}", user_token, what="user")
             batch = data.get("installations", [])
-            found |= {inst["id"]: (inst.get("account") or {}).get("login") or "" for inst in batch}
+            found |= {
+                inst["id"]: (inst.get("account") or {}).get("login") or ""
+                for inst in batch
+                if not require_app_match or str(inst.get("app_id")) == self.config.app_id
+            }
             if len(batch) < 100:
                 return found
             page += 1
