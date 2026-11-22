@@ -19,6 +19,9 @@
 @theme {
   --font-sans: "IBM Plex Sans Variable", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
+  /* Títulos (h1-h3) y el tema puede cambiarlos. El texto corrido siempre usa --font-sans. */
+  --font-display: "IBM Plex Sans Variable", sans-serif;
+  --display-tracking: -0.01em;
   --spacing: 0.25rem;
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
@@ -196,9 +199,107 @@
   --status-saturated-border: #bc796b;
 }
 
+/*
+ * Temas oscuros del selector (ThemeSwitcher). "medianoche" es el .dark de arriba.
+ * Los cuatro valores de tipografía usan solo las fuentes cargadas en nuxt.config.ts.
+ */
+.dark[data-theme="bosque"] {
+  --background: #0b1410;
+  --foreground: #e6f4ec;
+  --card: #12211a;
+  --primary: #34d399;
+  --primary-foreground: #052e1d;
+  --secondary: #1c3228;
+  --secondary-foreground: #e6f4ec;
+  --muted: #172b22;
+  --muted-foreground: #a7c4b5;
+  --accent: #22402f;
+  --accent-foreground: #e6f4ec;
+  --destructive: #f87171;
+  --destructive-foreground: #2a0b0b;
+  --border: #2b4a3b;
+  --input: #6f9a86;
+  --ring: #34d399;
+  --sidebar: #0e1a15;
+  --sidebar-accent: #193127;
+  --brand: #34d399;
+  --brand-foreground: #052e1d;
+  --highlight: #e879f9;
+  --highlight-foreground: #2d0836;
+  --info: #38bdf8;
+  --info-foreground: #04263a;
+  --font-display: "IBM Plex Sans Variable", sans-serif;
+  --display-tracking: -0.02em;
+}
+
+.dark[data-theme="brasa"] {
+  --background: #15100c;
+  --foreground: #f6ede4;
+  --card: #1f1812;
+  --primary: #fbbf24;
+  --primary-foreground: #2a1a02;
+  --secondary: #2e2319;
+  --secondary-foreground: #f6ede4;
+  --muted: #261e16;
+  --muted-foreground: #c4b3a0;
+  --accent: #3a2c1e;
+  --accent-foreground: #f6ede4;
+  --destructive: #f87171;
+  --destructive-foreground: #2a0b0b;
+  --border: #3d2f22;
+  --input: #8a7360;
+  --ring: #fbbf24;
+  --sidebar: #110c09;
+  --sidebar-accent: #2a2016;
+  --brand: #fbbf24;
+  --brand-foreground: #2a1a02;
+  --highlight: #e879f9;
+  --highlight-foreground: #2d0836;
+  --info: #5eead4;
+  --info-foreground: #0b2e29;
+  --font-display: "IBM Plex Mono", monospace;
+  --display-tracking: 0;
+}
+
+.dark[data-theme="pixel"] {
+  --background: #06131d;
+  --foreground: #e4f1f9;
+  --card: #0c1f2d;
+  --primary: #2dd4bf;
+  --primary-foreground: #042a25;
+  --secondary: #123044;
+  --secondary-foreground: #e4f1f9;
+  --muted: #0f2636;
+  --muted-foreground: #9fbccd;
+  --accent: #173a50;
+  --accent-foreground: #e4f1f9;
+  --destructive: #f87171;
+  --destructive-foreground: #2a0b0b;
+  --border: #1e3d52;
+  --input: #5b7d90;
+  --ring: #2dd4bf;
+  --sidebar: #081722;
+  --sidebar-accent: #123044;
+  --brand: #2dd4bf;
+  --brand-foreground: #042a25;
+  --highlight: #f472b6;
+  --highlight-foreground: #2a0716;
+  --info: #60a5fa;
+  --info-foreground: #06203d;
+  --font-display: "Geist Pixel Variable", monospace;
+  --display-tracking: 0.02em;
+}
+
 @layer base {
   body {
     @apply bg-background font-sans text-foreground;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: var(--display-tracking);
   }
 
   :focus-visible {

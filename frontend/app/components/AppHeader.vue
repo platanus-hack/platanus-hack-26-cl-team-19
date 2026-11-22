@@ -99,6 +99,7 @@ onMounted(async () => {
         >
           <AppWordmark />
         </NuxtLink>
+        <ThemeSwitcher />
         <Badge v-if="isMock" variant="outline">Demo</Badge>
       </div>
 
