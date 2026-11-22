@@ -42,6 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ProjectScenarioInput } from "@/services/editor-api";
 import { MAX_REPOS } from "@/services/github-api";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1146,6 +1147,17 @@ function openVersionDraft() {
         :selected-id="selectedNode"
         @select="selectedNode = $event"
       />
+      <div
+        v-else-if="pending"
+        role="status"
+        aria-live="polite"
+        class="m-auto flex flex-col items-center gap-3 text-sm text-muted-foreground"
+      >
+        <Spinner class="size-6" />
+        <span>{{
+          pending.startsWith("Abriendo") ? pending : "Cargando diagrama…"
+        }}</span>
+      </div>
       <Button
         v-else-if="error"
         variant="outline"
