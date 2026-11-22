@@ -29,8 +29,9 @@ class ChatAgentTools(AgentTools):
         *,
         project_id: str,
         base_version: int,
+        user_messages: list[str] | None = None,
     ) -> None:
-        super().__init__(store, owner, limiter, attachments)
+        super().__init__(store, owner, limiter, attachments, user_messages=user_messages)
         self.project_id = project_id
         self.base_version = base_version
         for name in CLI_ONLY | WRITE_TOOLS:
@@ -75,4 +76,7 @@ class ChatAgentTools(AgentTools):
             raise ToolError("Usa como base la versión abierta en el editor.")
         if not 1 <= len(args.ops) <= 20:
             raise ToolError("La propuesta tiene que incluir entre 1 y 20 operaciones.")
+        for op in args.ops:  # una quote respalda un dato del usuario: tiene que estar en lo que él escribió
+            if isinstance(op, dict) and isinstance(op.get("quote"), str):
+                self._require_said(op["quote"])
         return self._preview(args.project_id, ProposalDraft(base=self.base_version, ops=args.ops, note=args.note))
