@@ -9,6 +9,7 @@ implementaciones: ``InMemoryProjectStore`` (se pierde al reiniciar; la usan los 
 from __future__ import annotations
 
 import copy
+import re
 import threading
 import uuid
 from dataclasses import dataclass, field, replace
@@ -158,20 +159,42 @@ class GitHubInstallation:
     account_login: str
 
 
-def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
-    """Los escenarios de ``traffic.scenarios`` del modelo, para cargarlos al crear un proyecto.
+@dataclass(frozen=True)
+class CachedAnalysis:
+    """Lo que entregó el analizador para un commit (JAJ-146): la ``ArchitectureSubmission`` como dict, ya
+    verificada contra el repo, y quién y con cuánto la produjo."""
 
-    Se guarda el multiplicador cuando lo hay: así la tasa se recalcula con el pico de cada versión
-    (decisión 4 del README de ``app/db``). Si no, las req/s.
+    submission: dict[str, Any]
+    usage: dict[str, int]
+    steps: int
+    provider: str | None = None
+    llm_model: str | None = None
+
+
+INITIAL_SCENARIO = "actual"
+# Nombre válido de un escenario del proyecto (ej. black_friday)
+SCENARIO_NAME = re.compile(r"[a-z0-9_-]{1,60}")
+
+
+def initial_scenarios(model: dict[str, Any]) -> list[ProjectScenario]:
+    """El escenario con que nace un proyecto: ``actual``, el tráfico de hoy. El usuario crea los demás.
+
+    Su tasa sale de ``traffic.scenarios.pico_normal`` del modelo si lo trae; si no, es ×1 el pico
+    (``traffic.peak_rps``). Se guarda el multiplicador cuando lo hay: así la tasa se recalcula con el
+    pico de cada versión (decisión 4 del README de ``app/db``). Sin pico ni ``pico_normal``, el
+    proyecto nace sin escenarios.
     """
-    scenarios = []
-    for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
-        multiplier, rps = value(sc.get("multiplier")), value(sc.get("rps"))  # con procedencia o escalar
-        if multiplier is not None and multiplier > 0:
-            scenarios.append(ProjectScenario(name, float(multiplier), None))
-        elif rps is not None and rps > 0:
-            scenarios.append(ProjectScenario(name, None, float(rps)))
-    return scenarios
+    traffic = model.get("traffic") or {}
+    normal = (traffic.get("scenarios") or {}).get("pico_normal") or {}
+    multiplier, rps = value(normal.get("multiplier")), value(normal.get("rps"))  # con procedencia o escalar
+    if multiplier is not None and multiplier > 0:
+        return [ProjectScenario(INITIAL_SCENARIO, float(multiplier), None)]
+    if rps is not None and rps > 0:
+        return [ProjectScenario(INITIAL_SCENARIO, None, float(rps))]
+    peak = value(traffic.get("peak_rps"))
+    if peak is not None and peak > 0:
+        return [ProjectScenario(INITIAL_SCENARIO, 1.0, None)]
+    return []
 
 
 @dataclass(frozen=True)
@@ -238,6 +261,12 @@ class ProjectStore(Protocol):
 
     def list(self, owner: str | None = None) -> list[Project]:
         """Los proyectos de ``owner``, del más nuevo al más viejo."""
+        ...
+
+    def delete(self, project_id: str, owner: str | None = None) -> bool:
+        """Borra el proyecto de ``owner`` con todo lo suyo: versiones, escenarios, metas, runs, reportes,
+        chat, adjuntos (las filas; los archivos los borra la ruta) y repos vinculados (JAJ-144). ``False``
+        si no existe o es de otro: como ``get``, el dueño se valida aquí y no solo en la ruta."""
         ...
 
     def add_version(
@@ -339,6 +368,17 @@ class ProjectStore(Protocol):
         """La ``repo_connections.id`` de ese repo para ``owner``. Reutiliza la que ya existe."""
         ...
 
+    # ---------- Caché del análisis (JAJ-146) ----------
+
+    def find_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str) -> CachedAnalysis | None:
+        """El análisis guardado de ese commit con esa huella del analizador, o ``None``. No es de un usuario:
+        quien llama ya resolvió el commit con el token de instalación de quien importa."""
+        ...
+
+    def save_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str, analysis: CachedAnalysis) -> None:
+        """Guarda el análisis. Si ya había uno con esa clave, no hace nada."""
+        ...
+
     # ---------- Adjuntos del chat (IA-6) ----------
 
     def create_attachment(self, attachment: Attachment) -> Attachment:
@@ -387,6 +427,9 @@ class OwnedStore:
     def list(self) -> list[Project]:
         return self._store.list(self.owner)
 
+    def delete(self, project_id: str) -> bool:
+        return self._store.delete(project_id, self.owner)
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._store, name)
 
@@ -420,6 +463,7 @@ class InMemoryProjectStore:
         self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
         self._chats: dict[str, list[dict[str, Any]]] = {}  # proyecto → mensajes del chat
         self._reports: dict[str, tuple[str, dict[str, Any]]] = {}  # id → (proyecto, reporte) (JAJ-127)
+        self._analyses: dict[tuple[int, str, str], CachedAnalysis] = {}  # (repo, commit, huella) (JAJ-146)
 
     def create(
         self,
@@ -446,7 +490,7 @@ class InMemoryProjectStore:
             self.sources[project.id] = source
         with self._lock:
             self._projects[project.id] = project
-            self._scenarios[project.id] = {s.name: s for s in scenarios_from_model(model)}
+            self._scenarios[project.id] = {s.name: s for s in initial_scenarios(model)}
         return project
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:
@@ -460,6 +504,19 @@ class InMemoryProjectStore:
     def list(self, owner: str | None = None) -> list[Project]:
         mine = [p for p in self._projects.values() if p.owner == owner]
         return sorted(mine, key=lambda p: p.created_at, reverse=True)
+
+    def delete(self, project_id: str, owner: str | None = None) -> bool:
+        with self._lock:
+            project = self._projects.get(project_id)
+            if project is None or project.owner != owner:
+                return False
+            del self._projects[project_id]
+            for by_project in (self._scenarios, self._goals, self.sources, self._chats):
+                by_project.pop(project_id, None)
+            self._runs = {k: v for k, v in self._runs.items() if v[0] != project_id}
+            self._reports = {k: v for k, v in self._reports.items() if v[0] != project_id}
+            self._attachments = {k: a for k, a in self._attachments.items() if a.project_id != project_id}
+            return True
 
     def add_version(
         self,
@@ -594,6 +651,14 @@ class InMemoryProjectStore:
     ) -> str:
         with self._lock:
             return self._connections.setdefault((owner, repo_id), uuid.uuid4().hex[:12])
+
+    def find_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str) -> CachedAnalysis | None:
+        saved = self._analyses.get((github_repo_id, commit_sha, analyzer))
+        return copy.deepcopy(saved) if saved is not None else None
+
+    def save_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str, analysis: CachedAnalysis) -> None:
+        with self._lock:
+            self._analyses.setdefault((github_repo_id, commit_sha, analyzer), copy.deepcopy(analysis))
 
     def create_attachment(self, attachment: Attachment) -> Attachment:
         with self._lock:

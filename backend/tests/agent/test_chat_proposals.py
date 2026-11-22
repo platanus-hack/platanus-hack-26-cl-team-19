@@ -87,3 +87,85 @@ def test_chat_proposes_scenario_then_accepts_once(client):
     comparison = client.post(f"{path}/compare", json={**params, "a": 1, "b": 2}).json()
     assert comparison["run_a"]["rps"] == baseline["run"]["rps"]
     assert comparison["run_b"]["rps"] == 42
+
+
+class NewScenarioLLM:
+    """Pide CyberDay ×20 en un proyecto que solo tiene ``actual`` (JAJ-149)."""
+
+    model = "claude-opus-5-5"
+
+    def __init__(self, project_id: str, scenario: dict):
+        self.project_id = project_id
+        self.scenario = scenario
+        self.called = False
+
+    def complete(self, system, messages, tools):
+        if not self.called:
+            self.called = True
+            return Turn(
+                [
+                    {
+                        "type": "tool_use",
+                        "id": "nuevo",
+                        "name": "propose_scenario",
+                        "input": {"project_id": self.project_id, "scenario": self.scenario},
+                    }
+                ],
+                "tool_use",
+            )
+        return Turn([{"type": "text", "text": "Revisa la propuesta."}], "end_turn")
+
+
+def _propose(client, pid: str, scenario: dict) -> dict:
+    client.app.state.llm_factory = lambda key: NewScenarioLLM(pid, scenario)
+    response = client.post(
+        f"/projects/{pid}/chat",
+        headers={"X-Anthropic-Api-Key": "test"},
+        json={
+            "version": 1,
+            "scenario": "actual",
+            "messages": [{"role": "user", "content": "¿Qué pasa en CyberDay si llega 20 veces el tráfico?"}],
+        },
+    )
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    return next(event["result"] for event in events if event["type"] == "tool_result")
+
+
+@pytest.mark.initial_scenarios
+def test_chat_creates_a_new_scenario_and_simulates_it(client):
+    pid = client.post("/projects", json={"sample": "full-stack-fastapi-template"}).json()["id"]
+    path = f"/projects/{pid}"
+    cyberday = {"name": "cyberday", "multiplier": 20, "description": "CyberDay: 20 veces el tráfico actual"}
+    proposal = _propose(client, pid, cyberday)["proposal"]
+    assert proposal["new_scenario"] is True
+    assert proposal["changes"][0] == "Escenario nuevo: cyberday"
+    assert any("×20 el pico" in line for line in proposal["changes"])
+    # mientras no se acepta (o si se descarta), no se crea nada
+    assert [s["name"] for s in client.get(f"{path}/scenarios").json()] == ["actual"]
+
+    url = f"{path}/chat/proposals/{proposal['id']}/accept"
+    first = client.post(url, json=proposal["draft"])
+    repeated = client.post(url, json=proposal["draft"])
+    assert first.status_code == repeated.status_code == 201, repeated.text
+    assert first.json()["number"] == repeated.json()["number"] == 1  # sin versión nueva
+    assert len(client.get(path).json()["versions"]) == 1
+    saved = client.get(f"{path}/scenarios/cyberday").json()
+    assert (saved["multiplier"], saved["rps"], saved["description"]) == (20.0, None, cyberday["description"])
+    run = client.post(f"{path}/versions/1/runs", json={"scenario": "cyberday", "seed": 1, "duration_s": 5})
+    assert run.status_code == 200 and run.json()["scenario"] == "cyberday"
+
+
+@pytest.mark.initial_scenarios
+@pytest.mark.parametrize(
+    "scenario, message",
+    [
+        ({"name": "cyberday"}, "es nuevo: indica su tráfico"),
+        ({"name": "Cyber Day", "multiplier": 20}, "no sirve"),
+    ],
+)
+def test_new_scenario_needs_a_rate_and_a_valid_name(client, scenario, message):
+    pid = client.post("/projects", json={"sample": "full-stack-fastapi-template"}).json()["id"]
+    result = _propose(client, pid, scenario)
+    assert message in result["error"]
+    assert [s["name"] for s in client.get(f"/projects/{pid}/scenarios").json()] == ["actual"]

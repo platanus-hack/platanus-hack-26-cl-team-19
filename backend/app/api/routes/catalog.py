@@ -16,17 +16,6 @@ from app.catalog import deploy, load_catalog
 
 router = APIRouter(tags=["catalog"])
 
-PROVIDER_LABELS = {
-    "supabase": "Supabase",
-    "neon": "Neon",
-    "rds_postgres": "Amazon RDS (PostgreSQL)",
-    "fargate": "AWS Fargate",
-    "fly": "Fly.io",
-    "render": "Render",
-    "vercel": "Vercel",
-    "cloudfront": "Amazon CloudFront",
-    "local": "Local",
-}
 # En Fargate y local el tamaño se elige en vCPU: el plan es una máquina de ejemplo para mostrar el costo.
 SIZED_BY_VCPU = {"fargate", "local"}
 
@@ -58,7 +47,7 @@ def _db_options(catalog: dict[str, Any]) -> list[dict[str, Any]]:
                     },
                 }
             )
-        out.append({"id": provider, "label": PROVIDER_LABELS.get(provider, provider), "plans": rows})
+        out.append({"id": provider, "label": deploy.PROVIDER_LABELS.get(provider, provider), "plans": rows})
     return out
 
 
@@ -80,7 +69,7 @@ def _api_options(catalog: dict[str, Any]) -> list[dict[str, Any]]:
                     },
                 }
             )
-        entry = {"id": provider, "label": PROVIDER_LABELS.get(provider, provider), "plans": rows}
+        entry = {"id": provider, "label": deploy.PROVIDER_LABELS.get(provider, provider), "plans": rows}
         if provider in SIZED_BY_VCPU:
             p = deploy.app_profile(provider, None, one, one, {**one, "value": 2}, "1 vCPU y 2 GB", catalog)
             entry["sized_by_vcpu"] = True
@@ -99,7 +88,7 @@ def _frontend_options(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             }
             for plan in plans
         ]
-        out.append({"id": provider, "label": PROVIDER_LABELS.get(provider, provider), "plans": rows})
+        out.append({"id": provider, "label": deploy.PROVIDER_LABELS.get(provider, provider), "plans": rows})
     return out
 
 

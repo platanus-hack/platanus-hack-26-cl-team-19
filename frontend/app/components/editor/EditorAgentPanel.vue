@@ -138,6 +138,8 @@ watch(
     log.value?.scrollTo({ top: log.value.scrollHeight });
   },
 );
+// Al volver de Comparar el panel se monta de nuevo: parte en lo último de la conversación, no al principio
+onMounted(() => log.value?.scrollTo({ top: log.value.scrollHeight }));
 </script>
 
 <template>

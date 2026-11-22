@@ -1,5 +1,6 @@
 import { mountSuspended } from "@nuxt/test-utils/runtime";
 import { describe, expect, it } from "vitest";
+import { nextTick } from "vue";
 import ProjectScenarioForm from "@/components/editor/ProjectScenarioForm.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
 import { createMockEditorApi } from "@/services/editor-mock";
@@ -11,7 +12,10 @@ describe("escenario elástico", () => {
     const props = { names: [], hasPeak: false, busy: false };
     const form = await mountSuspended(ProjectScenarioForm, { props });
     await form.get('input[id$="-name"]').setValue("salto");
-    await form.get("select").setValue("elastic");
+    form
+      .findComponent({ name: "SelectRoot" })
+      .vm.$emit("update:modelValue", "elastic");
+    await nextTick();
     await form.get('input[id$="-rate"]').setValue(100);
     await form.get('input[id$="-jump-at"]').setValue(30);
     await form.get("form").trigger("submit");
@@ -36,7 +40,9 @@ describe("escenario elástico", () => {
     const reopened = await mountSuspended(ProjectScenarioForm, {
       props: { ...props, existing: saved },
     });
-    expect(reopened.get("select").element.value).toBe("elastic");
+    expect(reopened.get('[id$="-mode"]').text()).toBe(
+      "Elástico, con salto instantáneo",
+    );
     expect(
       reopened.get<HTMLInputElement>('input[id$="-rate"]').element.value,
     ).toBe("100");

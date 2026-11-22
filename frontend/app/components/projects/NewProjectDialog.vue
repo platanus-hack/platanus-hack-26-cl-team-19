@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import BrandIcon from "@/components/BrandIcon.vue";
-import IngestionCredential from "@/components/projects/IngestionCredential.vue";
-import { CircleCheck, CircleX, ExternalLink, Plus, X } from "@lucide/vue";
+import ProjectAnalysisProgress from "@/components/projects/ProjectAnalysisProgress.vue";
+import { ExternalLink, Plus, X } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,17 +15,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import type { ModelSummary } from "@/services/editor-api";
-import type { Ingestion } from "@/services/github-api";
+import { ingestionCredential } from "@/services/ingestion-credential";
 
 // Con backend, un proyecto nace de analizar un repo de GitHub (JAJ-57). Sin backend (demo), de
 // un modelo de ejemplo.
@@ -44,24 +45,8 @@ const error = ref("");
 const name = ref("");
 const sample = ref("");
 const nameId = useId();
-const credentialUsable = ref(true);
+const credentials = useApiCredentials();
 const primaryId = useId();
-const finished = shallowRef<Ingestion | null>(null); // la ingesta terminada, hasta abrir el proyecto
-
-const STATUS_LABELS = {
-  queued: "En cola",
-  running: "Analizando",
-  done: "Listo",
-  failed: "No se pudo analizar",
-} as const;
-
-function usd(value: number) {
-  return value.toLocaleString("es-CL", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  });
-}
 
 /** Los repos que se pueden elegir en una fila: los que no están elegidos en otra. */
 function availableFor(current: string) {
@@ -71,13 +56,6 @@ function availableFor(current: string) {
   );
 }
 
-function openProject() {
-  const projectId = finished.value?.project_id;
-  if (!projectId) return;
-  finished.value = null;
-  open.value = false;
-  emit("created", projectId);
-}
 const modelId = useId();
 
 async function loadModels() {
@@ -97,14 +75,23 @@ function updateOpen(value: boolean) {
   if (pending.value || github.running.value) return;
   open.value = value;
   if (!value) return;
-  finished.value = null;
   if (!usesSample.value) void github.loadRepos();
   else if (!models.value.length && !loading.value) void loadModels();
 }
 
 async function analyzeRepo() {
+  const settings = credentials.chatSettings.value;
+  const repos = github.selection.value.length;
+  github.provider.value =
+    !ingestionCredential("anthropic", settings, repos).usable &&
+    ingestionCredential("openai", settings, repos).usable
+      ? "openai"
+      : "anthropic";
   await github.analyze();
-  if (github.done.value?.project_id) finished.value = github.done.value;
+  const projectId = github.done.value?.project_id;
+  if (!projectId) return;
+  open.value = false;
+  emit("created", projectId);
 }
 
 async function createProject() {
@@ -125,26 +112,37 @@ async function createProject() {
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="updateOpen">
-    <SheetTrigger as-child>
+  <Dialog :open="open" @update:open="updateOpen">
+    <DialogTrigger as-child>
       <Button :variant="fromSample ? 'outline' : 'default'">
         <Plus data-icon="inline-start" aria-hidden="true" />
         {{ fromSample ? "Crear con un ejemplo" : "Nuevo proyecto" }}
       </Button>
-    </SheetTrigger>
-    <SheetContent class="w-full overflow-y-auto">
-      <SheetHeader>
-        <SheetTitle>Nuevo proyecto</SheetTitle>
-        <SheetDescription>{{
-          isMock
-            ? "Elige un nombre y el modelo con el que quieres empezar."
-            : "Elige un repo y una rama. Branchpoint analiza su código y crea la primera versión del modelo."
-        }}</SheetDescription>
-      </SheetHeader>
+    </DialogTrigger>
+    <DialogContent
+      class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+      :show-close-button="!pending && !github.running.value"
+    >
+      <DialogHeader class="pe-8">
+        <DialogTitle>Nuevo proyecto</DialogTitle>
+        <DialogDescription>{{
+          github.running.value
+            ? "Estamos preparando la primera versión del proyecto."
+            : usesSample
+              ? "Elige un nombre y el modelo con el que quieres empezar."
+              : "Elige un repo y una rama. Branchpoint analiza su código y crea la primera versión del modelo."
+        }}</DialogDescription>
+      </DialogHeader>
+
+      <ProjectAnalysisProgress
+        v-if="github.running.value"
+        :job="github.ingestion.value"
+        :detail="github.progress.value"
+      />
 
       <form
-        v-if="!usesSample"
-        class="flex flex-col gap-5 px-4 pb-4"
+        v-else-if="!usesSample"
+        class="flex flex-col gap-5"
         @submit.prevent="analyzeRepo"
       >
         <Alert v-if="github.error.value" variant="destructive">
@@ -310,7 +308,7 @@ async function createProject() {
             </li>
           </ul>
           <Button
-            v-if="github.canAddRepo.value && !github.running.value && !finished"
+            v-if="github.canAddRepo.value && !github.running.value"
             type="button"
             variant="outline"
             size="sm"
@@ -354,72 +352,6 @@ async function createProject() {
           >
             {{ github.selectionError.value }}
           </p>
-          <IngestionCredential
-            v-model:provider="github.provider.value"
-            :disabled="github.running.value"
-            :repos="github.selection.value.length"
-            :refresh-key="finished?.id"
-            @usable="credentialUsable = $event"
-          />
-          <ul
-            v-if="github.running.value && github.ingestion.value?.repos"
-            class="flex flex-col gap-1.5 text-sm"
-            aria-label="Avance de cada repo"
-            aria-live="polite"
-          >
-            <li
-              v-for="item in github.ingestion.value.repos"
-              :key="item.full_name"
-              class="flex items-center gap-2"
-            >
-              <Spinner
-                v-if="item.status === 'running' || item.status === 'queued'"
-                class="size-3.5"
-                aria-hidden="true"
-              />
-              <CircleCheck
-                v-else-if="item.status === 'done'"
-                class="size-3.5 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <CircleX
-                v-else
-                class="size-3.5 text-destructive"
-                aria-hidden="true"
-              />
-              <span class="min-w-0 flex-1 truncate">{{ item.full_name }}</span>
-              <span class="shrink-0 text-xs text-muted-foreground">
-                {{ STATUS_LABELS[item.status]
-                }}{{
-                  item.status === "running" && item.llm_steps
-                    ? ` · paso ${item.llm_steps}`
-                    : ""
-                }}
-              </span>
-            </li>
-          </ul>
-          <Alert v-if="finished">
-            <AlertDescription class="flex flex-col gap-1">
-              <span
-                >Proyecto creado con {{ finished.endpoints ?? 0 }} endpoints del
-                repo principal.</span
-              >
-              <span v-if="finished.cost"
-                >Costo del análisis: {{ usd(finished.cost.value) }} ({{
-                  finished.cost.label
-                }}).</span
-              >
-              <span
-                v-for="item in finished.repos?.filter(
-                  (entry) => entry.status === 'failed',
-                ) ?? []"
-                :key="item.full_name"
-                >{{ item.full_name }} no se pudo analizar:
-                {{ item.error_message }} Aparece en el diagrama sin
-                detalle.</span
-              >
-            </AlertDescription>
-          </Alert>
           <Alert
             v-if="github.ingestion.value?.status === 'failed'"
             variant="destructive"
@@ -431,38 +363,26 @@ async function createProject() {
           </Alert>
         </template>
 
-        <div class="flex justify-end gap-2">
-          <SheetClose as-child>
+        <DialogFooter>
+          <DialogClose as-child>
             <Button
               type="button"
               variant="outline"
               :disabled="github.running.value"
               >Cancelar</Button
             >
-          </SheetClose>
-          <Button v-if="finished" type="button" @click="openProject">
-            Abrir proyecto
-          </Button>
+          </DialogClose>
           <Button
-            v-else-if="github.repos.value.length"
+            v-if="github.repos.value.length"
             type="submit"
-            :disabled="
-              github.running.value ||
-              Boolean(github.selectionError.value) ||
-              !credentialUsable
-            "
+            :disabled="Boolean(github.selectionError.value)"
           >
-            <Spinner v-if="github.running.value" data-icon="inline-start" />
-            {{ github.running.value ? github.progress.value : "Analizar repo" }}
+            Analizar repo
           </Button>
-        </div>
+        </DialogFooter>
       </form>
 
-      <form
-        v-else
-        class="flex flex-col gap-5 px-4 pb-4"
-        @submit.prevent="createProject"
-      >
+      <form v-else class="flex flex-col gap-5" @submit.prevent="createProject">
         <div class="grid gap-2">
           <Label :for="nameId">Nombre</Label>
           <Input
@@ -509,20 +429,20 @@ async function createProject() {
         <Alert v-if="error" variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
-        <div class="flex justify-end gap-2">
-          <SheetClose as-child>
+        <DialogFooter>
+          <DialogClose as-child>
             <Button type="button" variant="outline" :disabled="pending"
               >Cancelar</Button
             >
-          </SheetClose>
+          </DialogClose>
           <Button
             type="submit"
             :disabled="loading || pending || !name.trim() || !sample"
           >
             {{ pending ? "Creando…" : "Crear proyecto" }}
           </Button>
-        </div>
+        </DialogFooter>
       </form>
-    </SheetContent>
-  </Sheet>
+    </DialogContent>
+  </Dialog>
 </template>

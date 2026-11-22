@@ -84,6 +84,8 @@ class SecondSample:
     utilization: dict[str, float]
     # req/s que pide el escenario en ese segundo (JAJ-71): constante sin perfil, la curva con perfil
     target_rps: float | None = None
+    # Llamadas iniciadas en este segundo, por ID de arista (JAJ-136). Se omiten los ceros.
+    edge_calls: dict[str, int] | None = None
 
 
 @dataclass
@@ -219,6 +221,8 @@ class Run:
     saturation: Saturation | None = None
     # JAJ-131: los reemplazos del escenario con que se simuló, una frase por cada uno; vacía sin ellos
     overrides: list[str] = field(default_factory=list)
+    # Sin este listado, la corrida es anterior a la medición por arista (JAJ-136).
+    measured_edges: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -76,6 +76,7 @@ from app.models.architecture import (
     Step,
     walk_steps,
 )
+from app.models.graph import edge_id, queue_nodes, step_target
 from app.models.run import (
     Bottleneck,
     CacheStats,
@@ -120,7 +121,7 @@ MIN_SECONDS_FOR_GROWTH = 4
 def saturation_source() -> str:
     """De dónde sale ``Saturation.saturated``: los umbrales, armados desde las constantes (JAJ-89)."""
     return (
-        f"JAJ-89, umbrales elegidos por el equipo: saturado = al menos {_es(UNANSWERED_SATURATED * 100)} % de las "
+        f"Umbrales elegidos por el equipo: saturado = al menos {_es(UNANSWERED_SATURATED * 100)} % de las "
         f"requests sin respuesta al terminar, y una espera (Ley de Little, tasa de llegada en {WAIT_WINDOW_S} s) "
         f"que crece de la mitad al final (×{_es(WAIT_GROWTH)} más {_es(WAIT_GROWTH_MIN_S)} s) o que llega al "
         f"{_es(TIMEOUT_SHARE * 100)} % del timeout del cliente. No se evalúa con menos de {MIN_SECONDS_FOR_GROWTH} s."
@@ -251,7 +252,28 @@ def simulate(
     ):
         warnings.append("Se pidió una tasa de aciertos de caché, pero ningún endpoint tiene caché con on_miss.")
     cache = [0, 0]  # aciertos, fallos
-    rec = Recorder(duration_s, model.endpoints, resources)
+    step_edges: dict[str, dict[int, str]] = {"api": {}}
+    queue_edges: dict[str, tuple[str, str]] = {}
+
+    def prepare_edges(source: str, steps: tuple[Step, ...]) -> None:
+        routes = step_edges[source]
+        for step in walk_steps(steps):
+            if step.resource == RESOURCE_BACKGROUND and step.queue is None:
+                continue  # el grafo muestra la cola sin configurar, pero el motor no la ejecuta
+            target = step_target(model, source, step)
+            if target is not None:
+                routes[id(step)] = edge_id(source, target)
+
+    for ep in model.endpoints:
+        prepare_edges("api", ep.steps)
+    for name, q in queues.items():
+        queue_id, worker_id = queue_nodes(name)
+        queue_edges[name] = (worker_id, edge_id(queue_id, worker_id))
+        step_edges[worker_id] = {}
+        prepare_edges(worker_id, q.config.job_steps)
+    measured_edges = {edge for routes in step_edges.values() for edge in routes.values()}
+    measured_edges.update(edge for _, edge in queue_edges.values())
+    rec = Recorder(duration_s, model.endpoints, resources, measured_edges)
     usage = UsageTracker()
     # lo que está tomado ahora: clave -> (recurso, dueño, línea, desde cuándo). Al soltarlo se anota en
     # ``usage``; lo que sigue tomado al terminar se anota hasta ``duration_s`` (JAJ-100). Sin esto, en
@@ -280,14 +302,20 @@ def simulate(
         res.release()
         give_back(key)
 
-    def run_steps(steps: tuple[Step, ...], conn: list[Any] | None, owner: str) -> Generator[Any, Any, str | None]:
+    def run_steps(
+        steps: tuple[Step, ...], conn: list[Any] | None, owner: str, source: str
+    ) -> Generator[Any, Any, str | None]:
         """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, clave en
         held, réplica de la request, clave de su conexión a la réplica]`` de la request; ``None`` en un
         trabajo de una cola (usa su propia conexión y su propia CPU). ``owner``: a nombre de quién se
         anota el uso de cada recurso."""
+        routes = step_edges[source]
         for step in steps:
             res, ms = step.resource, step.time_ms
+            edge = routes.get(id(step))
             for _ in range(step.repeat):
+                if edge is not None:
+                    rec.edge_call(edge, sim.now)
                 if res == RESOURCE_DB_CONNECTION and replicas and conn is not None and step.shape in READ_SHAPES:
                     r_cpu, r_scale, r_pool = replicas[conn[2]]
                     if conn[3] is None:
@@ -320,7 +348,7 @@ def simulate(
                         cache[0] += 1
                         continue
                     cache[1] += 1
-                    error = yield from run_steps(step.on_miss, conn, owner)
+                    error = yield from run_steps(step.on_miss, conn, owner, source)
                     if error:
                         return error
                     if ms > 0:
@@ -344,8 +372,10 @@ def simulate(
     def job(q: _QueueCounters, t0: float) -> Generator[Any, Any, None]:
         owner = f"cola {q.config.name}"
         yield q.resource.acquire()
+        source, edge = queue_edges[q.config.name]
+        rec.edge_call(edge, sim.now)
         key = take(q.resource, owner, None)
-        yield from run_steps(q.config.job_steps, None, owner)
+        yield from run_steps(q.config.job_steps, None, owner, source)
         q.resource.release()
         give_back(key)
         q.processed += 1
@@ -362,7 +392,7 @@ def simulate(
         if ep.base_cpu_ms > 0:
             yield from hold(api_cpu, api_scale, ep.base_cpu_ms, ep.id, None)
         conn: list[Any] = [False, None, rid % len(replicas) if replicas else 0, None]
-        error = yield from run_steps(ep.steps, conn, ep.id)
+        error = yield from run_steps(ep.steps, conn, ep.id, "api")
         if conn[0]:
             pool.release()
             give_back(conn[1])
@@ -521,7 +551,7 @@ def _cpu_adjustment(model: ArchitectureModel, cpu_credits: str, warnings: list[s
     if adjusted:
         warnings.append(
             "Capacidad de la nube: los tiempos de CPU del modelo son de 1 núcleo del laptop de calibración "
-            f"y se multiplican por el factor de cada procesador: {', '.join(adjusted)} (JAJ-46)."
+            f"y se multiplican por el factor de cada procesador: {', '.join(adjusted)}."
         )
 
     db_vcpu, credits = db.vcpu, None
@@ -633,8 +663,8 @@ def _build_run(
     for rs in resource_stats:
         if rs.utilization >= SATURATION_WARNING:
             warnings.append(
-                f"{rs.label} al {rs.utilization:.0%}: cerca o sobre la capacidad el modelo es optimista "
-                f'(JAJ-44). Tomar la latencia y los errores como piso ("al menos").'
+                f"{rs.label} al {rs.utilization:.0%}: cerca o sobre la capacidad el modelo es optimista. "
+                'Tomar la latencia y los errores como piso ("al menos").'
             )
 
     return Run(
@@ -677,6 +707,7 @@ def _build_run(
                 latency=latency_stats(rec.latencies_ms[i]),
                 queue=rec.queue_samples[i] if i < len(rec.queue_samples) else {},
                 utilization=rec.utilization_samples[i] if i < len(rec.utilization_samples) else {},
+                edge_calls=rec.edge_calls[i],
                 target_rps=round(rate * (profile.multiplier_at(i + 0.5) if profile else 1.0), 3),
             )
             for i in range(rec.seconds)
@@ -684,6 +715,7 @@ def _build_run(
         traffic_profile=_profile_segments(profile, rate),
         elapsed_ms=round((time.perf_counter() - wall_start) * 1000, 1),
         saturation=saturation,
+        measured_edges=rec.measured_edges,
     )
 
 

@@ -8,15 +8,15 @@ Todas las rutas piden sesión cuando la API tiene login (JAJ-78, ``get_store``).
 
 from __future__ import annotations
 
-import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.agent import OpError, apply_ops
-from app.agent.proposals import ProposalDraft, prepare_proposal
+from app.agent.proposals import ProposalDraft, already_created, prepare_proposal
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_OPERATIONS, INVALID_PARAMETERS, NOT_FOUND, UNKNOWN_SCENARIO, ApiError
+from app.api.routes.attachments import purge_expired
 from app.api.routes.models import sample_or_404
 from app.api.routes.runs import load_or_422, scenario_model
 from app.api.run_cache import RUN_CACHE_HEADER, cached_run
@@ -40,7 +40,7 @@ from app.api.schemas import (
     VersionResultsRequest,
     VersionSummary,
 )
-from app.api.store import OwnedStore, Project, ProjectScenario, ProjectStore, Version
+from app.api.store import SCENARIO_NAME, OwnedStore, Project, ProjectScenario, ProjectStore, Version
 from app.costs import (
     CostDelta,
     CostEstimate,
@@ -54,10 +54,10 @@ from app.costs import (
 from app.costs.estimate import COMPONENT_NAMES, describe_missing
 from app.models.compare import run_delta
 from app.models.run import Run
+from app.reports import es
+from app.storage.attachments import StorageError
 
 router = APIRouter(prefix="/projects", tags=["projects"])
-
-SCENARIO_NAME = re.compile(r"[a-z0-9_-]{1,60}")
 
 
 def get_store(request: Request, user: User | None = Depends(current_user)) -> ProjectStore:
@@ -124,6 +124,34 @@ def get_project(project_id: str, store: ProjectStore = Depends(get_store)) -> Pr
     return _detail(_project(store, project_id))
 
 
+@router.delete("/{project_id}", status_code=204, summary="Borrar un proyecto con todo lo suyo (JAJ-144)")
+def delete_project(project_id: str, request: Request, store: OwnedStore = Depends(get_store)) -> Response:
+    """Borra el proyecto y todo lo que cuelga de él: versiones, escenarios, metas, runs, reportes, chat,
+    adjuntos y repos vinculados. Solo el dueño: el proyecto de otro da 404, como en ``GET``.
+
+    Primero borra de Storage los archivos de sus adjuntos, porque la cascada de Postgres solo borra las
+    filas: sin ellas, el barrido de vencidos ya no encontraría los archivos. Si Storage falla, responde
+    502 y no borra nada. La conexión al repo (``repo_connections``) es del usuario y se conserva."""
+    project = _project(store, project_id)
+    storage = request.app.state.attachments
+    # los adjuntos piden sesión: sin dueño no hay ninguno, y purge_expired(None) barrería los de todos
+    if storage is not None and store.owner is not None:
+        try:
+            purge_expired(store, storage, store.owner)  # los vencidos ya no aparecen en list_attachments
+            files = [a.storage_path for a in store.list_attachments(project.id, store.owner, include_pending=True)]
+            if files:
+                storage.delete(files)
+        except StorageError:
+            raise ApiError(
+                502,
+                "attachments_storage_error",
+                "No pudimos borrar los adjuntos del proyecto. Inténtalo de nuevo; el proyecto no se borró.",
+            ) from None
+    if not store.delete(project.id):
+        raise ApiError(404, NOT_FOUND, f"No existe el proyecto '{project_id}'.", resource="project")
+    return Response(status_code=204)
+
+
 @router.post(
     "/{project_id}/versions",
     response_model=VersionDetail,
@@ -167,10 +195,17 @@ def accept_chat_proposal(
     project_id: str, proposal_id: UUID, draft: ProposalDraft, store: ProjectStore = Depends(get_store)
 ) -> VersionDetail:
     base = _version(store, _project(store, project_id), draft.base)
+    scenarios = store.list_scenarios(project_id)
+    if already_created(base.model, draft, scenarios):
+        return VersionDetail(**_summary(base).model_dump(), model=base.model)
     try:
-        prepared = prepare_proposal(base.model, draft, store.list_scenarios(project_id))
+        prepared = prepare_proposal(base.model, draft, scenarios)
     except ValueError as e:
         raise ApiError(422, INVALID_OPERATIONS, str(e)) from None
+    if prepared.new_scenario is not None:
+        # JAJ-149: un escenario nuevo es del proyecto, no de una versión: se guarda y la versión queda igual
+        store.upsert_scenario(project_id, prepared.new_scenario)
+        return VersionDetail(**_summary(base).model_dump(), model=base.model)
     note = draft.note or "; ".join(prepared.changes)
     version = store.add_version(project_id, prepared.model, "agente", draft.base, note[:500], proposal_id=proposal_id)
     return VersionDetail(**_summary(version).model_dump(), model=version.model)
@@ -427,41 +462,50 @@ def compare_summary(
     return _cost_sentence(a, b, cost, fa, fb) + _saturation_sentence(a, b, run_a, run_b) + _overrides_sentence(run_a)
 
 
+_usd = es.usd  # 'US$1.234,50', el formato del editor (JAJ-156)
+
+
 def _cost_sentence(a: int, b: int, cost: CostDelta, fa: FailureCost | None, fb: FailureCost | None) -> str:
+    """La parte de costo del resumen de una comparación. Ejemplos:
+
+    * 'v2 cuesta +US$57,66/mes respecto de v1 y evita entre US$120 y US$480 por hora en ventas en juego.'
+    * 'v2 suma US$7,00/mes en la API (v1 no tiene precio); el resto cuesta lo mismo.' (JAJ-156)
+    * 'v2 cuesta lo mismo que v1 sin contar la DB, que no tiene precio (…).' (JAJ-88)
+
+    Un componente con precio en una sola versión se dice aparte, con su monto: sumarlo a la diferencia la
+    inflaría, y dejarlo fuera sin decirlo hacía leer "+US$0,00" con totales distintos. Las ventas en juego
+    se omiten si la diferencia es US$0 en las dos cotas (ninguna versión falla, o fallan igual).
+    """
+    parts = []
+    for c, usd in cost.priced_in_one.items():
+        priced, other = (b, a) if c in cost.missing_a else (a, b)
+        parts.append(f"v{priced} suma {_usd(usd)}/mes en {COMPONENT_NAMES[c]} (v{other} no tiene precio)")
     sign = "+" if cost.diff >= 0 else "−"
-    text = f"v{b} cuesta {sign}US${abs(cost.diff):,.2f}/mes respecto de v{a}"
-    if cost.missing:  # JAJ-88: sin esto, "+US$0.00" con la API en local se lee como "no cambia el costo"
-        text += " sin contar " + _missing_clause(a, b, cost)
+    if not parts:
+        parts.append(
+            f"v{b} cuesta lo mismo que v{a}"
+            if cost.diff == 0
+            else f"v{b} cuesta {sign}{_usd(cost.diff)}/mes respecto de v{a}"
+        )
+    elif cost.by_line:  # el resto: lo que tiene precio en las dos
+        parts.append("el resto cuesta lo mismo" if cost.diff == 0 else f"el resto cuesta {sign}{_usd(cost.diff)}/mes")
+    text = "; ".join(parts)
+    both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
+    if both:  # JAJ-88: sin esto, "lo mismo" con la DB en local se lee como "no cambia el costo"
+        text += f" sin contar {describe_missing(both)} (despliegue local o proveedor sin precios)"
     if fa is None or fb is None:
         return text + "."
     if fa.too_short or fb.too_short:
         return text + ". La simulación es muy corta para ver los timeouts: simula más tiempo para comparar las ventas."
     lo, hi = sorted(fa.lost_sales_per_hour[k]["value"] - fb.lost_sales_per_hour[k]["value"] for k in ("low", "high"))
+    if round(lo) == 0 and round(hi) == 0:
+        return text + "."
     floor = " (al menos)" if fa.is_floor or fb.is_floor else ""
     if lo >= 0:
-        return text + f" y evita entre US${lo:,.0f} y US${hi:,.0f} por hora en ventas en juego{floor}."
+        return text + f" y evita entre {_usd(lo, 0)} y {_usd(hi, 0)} por hora en ventas en juego{floor}."
     if hi <= 0:
-        return text + f" y suma entre US${-hi:,.0f} y US${-lo:,.0f} por hora en ventas en juego{floor}."
-    return text + f"; las ventas en juego cambian entre US${lo:,.0f} y US${hi:,.0f} por hora{floor}."
-
-
-def _missing_clause(a: int, b: int, cost: CostDelta) -> str:
-    """Qué no cuenta la diferencia y por qué (JAJ-88). Ejemplos:
-
-    * 'la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)'
-    * 'la API (con precio solo en v2)'
-    * 'la DB, que no tiene precio (…), ni la API (con precio solo en v2)'
-    """
-    both = [c for c in cost.missing if c in cost.missing_a and c in cost.missing_b]
-    only = [
-        f"{COMPONENT_NAMES[c]} (con precio solo en v{b if c in cost.missing_a else a})"
-        for c in cost.missing
-        if c not in both
-    ]
-    if not both:
-        return " ni ".join(only)
-    head = f"{describe_missing(both)} (despliegue local o proveedor sin precios)"
-    return head + (", ni " + " ni ".join(only) if only else "")
+        return text + f" y suma entre {_usd(hi, 0)} y {_usd(lo, 0)} por hora en ventas en juego{floor}."
+    return text + f"; las ventas en juego cambian entre −{_usd(lo, 0)} y +{_usd(hi, 0)} por hora{floor}."
 
 
 def _saturation_sentence(a: int, b: int, run_a: Run | None, run_b: Run | None) -> str:

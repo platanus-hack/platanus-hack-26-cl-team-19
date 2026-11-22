@@ -113,6 +113,8 @@ function selectVersion(withCache: boolean) {
     </div>
 
     <ArchitectureDiagram
+      fixed
+      animate-layout
       :nodes="nodes"
       :edges="diagram.edges"
       :flows="flows"

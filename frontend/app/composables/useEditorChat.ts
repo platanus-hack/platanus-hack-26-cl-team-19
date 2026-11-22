@@ -8,6 +8,7 @@ import {
   type ChatProvider,
 } from "@/services/chat-stream";
 import { createEditorApi } from "@/services/editor-api";
+import { scenarioLabel } from "@/services/editor-view";
 
 type ToolMessage = Extract<ChatMessage, { role: "tool" }>;
 type Conversation = {
@@ -16,6 +17,26 @@ type Conversation = {
   evidence?: ChatEvidence | null;
 };
 
+/**
+ * Las herramientas que guardan una versión (JAJ-154). Las de lectura (get_model, simulate,
+ * estimate_cost…) también devuelven `version`, pero es la que leyeron: no se abre ni se simula (JAJ-165).
+ * En el chat, propose_version solo prepara una tarjeta y no llega con `version`.
+ */
+export const VERSION_TOOLS = new Set([
+  "propose_version",
+  "set_traffic",
+  "set_deployment",
+  "submit_architecture",
+  "apply_log_traffic",
+]);
+
+/** El motivo de un paso fallido en una línea: la primera frase del error, sin el detalle técnico. */
+function errorSummary(error: unknown) {
+  const text = String(error).split("\n")[0]!.trim();
+  const sentence = text.match(/^.+?[.!?](?=\s|$)/)?.[0] ?? text;
+  return sentence.length > 120 ? `${sentence.slice(0, 117)}…` : sentence;
+}
+
 function number(value: number) {
   return value.toLocaleString("es-CL", { maximumFractionDigits: 1 });
 }
@@ -23,11 +44,21 @@ function number(value: number) {
 export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
   const { result } = event;
   if (result?.error)
-    return { status: "error" as const, output: String(result.error) };
+    return {
+      status: "error" as const,
+      output: errorSummary(result.error),
+      detail: String(result.error),
+    };
+  const created =
+    VERSION_TOOLS.has(event.name ?? "") && typeof result?.version === "number"
+      ? (result.version as number)
+      : undefined;
   let output: string | undefined;
   if (typeof result?.p95_ms === "number")
     output = [
-      result.scenario === "cyberday" ? "CyberDay" : result.scenario,
+      typeof result.scenario === "string"
+        ? scenarioLabel(result.scenario)
+        : undefined,
       `Latencia p95 de ${number(result.p95_ms)} ms`,
     ]
       .filter(Boolean)
@@ -36,15 +67,15 @@ export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
     output = `${number(result.peak_rps.value)} req/s pico · ${result.endpoints?.length ?? 0} endpoints`;
   else if (event.name === "apply_log_traffic" && result?.version)
     output = `Versión ${result.version} con tráfico observado`;
-  else if (typeof result?.version === "number")
-    output = [`Versión ${result.version} creada`, ...(result.changes ?? [])]
+  else if (created !== undefined)
+    output = [`Versión ${created} creada`, ...(result.changes ?? [])]
       .slice(0, 3)
       .join(" · ");
   return {
     status: "done" as const,
     output,
     detail: JSON.stringify(result, null, 2),
-    version: typeof result?.version === "number" ? result.version : undefined,
+    version: created,
   };
 }
 
@@ -315,12 +346,10 @@ export async function finishTurn(
   for await (const event of readChatEvents(stream)) {
     applyChatEvent(conversation, event, turnId);
     if (event.type === "text") reply.push(event.text);
-    if (
-      event.type === "tool_result" &&
-      !event.result?.error &&
-      typeof event.result?.version === "number"
-    )
-      created.push(event.result.version);
+    if (event.type === "tool_result" && !event.result?.error) {
+      const { version } = toolResult(event);
+      if (version !== undefined) created.push(version);
+    }
     if (event.type === "done") {
       if (reply.length)
         conversation.history = [

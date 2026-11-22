@@ -196,7 +196,27 @@ def test_add_cache_only_some_reads(model):
     steps = endpoint(r.model, "GET /items/")["steps"]
     assert [s["kind"] for s in steps] == ["cache", "db", "db"]
     assert [s["at"] for s in steps[0]["on_miss"]] == [at]
-    assert any("0 %" in w for w in r.warnings)  # sin tasa de aciertos: el peor caso
+    assert any("80 %" in w for w in r.warnings)  # sin tasa de aciertos: la de partida del catálogo
+
+
+def test_add_cache_without_hit_ratio_uses_catalog_default(model):
+    """JAJ-150: sin dato del usuario la caché no se simula con 0 %, que no le quitaba lecturas a la DB."""
+    r = apply_ops(model, [{"op": "add_cache", "endpoint": "GET /items/"}])
+    ratio = endpoint(r.model, "GET /items/")["steps"][0]["hit_ratio"]
+    assert ratio["value"] == 0.8 and ratio["label"] == "SUPUESTO" and ratio["needs_review"] is True
+    assert "80 % de aciertos" in r.changes[0]
+    assert simulates(r.model).cache.hits > 0
+    assert_provenance(r.model)
+
+
+def test_cache_warnings_speak_to_the_user_once(model):
+    """JAJ-153: un aviso por tarjeta, dirigido al usuario y sin nombres de campos internos."""
+    ops = [{"op": "add_cache", "endpoint": e} for e in ("GET /items/", "GET /items/{id}")]
+    r = apply_ops(model, ops)
+    assert len(r.warnings) == len(set(r.warnings))
+    assert sum("Costos" in w for w in r.warnings) == 1
+    visible = " ".join(r.warnings + r.changes)
+    assert "Pregúntale" not in visible and "on_miss" not in visible
 
 
 def test_add_cache_hit_ratio_needs_a_quote(model):

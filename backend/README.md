@@ -56,6 +56,14 @@ backend/
 
 El flujo es: **modelo v1 (JSON)** → `load_model()` → `simulate()` → **Run**. La API recibe el modelo en `POST /runs` y devuelve el `Run`.
 
+## Textos que ve el usuario
+
+Las fuentes de los números (`source`) y los avisos explican de dónde sale cada número con palabras del usuario: «Lectura por PK, pgbench, 1 M filas…» o «Default de QueuePool, SQLAlchemy 2.1.9». Esto vale para el catálogo, los modelos de ejemplo, los avisos del motor y del costo, el reporte, y las descripciones de las tools y el prompt del agente, que el agente puede repetir en el chat.
+
+- **No llevan IDs de Linear** (`JAJ-8`, `P-JAJ-1`), ni rutas de `spikes/`, ni «guion de la demo» (JAJ-152). Esos IDs van en los comentarios y los docstrings.
+- **Lo revisa `tests/api/test_no_internal_refs.py`:** recorre los JSON y lo que devuelve la API en el camino de la demo (resultados, costos, comparación y reportes).
+- **Las versiones ya guardadas** en la base conservan las fuentes con que se crearon.
+
 ## Cómo modela el sistema el motor
 
 Los recursos se arman desde el `deployment` del modelo:
@@ -206,6 +214,12 @@ Sin perfil, el motor simula una tasa constante: las req/s del escenario, o `rps`
 - **`series[].target_rps`:** las req/s que pide el perfil en cada segundo, para dibujar la curva pedida contra lo que se atiende (`ok`). Sin perfil es la tasa constante.
 - **`traffic_profile`:** los tramos en req/s, con su segundo de inicio y de fin. Sin perfil es `null`.
 
+### Flujo por arista (JAJ-136)
+
+`measured_edges` enumera los ID de `POST /graph` que instrumenta la simulación. Cada `series[].edge_calls` guarda por ID las llamadas iniciadas en ese segundo. Si falta una arista incluida en `measured_edges`, su contador es cero. En corridas anteriores a esta métrica, `measured_edges` puede estar ausente o ser `null`.
+
+Cada repetición de un paso cuenta por separado y los pasos condicionales solo cuentan al ejecutarse. El conector de la cola al worker mide el inicio del trabajo al adquirir un worker. La espera sigue saliendo en `series[].queue` por recurso.
+
 **El tope de requests por llamada** (300.000) usa el multiplicador medio del perfil.
 
 **La forma de `"pico"`** es la que usa el editor en sus datos de ejemplo. Es una elección de diseño para mostrar un evento, no una medición: en JAJ-59, el usuario la va a poder dar en el chat.
@@ -304,6 +318,7 @@ docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c 'pip install -q -e ".[
 | `POST` | `/graph` | Grafo del diagrama desde `{"model": ...}`: nodos, aristas con sus endpoints y `archivo:línea`, y el peso de cada endpoint. |
 | `POST` | `/projects` | Crea un proyecto desde `{"sample": id}` o `{"model": ...}`, con `name` opcional. Queda con **v1** (`origin: repo`). |
 | `GET` | `/projects` · `/projects/{id}` | Los proyectos, o uno con su historial de versiones (sin los modelos) y `repositories`, el repo del que salió (ver "Repo de cada proyecto" abajo). |
+| `DELETE` | `/projects/{id}` | Borra el proyecto con todo lo suyo (JAJ-144): versiones, escenarios, runs, reportes, chat, adjuntos (también sus archivos en Storage) y repos vinculados. 204; 404 si no existe o es de otro usuario. Si Storage falla, 502 y no borra nada. La conexión con el repo es del usuario y se conserva. |
 | `POST` | `/projects/{id}/versions` | Guarda `{"model", "origin", "parent", "note"}` como versión nueva. `origin`: `repo`, `manual` (por defecto) o `agente`; `parent`: por defecto, la última. |
 | `GET` | `/projects/{id}/versions/{n}` | Una versión con su modelo. |
 | `POST` | `/projects/{id}/versions/{n}/runs` | Simula la versión `n`. Body: el de `POST /runs` sin `model`. Si ya se simuló con los mismos parámetros, devuelve el run guardado (ver "Runs guardados" abajo). |
@@ -614,7 +629,13 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 
 **API o DB sin precio (JAJ-88).** Solo hay precios para la API en `fargate` y para la DB en `supabase` o `rds_postgres`. En `local` cuestan US$0, y en otro proveedor (por ejemplo `render`) no tienen precio. En ambos casos el total no las incluye, así que **no cambia con sus réplicas ni con su plan**. Un repo importado con Docker Compose queda en `local`. Con branchpoint-shop-demo, por ejemplo, 1 y 5 réplicas daban "= Igual", y los US$62/mes eran solo la caché.
 - **`CostEstimate.missing`:** `["api", "db"]`, los componentes sin precio. El primer elemento de `warnings` lo explica y dice qué proveedor usar para comparar.
-- **`CostDelta.missing`:** los que faltan en alguna de las dos versiones. `missing_a` y `missing_b` dicen en cuál. `a`, `b`, `diff`, `pct` y `by_line` **cuentan solo los componentes con precio en las dos**. Si v1 está en local y v2 en Fargate, sumar la API (y su ALB) haría que todo el "+US$X" fuera la API de v2, presentado como una diferencia. En ese caso el resumen dice "sin contar la API (con precio solo en v2)". Los totales completos siguen en `cost_a` y `cost_b`.
+- **`CostDelta.missing`:** los que faltan en alguna de las dos versiones. `missing_a` y `missing_b` dicen en cuál. `a`, `b`, `diff`, `pct` y `by_line` **cuentan solo los componentes con precio en las dos**. Si v1 está en local y v2 en Fargate, sumar la API (y su ALB) haría que todo el "+US$X" fuera la API de v2, presentado como una diferencia. Los totales completos siguen en `cost_a` y `cost_b`.
+- **`CostDelta.priced_in_one` y `comparable`** (JAJ-156):
+  - `priced_in_one` dice cuánto cuesta cada componente con precio en una sola versión, medido en la versión que lo tiene, por ejemplo `{"api": 7.0}`.
+  - `comparable` es `false` si hay alguno. Entonces el editor no debe mostrar `a → b` como «= Igual»: los totales de `cost_a` y `cost_b` son distintos.
+  - El resumen dice ese componente aparte, con su monto: «v2 suma US$7,00/mes en la API (v1 no tiene precio); el resto cuesta lo mismo».
+- **Ventas en juego en el resumen:** se omiten cuando la diferencia es US$0 en las dos cotas, es decir, cuando ninguna versión falla o las dos fallan igual.
+- **Formato de los montos:** el del editor (es-CL), con punto de miles y coma decimal: «US$1.234,50».
 - **Proveedores con precio:** lo que falta se detecta de las mismas funciones que calculan el precio. `PRICED_API` y `PRICED_DB` solo arman el aviso, y un test comprueba que coinciden.
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
 - **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Si lo que tiene precio ya supera el presupuesto, queda en `false`, porque lo que falta solo puede sumar. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
@@ -637,8 +658,15 @@ Cada simulación guarda su reporte (`branchpoint.report/v1`, tabla `reports`): u
   - **Resultados:** latencias, throughput, errores, requests sin respuesta y saturación, con su procedencia.
   - **Cuello de botella:** el recurso, su `archivo:línea` y el endpoint que más lo ocupa.
   - **Costos y supuestos:** el costo por línea, el costo de fallar y los supuestos principales.
-  - **Conclusión:** escrita con una plantilla, sin LLM.
+    - **El primer supuesto es el escenario de la corrida, sacado de la tabla del proyecto** (JAJ-152): «Escenario «cyberday» del proyecto: 20 veces el pico del modelo (26,2 req/s). Definido por el usuario». Para `actual` dice que nace con el proyecto, y para una tasa a mano, «Tasa elegida para esta corrida».
+    - **No se listan los escenarios del catálogo que trae el modelo** (`traffic.scenarios`): la corrida no los usa.
+  - **Conclusión:** escrita con una plantilla, sin LLM, en formato es-CL (JAJ-164), con `app/reports/es.py`, igual que el Markdown y la frase de `compare`. Ejemplo: «En cyberday, v3 atiende en promedio 21,9 req/s (el escenario llega a 26,2 req/s), con p95 de 15 ms y sin errores. La API tiene holgura para este tráfico. Cuesta US$68,91/mes sin contar la base de datos, que no tiene precio».
+    - **Si atiende menos del 95 % de la tasa del escenario**, dice las dos tasas: con subida y bajada, el promedio queda bajo el pico.
+    - **Si el sistema no alcanza a atender**, dice «0 % de errores entre las que terminaron» en vez de «sin errores».
 - **Diagnóstico por componente** (API, DB, colas): uso promedio y pico del recurso más ocupado, costo mensual y estado.
+  - **Componentes con costo y sin recurso en el motor**, como la caché o el frontend (JAJ-164): aparecen igual.
+    - Van con estado `ok`, uso y margen en `null` (el editor muestra «—») y su costo.
+    - La caché dice además sus aciertos en la corrida.
   - **Estados:** `overloaded` (uso promedio de 80 % o más, o el cuello de botella con requests sin atender), `idle` (bajo 30 % incluso en el pico y con costo) u `ok`. Los umbrales van en `thresholds`, con etiqueta `SUPUESTO`.
   - **Margen hasta saturar:** req/s ÷ uso promedio. Es una aproximación lineal (`ESTIMADO`) y se omite si el recurso ya está saturado.
   - **Propósito:** son datos estructurados, pensados para decidir más adelante cambios de arquitectura por costo o por riesgo de caída.

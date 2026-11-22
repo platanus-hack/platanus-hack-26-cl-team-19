@@ -68,6 +68,8 @@ import {
 } from "@/services/deployment-options";
 import {
   costComponentLabel,
+  flowPeak,
+  scenarioLabel,
   simulationProvenance,
   toBottleneck,
   toComparisonRows,
@@ -242,8 +244,11 @@ const edges = computed(() =>
       : edge,
   ),
 );
+const peakFlow = computed(() => (run.value ? flowPeak(run.value) : 1));
 const flows = computed(() =>
-  graph.value && run.value ? toFlows(graph.value, run.value, cursor.value) : [],
+  graph.value && run.value
+    ? toFlows(graph.value, run.value, cursor.value, peakFlow.value)
+    : [],
 );
 const bottleneck = computed(() =>
   run.value
@@ -1119,6 +1124,7 @@ function openVersionDraft() {
     <template #canvas>
       <ArchitectureDiagram
         v-if="graph"
+        :fixed="embedded"
         :nodes="nodes"
         :edges="edges"
         :bottleneck="bottleneck"
@@ -1334,7 +1340,11 @@ function openVersionDraft() {
               v-else-if="simulationState === 'idle'"
               class="text-sm text-muted-foreground"
             >
-              Elige un escenario y pulsa Simular para reproducir el resultado.
+              {{
+                scenario
+                  ? `Pulsa Simular para ver cómo se comporta ${version?.label ?? "la versión"} en ${scenarioLabel(scenario)}.`
+                  : "Elige un escenario y pulsa Simular para reproducir el resultado."
+              }}
             </p>
             <SimulationRunSummary
               v-if="run"

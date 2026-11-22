@@ -19,6 +19,7 @@ from psycopg_pool import ConnectionPool
 
 from app.api.store import (
     Attachment,
+    CachedAnalysis,
     GitHubInstallation,
     Origin,
     Project,
@@ -28,8 +29,8 @@ from app.api.store import (
     ReportSummary,
     RepoSource,
     Version,
+    initial_scenarios,
     report_summary,
-    scenarios_from_model,
 )
 
 _SUMMARY = "number, origin::text as origin, parent_number, note, created_at"
@@ -274,7 +275,7 @@ class PostgresProjectStore:
             with conn.cursor() as cur:
                 cur.executemany(
                     "insert into scenarios (project_id, name, multiplier, rps) values (%s, %s, %s, %s)",
-                    [(row["id"], s.name, s.multiplier, s.rps) for s in scenarios_from_model(model)],
+                    [(row["id"], s.name, s.multiplier, s.rps) for s in initial_scenarios(model)],
                 )
                 primary = source.repo_full_name if source else None
                 cur.executemany(
@@ -326,6 +327,20 @@ class PostgresProjectStore:
             versions = self._summaries(conn, ids)
             repos = self._repos(conn, ids)
         return [_project(r, versions[r["id"]], repos.get(r["id"])) for r in rows]
+
+    def delete(self, project_id: str, owner: str | None = None) -> bool:
+        """Una sola sentencia: las tablas del proyecto se van por ``on delete cascade`` (versiones,
+        escenarios, runs, reportes, ingestas, chat, adjuntos, repos vinculados, perfiles de uso). La
+        ``repo_connection`` es del usuario, no del proyecto, y queda para el próximo análisis (JAJ-144)."""
+        pid = _uuid(project_id)
+        if pid is None:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                "delete from projects where id = %s and owner_id is not distinct from %s::uuid returning id",
+                (pid, owner),
+            ).fetchone()
+        return row is not None
 
     @staticmethod
     def _repos(conn: Connection, project_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[ProjectRepo]]:
@@ -637,6 +652,37 @@ class PostgresProjectStore:
                 (owner, installation_id, repo_id, full_name, default_branch),
             ).fetchone()
         return str(row["id"])
+
+    # ---------- Caché del análisis (JAJ-146) ----------
+
+    def find_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str) -> CachedAnalysis | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "select submission, usage, steps, provider, llm_model from repo_analyses"
+                " where github_repo_id = %s and commit_sha = %s and analyzer = %s",
+                (github_repo_id, commit_sha, analyzer),
+            ).fetchone()
+        if row is None:
+            return None
+        return CachedAnalysis(row["submission"], row["usage"], row["steps"], row["provider"], row["llm_model"])
+
+    def save_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str, analysis: CachedAnalysis) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "insert into repo_analyses"
+                " (github_repo_id, commit_sha, analyzer, provider, llm_model, submission, usage, steps)"
+                " values (%s, %s, %s, %s, %s, %s, %s, %s) on conflict do nothing",
+                (
+                    github_repo_id,
+                    commit_sha,
+                    analyzer,
+                    analysis.provider,
+                    analysis.llm_model,
+                    Jsonb(analysis.submission),
+                    Jsonb(analysis.usage),
+                    analysis.steps,
+                ),
+            )
 
     # ---------- Adjuntos del chat (IA-6) ----------
 

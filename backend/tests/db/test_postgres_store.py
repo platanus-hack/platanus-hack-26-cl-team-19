@@ -51,16 +51,14 @@ def test_unknown_or_malformed_ids_are_none(store, model):
     assert store.get_version(project.id, 9) is None
 
 
-def test_create_loads_the_model_scenarios(database_url, store, model):
+@pytest.mark.initial_scenarios
+def test_create_starts_with_the_current_traffic(database_url, store, model):
     project = store.create("tienda", model, None)
     with psycopg.connect(database_url) as conn:
         rows = conn.execute(
             "select name, multiplier, rps from scenarios where project_id = %s order by name", (project.id,)
         ).fetchall()
-    assert [(name, float(mult), rps) for name, mult, rps in rows] == [
-        ("cyberday", 20.0, None),
-        ("pico_normal", 1.0, None),
-    ]
+    assert [(name, float(mult), rps) for name, mult, rps in rows] == [("actual", 1.0, None)]
 
 
 def test_concurrent_versions_get_distinct_numbers(store, model):
@@ -126,3 +124,17 @@ def test_chat_survives_a_restart_and_keeps_its_order(database_url, store, model)
         reopened.close()
     store.save_chat(project.id, [])
     assert store.get_chat(project.id) == []
+
+
+def test_analysis_cache_round_trip(store):
+    """El caché de análisis por repo, commit y huella (JAJ-146). La primera entrega guardada gana."""
+    from app.api.store import CachedAnalysis
+
+    sha = "06ff98cfa9b925e35b866e5abdf9e792006a36bb"
+    first = CachedAnalysis({"framework": "express", "endpoints": []}, {"output": 400}, 2, "anthropic", "claude-x")
+    assert store.find_analysis(7, sha, "huella") is None
+    store.save_analysis(7, sha, "huella", first)
+    store.save_analysis(7, sha, "huella", CachedAnalysis({"framework": "otra"}, {}, 9))
+    assert store.find_analysis(7, sha, "huella") == first
+    assert store.find_analysis(7, sha, "otra-huella") is None
+    assert store.find_analysis(8, sha, "huella") is None

@@ -117,6 +117,7 @@ export function useEditorProject(embeddedDemo = false) {
     const available = scenarios.value.filter(({ disabled }) => !disabled);
     if (!available.some(({ id }) => id === scenario.value)) {
       scenario.value =
+        available.find(({ id }) => id === "actual")?.id ??
         available.find(({ id }) => id === "cyberday")?.id ??
         available[0]?.id ??
         "";
@@ -279,6 +280,12 @@ export function useEditorProject(embeddedDemo = false) {
         ],
       };
       const scenarioName = proposal.draft.scenario?.name;
+      // JAJ-149: un escenario nuevo queda en el proyecto; se recarga la lista para poder elegirlo
+      if (
+        scenarioName &&
+        !savedScenarios.value.some(({ name }) => name === scenarioName)
+      )
+        savedScenarios.value = await api.listScenarios(current.id);
       if (scenarioName) scenario.value = scenarioName;
       await displayVersion(saved);
     });

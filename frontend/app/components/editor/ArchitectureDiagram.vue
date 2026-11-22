@@ -27,17 +27,19 @@ const props = defineProps<{
   selectedId?: string | null;
   bottleneck?: Bottleneck | null;
   canExplain?: boolean;
-  /** Flujo estimado por conector en el segundo que se muestra (JAJ-129). */
+  /** Flujo por conector en el segundo visible. */
   flows?: DiagramFlow[];
   /** true mientras se reproduce la corrida: las partículas se mueven. */
   animating?: boolean;
   animateLayout?: boolean;
+  /** El diagrama queda ajustado a la vista, sin zoom ni arrastre (la landing). */
+  fixed?: boolean;
 }>();
 
 const emit = defineEmits<{ select: [id: string | null]; explain: [] }>();
 
 // Geometría en px del lienzo sin escalar.
-const NODE_WIDTH = 136;
+const NODE_WIDTH = 156;
 const NODE_HEIGHT = 48;
 const COLUMN_GAP = 104;
 const ROW_GAP = 16;
@@ -277,7 +279,7 @@ const paths = computed(() =>
 );
 
 // Partículas del flujo (JAJ-129): representan flujo agregado, no requests individuales (JAJ-38).
-// La densidad sigue al req/s estimado y la velocidad es fija.
+// La densidad y el grosor siguen al flujo. La velocidad es fija.
 const MAX_PARTICLES = 8;
 const PARTICLE_SPEED = 90; // px/s
 const reducedMotion = usePreferredReducedMotion();
@@ -314,11 +316,12 @@ const particles = computed(() => {
         ...path,
         flow,
         duration,
-        title:
-          `≈ ${rpsFormat.format(flow.rps)} req/s, estimado a partir de la mezcla de endpoints` +
-          (flow.errorShare > 0
-            ? ` · ${percentFormat.format(flow.errorShare)} con error`
-            : ""),
+        title: flow.measured
+          ? `${rpsFormat.format(flow.rps)} llamadas/s simuladas`
+          : `≈ ${rpsFormat.format(flow.rps)} req/s, estimado a partir de la mezcla de endpoints` +
+            (flow.errorShare > 0
+              ? ` · ${percentFormat.format(flow.errorShare)} con error`
+              : ""),
         dots: Array.from({ length: count }, (_, index) => ({
           index,
           error: failing(index),
@@ -358,17 +361,27 @@ watchEffect(() => {
 const viewport = useTemplateRef<HTMLElement>("viewport");
 const { width: viewportWidth, height: viewportHeight } =
   useElementSize(viewport);
-const fit = computed(() => {
-  if (!viewportWidth.value || !viewportHeight.value) return 1;
-  return Math.min(
-    1,
-    viewportWidth.value / layout.value.width,
-    viewportHeight.value / layout.value.height,
-  );
-});
-const zoomLevels = [0.75, 0.9, 1, 1.15, 1.3];
-const zoomIndex = ref(2);
-const scale = computed(() => fit.value * (zoomLevels[zoomIndex.value] ?? 1));
+const canvas = usePanZoom(
+  () => ({ width: viewportWidth.value, height: viewportHeight.value }),
+  () => layout.value,
+);
+const { scale, translate, dragging } = canvas;
+
+function onWheel(event: WheelEvent) {
+  if (props.fixed) return;
+  event.preventDefault();
+  if (viewport.value)
+    canvas.onWheel(event, viewport.value.getBoundingClientRect());
+}
+
+function onPointerDown(event: PointerEvent) {
+  if (!props.fixed) canvas.onPointerDown(event);
+}
+
+function onCanvasClick(event: MouseEvent) {
+  if (canvas.consumeDrag()) return;
+  if (!(event.target as Element).closest("button, a")) emit("select", null);
+}
 
 const statusMeta: Record<
   Exclude<SaturationStatus, "healthy">,
@@ -399,9 +412,14 @@ const alertOf = (status?: SaturationStatus) =>
 
 <template>
   <div
-    class="relative flex min-h-80 flex-1 flex-col overflow-hidden bg-[radial-gradient(var(--color-border)_1px,transparent_1px)] [background-size:1rem_1rem]"
+    class="relative flex min-h-80 flex-1 flex-col overflow-hidden bg-[radial-gradient(var(--color-border)_1px,transparent_1px)]"
+    :style="{
+      backgroundSize: `${16 * scale}px ${16 * scale}px`,
+      backgroundPosition: `${translate.x}px ${translate.y}px`,
+    }"
   >
     <div
+      v-if="!fixed"
       class="absolute top-3 right-3 z-10 flex items-center rounded-md border border-border bg-card"
       role="toolbar"
       aria-label="Zoom del diagrama"
@@ -411,8 +429,8 @@ const alertOf = (status?: SaturationStatus) =>
         variant="ghost"
         size="icon-sm"
         aria-label="Alejar"
-        :disabled="zoomIndex <= 0"
-        @click="zoomIndex--"
+        :disabled="!canvas.canZoomOut.value"
+        @click="canvas.zoomOut()"
       >
         <Minus aria-hidden="true" />
       </Button>
@@ -426,8 +444,8 @@ const alertOf = (status?: SaturationStatus) =>
         variant="ghost"
         size="icon-sm"
         aria-label="Acercar"
-        :disabled="zoomIndex >= zoomLevels.length - 1"
-        @click="zoomIndex++"
+        :disabled="!canvas.canZoomIn.value"
+        @click="canvas.zoomIn()"
       >
         <Plus aria-hidden="true" />
       </Button>
@@ -436,8 +454,8 @@ const alertOf = (status?: SaturationStatus) =>
         variant="ghost"
         size="icon-sm"
         aria-label="Ajustar a la vista"
-        :disabled="zoomIndex === 2"
-        @click="zoomIndex = 2"
+        :disabled="canvas.isReset.value"
+        @click="canvas.reset()"
       >
         <Maximize aria-hidden="true" />
       </Button>
@@ -445,260 +463,263 @@ const alertOf = (status?: SaturationStatus) =>
 
     <div
       ref="viewport"
-      class="flex min-h-0 flex-1 overflow-auto"
-      @click.self="emit('select', null)"
+      class="relative min-h-0 flex-1 overflow-hidden"
+      :class="
+        !fixed && [
+          'touch-none select-none',
+          dragging ? 'cursor-grabbing' : 'cursor-grab',
+        ]
+      "
+      data-testid="diagram-viewport"
+      @wheel="onWheel"
+      @pointerdown="onPointerDown"
+      @pointermove="canvas.onPointerMove"
+      @pointerup="canvas.onPointerUp"
+      @pointercancel="canvas.onPointerUp"
+      @click="onCanvasClick"
     >
       <div
-        class="m-auto shrink-0 overflow-hidden"
+        class="absolute top-0 left-0 origin-top-left"
         :style="{
-          width: `${layout.width * scale}px`,
-          height: `${layout.height * scale}px`,
+          width: `${layout.width}px`,
+          height: `${layout.height}px`,
+          transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
         }"
       >
+        <svg
+          class="pointer-events-none absolute inset-0 overflow-visible"
+          :width="layout.width"
+          :height="layout.height"
+          aria-hidden="true"
+        >
+          <g v-for="path in paths" :key="path.key" :opacity="path.opacity">
+            <path
+              :d="path.d"
+              fill="none"
+              class="stroke-info/60"
+              stroke-width="1"
+            />
+            <circle
+              :cx="path.start.x"
+              :cy="path.start.y"
+              r="3"
+              class="fill-muted-foreground"
+            />
+            <circle
+              :cx="path.end.x"
+              :cy="path.end.y"
+              r="3"
+              class="fill-muted-foreground"
+            />
+          </g>
+        </svg>
+
+        <svg
+          v-if="particles.length"
+          ref="flowLayer"
+          class="pointer-events-none absolute inset-0 overflow-visible"
+          :width="layout.width"
+          :height="layout.height"
+          data-testid="diagram-flow"
+        >
+          <g v-for="item in particles" :key="item.key" :opacity="item.opacity">
+            <path
+              :d="item.d"
+              fill="none"
+              stroke="transparent"
+              stroke-width="10"
+              pointer-events="stroke"
+            >
+              <title>{{ item.title }}</title>
+            </path>
+            <path
+              v-if="
+                item.flow.measured ? item.flow.rps > 0 : prefersStaticParticles
+              "
+              :d="item.d"
+              fill="none"
+              class="stroke-primary"
+              :stroke-width="
+                item.flow.measured ? 1 + 3 * item.flow.intensity : 2
+              "
+              data-testid="diagram-flow-stroke"
+              :stroke-opacity="0.25 + item.flow.intensity * 0.75"
+              :stroke-dasharray="item.flow.errorShare > 0 ? '4 3' : undefined"
+            />
+            <template v-if="!prefersStaticParticles">
+              <g
+                v-for="dot in item.dots"
+                :key="dot.index"
+                :data-error="dot.error || undefined"
+              >
+                <rect
+                  v-if="dot.error"
+                  x="-2.5"
+                  y="-2.5"
+                  width="5"
+                  height="5"
+                  transform="rotate(45)"
+                  class="fill-status-down-foreground"
+                />
+                <circle v-else r="2.5" class="fill-primary" />
+                <animateMotion
+                  :path="item.d"
+                  :dur="`${item.duration}s`"
+                  :begin="`${dot.begin}s`"
+                  repeatCount="indefinite"
+                />
+              </g>
+            </template>
+          </g>
+        </svg>
+
         <div
-          class="relative origin-top-left"
+          v-for="group in layout.labelGroups"
+          :key="group.id"
+          class="absolute flex -translate-y-full flex-col items-center text-center"
           :style="{
-            width: `${layout.width}px`,
-            height: `${layout.height}px`,
-            transform: `scale(${scale})`,
+            left: `${group.left}px`,
+            top: `${group.bottom}px`,
+            width: `${group.width}px`,
+            gap: `${LABEL_STACK_GAP}px`,
           }"
         >
-          <svg
-            class="pointer-events-none absolute inset-0 overflow-visible"
-            :width="layout.width"
-            :height="layout.height"
-            aria-hidden="true"
+          <code
+            v-for="(label, index) in group.labels"
+            :key="index"
+            :title="label.text"
+            class="rounded-sm bg-background px-1 font-mono text-[10px] whitespace-pre text-muted-foreground"
+            :style="{ lineHeight: `${LABEL_LINE_HEIGHT}px` }"
+            >{{ label.lines.join("\n") }}</code
           >
-            <g v-for="path in paths" :key="path.key" :opacity="path.opacity">
-              <path
-                :d="path.d"
-                fill="none"
-                class="stroke-info/60"
-                stroke-width="1"
-              />
-              <circle
-                :cx="path.start.x"
-                :cy="path.start.y"
-                r="3"
-                class="fill-muted-foreground"
-              />
-              <circle
-                :cx="path.end.x"
-                :cy="path.end.y"
-                r="3"
-                class="fill-muted-foreground"
-              />
-            </g>
-          </svg>
+        </div>
 
-          <svg
-            v-if="particles.length"
-            ref="flowLayer"
-            class="pointer-events-none absolute inset-0 overflow-visible"
-            :width="layout.width"
-            :height="layout.height"
-            data-testid="diagram-flow"
-          >
-            <g
-              v-for="item in particles"
-              :key="item.key"
-              :opacity="item.opacity"
-            >
-              <path
-                :d="item.d"
-                fill="none"
-                stroke="transparent"
-                stroke-width="10"
-                pointer-events="stroke"
-              >
-                <title>{{ item.title }}</title>
-              </path>
-              <path
-                v-if="prefersStaticParticles"
-                :d="item.d"
-                fill="none"
-                class="stroke-primary"
-                stroke-width="2"
-                :stroke-opacity="0.25 + item.flow.intensity * 0.75"
-                :stroke-dasharray="item.flow.errorShare > 0 ? '4 3' : undefined"
-              />
-              <template v-else>
-                <g
-                  v-for="dot in item.dots"
-                  :key="dot.index"
-                  :data-error="dot.error || undefined"
-                >
-                  <rect
-                    v-if="dot.error"
-                    x="-2.5"
-                    y="-2.5"
-                    width="5"
-                    height="5"
-                    transform="rotate(45)"
-                    class="fill-status-down-foreground"
-                  />
-                  <circle v-else r="2.5" class="fill-primary" />
-                  <animateMotion
-                    :path="item.d"
-                    :dur="`${item.duration}s`"
-                    :begin="`${dot.begin}s`"
-                    repeatCount="indefinite"
-                  />
-                </g>
-              </template>
-            </g>
-          </svg>
-
-          <div
-            v-for="group in layout.labelGroups"
-            :key="group.id"
-            class="absolute flex -translate-y-full flex-col items-center text-center"
+        <ul aria-label="Diagrama de arquitectura">
+          <li
+            v-for="node in nodes"
+            :key="node.id"
+            class="absolute"
             :style="{
-              left: `${group.left}px`,
-              top: `${group.bottom}px`,
-              width: `${group.width}px`,
-              gap: `${LABEL_STACK_GAP}px`,
+              left: `${layout.positions.get(node.id)?.x ?? 0}px`,
+              top: `${layout.positions.get(node.id)?.y ?? 0}px`,
+              width: `${NODE_WIDTH}px`,
+              opacity: entryOpacity(node.id),
+              height: `${NODE_HEIGHT}px`,
             }"
           >
-            <code
-              v-for="(label, index) in group.labels"
-              :key="index"
-              :title="label.text"
-              class="rounded-sm bg-background px-1 font-mono text-[10px] whitespace-pre text-muted-foreground"
-              :style="{ lineHeight: `${LABEL_LINE_HEIGHT}px` }"
-              >{{ label.lines.join("\n") }}</code
+            <button
+              type="button"
+              class="relative flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
+              :class="
+                node.simulated === false
+                  ? 'border-dashed bg-muted/40 text-muted-foreground'
+                  : [
+                      alertOf(node.status)?.border,
+                      node.bottleneck &&
+                        'ring-2 ring-status-saturated-border ring-offset-2 ring-offset-background',
+                    ]
+              "
+              :aria-pressed="node.id === selectedId"
+              :title="
+                [
+                  node.name,
+                  componentKinds[node.kind].label,
+                  node.tech?.main?.label,
+                  ...(node.tech?.platforms ?? []).map(({ label }) => label),
+                  node.detail,
+                  node.simulated === false ? 'No simulado' : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              "
+              @click="emit('select', node.id === selectedId ? null : node.id)"
             >
-          </div>
-
-          <ul aria-label="Diagrama de arquitectura">
-            <li
-              v-for="node in nodes"
-              :key="node.id"
-              class="absolute"
-              :style="{
-                left: `${layout.positions.get(node.id)?.x ?? 0}px`,
-                top: `${layout.positions.get(node.id)?.y ?? 0}px`,
-                width: `${NODE_WIDTH}px`,
-                opacity: entryOpacity(node.id),
-                height: `${NODE_HEIGHT}px`,
-              }"
-            >
-              <button
-                type="button"
-                class="relative flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
-                :class="
-                  node.simulated === false
-                    ? 'border-dashed bg-muted/40 text-muted-foreground'
-                    : [
-                        alertOf(node.status)?.border,
-                        node.bottleneck &&
-                          'ring-2 ring-status-saturated-border ring-offset-2 ring-offset-background',
-                      ]
-                "
-                :aria-pressed="node.id === selectedId"
-                :title="
-                  [
-                    node.name,
-                    componentKinds[node.kind].label,
-                    node.tech?.main?.label,
-                    ...(node.tech?.platforms ?? []).map(({ label }) => label),
-                    node.detail,
-                    node.simulated === false ? 'No simulado' : undefined,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                "
-                @click="emit('select', node.id === selectedId ? null : node.id)"
+              <TechIcon
+                v-if="node.tech?.main"
+                :name="node.tech.main.icon"
+                class="size-4 shrink-0"
+                :class="{ 'opacity-60': node.simulated === false }"
+              />
+              <component
+                :is="componentKinds[node.kind].icon"
+                v-else
+                class="size-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="truncate">{{ node.name }}</span>
+                <span
+                  v-if="node.simulated === false"
+                  class="truncate text-[0.625rem] text-muted-foreground"
+                  >No simulado{{ node.detail ? ` · ${node.detail}` : "" }}</span
+                >
+                <span
+                  v-else-if="node.detail"
+                  class="truncate font-mono text-[0.625rem] text-muted-foreground"
+                  >{{ node.detail }}</span
+                >
+              </span>
+              <span
+                v-if="node.tech?.platforms.length"
+                class="pointer-events-none absolute end-1.5 top-1 flex items-center gap-1 opacity-70"
               >
                 <TechIcon
-                  v-if="node.tech?.main"
-                  :name="node.tech.main.icon"
-                  class="size-4 shrink-0"
-                  :class="{ 'opacity-60': node.simulated === false }"
+                  v-for="platform in node.tech.platforms"
+                  :key="platform.icon"
+                  :name="platform.icon"
+                  class="h-2.5 w-auto max-w-4"
+                  :class="{
+                    'opacity-60': node.simulated === false,
+                  }"
                 />
+              </span>
+              <span class="sr-only">{{
+                [
+                  componentKinds[node.kind].label,
+                  node.tech?.main?.label,
+                  ...(node.tech?.platforms ?? []).map(({ label }) => label),
+                ]
+                  .filter(Boolean)
+                  .join(", ")
+              }}</span>
+              <template v-if="alertOf(node.status)">
                 <component
-                  :is="componentKinds[node.kind].icon"
-                  v-else
-                  class="size-4 shrink-0 text-muted-foreground"
+                  :is="alertOf(node.status)!.icon"
+                  class="size-4 shrink-0"
+                  :class="alertOf(node.status)!.color"
                   aria-hidden="true"
                 />
-                <span class="flex min-w-0 flex-1 flex-col">
-                  <span class="truncate">{{ node.name }}</span>
-                  <span
-                    v-if="node.simulated === false"
-                    class="truncate text-[0.625rem] text-muted-foreground"
-                    >No simulado{{
-                      node.detail ? ` · ${node.detail}` : ""
-                    }}</span
-                  >
-                  <span
-                    v-else-if="node.detail"
-                    class="truncate font-mono text-[0.625rem] text-muted-foreground"
-                    >{{ node.detail }}</span
-                  >
-                </span>
-                <span
-                  v-if="node.tech?.platforms.length"
-                  class="pointer-events-none absolute end-1.5 top-1 flex items-center gap-1 opacity-70"
-                >
-                  <TechIcon
-                    v-for="platform in node.tech.platforms"
-                    :key="platform.icon"
-                    :name="platform.icon"
-                    class="h-2.5 w-auto max-w-4"
-                    :class="{
-                      'opacity-60': node.simulated === false,
-                    }"
-                  />
-                </span>
-                <span class="sr-only">{{
-                  [
-                    componentKinds[node.kind].label,
-                    node.tech?.main?.label,
-                    ...(node.tech?.platforms ?? []).map(({ label }) => label),
-                  ]
-                    .filter(Boolean)
-                    .join(", ")
-                }}</span>
-                <template v-if="alertOf(node.status)">
-                  <component
-                    :is="alertOf(node.status)!.icon"
-                    class="size-4 shrink-0"
-                    :class="alertOf(node.status)!.color"
-                    aria-hidden="true"
-                  />
-                  <span class="sr-only">{{ alertOf(node.status)!.label }}</span>
-                </template>
-              </button>
-              <span
-                v-if="node.bottleneck"
-                class="absolute -top-2.5 left-2 rounded-sm border border-status-saturated-border bg-card px-1 text-[0.625rem] leading-4 text-status-saturated-foreground"
-                >Cuello de botella</span
-              >
-              <span
-                v-if="node.change"
-                class="absolute -bottom-2.5 left-2 rounded-sm border px-1 text-[0.625rem] leading-4"
-                :class="
-                  node.change === 'new'
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border bg-card text-foreground'
-                "
-                :title="
-                  node.change === 'new'
-                    ? 'No estaba en la versión anterior'
-                    : 'Cambió respecto de la versión anterior'
-                "
-                >{{ node.change === "new" ? "Nuevo" : "Cambiado" }}</span
-              >
-              <span
-                v-if="node.queue"
-                class="absolute -right-2 -bottom-2.5 rounded-sm border border-border bg-card px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground tabular-nums"
-                :title="`${node.queue} requests en espera en este segundo`"
-                >{{ node.queue }} en cola</span
-              >
-            </li>
-          </ul>
-        </div>
+                <span class="sr-only">{{ alertOf(node.status)!.label }}</span>
+              </template>
+            </button>
+            <span
+              v-if="node.bottleneck"
+              class="absolute -top-2.5 left-2 rounded-sm border border-status-saturated-border bg-card px-1 text-[0.625rem] leading-4 text-status-saturated-foreground"
+              >Cuello de botella</span
+            >
+            <span
+              v-if="node.change"
+              class="absolute -bottom-2.5 left-2 rounded-sm border px-1 text-[0.625rem] leading-4"
+              :class="
+                node.change === 'new'
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-card text-foreground'
+              "
+              :title="
+                node.change === 'new'
+                  ? 'No estaba en la versión anterior'
+                  : 'Cambió respecto de la versión anterior'
+              "
+              >{{ node.change === "new" ? "Nuevo" : "Cambiado" }}</span
+            >
+            <span
+              v-if="node.queue"
+              class="absolute -right-2 -bottom-2.5 rounded-sm border border-border bg-card px-1 font-mono text-[0.625rem] leading-4 text-muted-foreground tabular-nums"
+              :title="`${node.queue} requests en espera en este segundo`"
+              >{{ node.queue }} en cola</span
+            >
+          </li>
+        </ul>
       </div>
     </div>
 

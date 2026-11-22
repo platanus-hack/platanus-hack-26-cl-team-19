@@ -11,7 +11,11 @@ De dónde sale cada número nuevo:
   ``SUPUESTO`` con la fuente "Propuesta del agente" y ``needs_review``. Si las dijo el usuario, van
   con ``quote`` (su frase) como fuente.
 * **Datos del mundo** (la tasa de aciertos de una caché): solo con ``quote``. Sin el dato del
-  usuario la caché se simula con 0 % de aciertos, el peor caso, y la operación lo advierte.
+  usuario se usa la tasa de partida del catálogo (``cache_hit_ratio_default``, ``SUPUESTO`` con
+  ``needs_review``) y la operación lo advierte. Con 0 % la caché no cambiaba nada (JAJ-150).
+
+Los ``warnings`` se le muestran al usuario en la tarjeta de la propuesta: le hablan a él, no al
+agente, y ``apply_ops`` deja una sola copia de cada uno (JAJ-153).
 
 Todo error es un ``OpError`` con un mensaje pensado para que el LLM lo lea y corrija.
 """
@@ -225,7 +229,8 @@ def apply_ops(model: dict[str, Any], ops: list[Any]) -> OpsResult:
         load_model(m)
     except (ValueError, KeyError, TypeError) as e:
         raise OpError(f"El modelo resultante no carga en el motor: {e}") from None
-    return OpsResult(m, changes, warnings)
+    # Una operación por endpoint repite el mismo aviso (por ejemplo, el costo de la caché): uno basta.
+    return OpsResult(m, changes, list(dict.fromkeys(warnings)))
 
 
 # ---------- números con procedencia ----------
@@ -369,7 +374,7 @@ def _add_cache(m: dict[str, Any], op: AddCache, catalog: dict[str, Any], warning
     if op.hit_ratio is not None and not op.quote:
         raise OpError(
             "hit_ratio es un dato del usuario: mándalo con quote (su frase). "
-            "Si no lo sabe, omite hit_ratio y se simula el peor caso (0 % de aciertos)."
+            "Si no lo sabe, omite hit_ratio y se usa la tasa de partida del catálogo (SUPUESTO, por confirmar)."
         )
     steps = ep["steps"]
     reads = [
@@ -399,19 +404,30 @@ def _add_cache(m: dict[str, Any], op: AddCache, catalog: dict[str, Any], warning
     }
     if op.hit_ratio is not None:
         cache_step["hit_ratio"] = _num(op.hit_ratio, "fracción", "SUPUESTO", f"Declarado por el usuario: «{op.quote}»")
-        ratio = f"{op.hit_ratio:.0%} de aciertos"
+        ratio = _percent(op.hit_ratio)
     else:
-        ratio = "sin tasa de aciertos"
+        # Sin el dato del usuario se usa la tasa de partida del catálogo (JAJ-150): con 0 % la caché no le
+        # quitaba ninguna lectura a la DB y la propuesta solo sumaba costo. Queda needs_review.
+        default = catalog["cache_hit_ratio_default"]
+        cache_step["hit_ratio"] = {**copy.deepcopy(default), "needs_review": True}
+        ratio = _percent(value(default))
         warnings.append(
-            f"La caché de '{op.endpoint}' no tiene tasa de aciertos: se simula con 0 % (el peor caso). "
-            "Pregúntale al usuario qué fracción de estas lecturas se repite."
+            f"No sabemos cuántas lecturas se repiten: la caché se simula con {ratio} de aciertos. "
+            "Si conoces tu tasa real, dila en el chat y la versión se rehace con ese número."
         )
     cached = set(reads)
     keep = [s for i, s in enumerate(steps) if i not in cached]
     keep.insert(reads[0], cache_step)  # donde estaba la primera lectura: ninguna lectura cacheada va antes
     ep["steps"] = keep
-    warnings.append("El costo de Redis no está en el modelo todavía.")
-    return f"Caché en {op.endpoint}: {len(reads)} lectura(s) pasan a on_miss ({ratio})"
+    # Se repite por cada endpoint cacheado; apply_ops deja una sola copia (JAJ-153).
+    warnings.append("La caché se cobra como ElastiCache (Valkey serverless): su costo aparece en Costos.")
+    reads_text = "1 lectura de la DB pasa" if len(reads) == 1 else f"{len(reads)} lecturas de la DB pasan"
+    return f"Caché en {op.endpoint}: {reads_text} por la caché ({ratio} de aciertos)"
+
+
+def _percent(fraction: float) -> str:
+    """0.8 → «80 %», con el espacio de es-CL."""
+    return f"{round(fraction * 100):d} %"
 
 
 # ---------- move_to_queue ----------

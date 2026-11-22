@@ -164,6 +164,7 @@ export function sampleFlows(
       from,
       to,
       rps,
+      measured: false,
       intensity: peak > 0 ? Math.min(1, rps / peak) : 0,
       errorShare:
         frame.nodes[to]?.status === "down" ? (frame.failureRate ?? 0) : 0,

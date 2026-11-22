@@ -84,9 +84,12 @@ const technicalDetail = computed(() =>
         aria-hidden="true"
       />
       <span class="min-w-0 wrap-anywhere">
-        <span :class="status === 'error' ? 'text-destructive' : undefined">{{
-          action
-        }}</span>
+        <span :class="status === 'error' ? 'text-destructive' : undefined"
+          >{{ action
+          }}<template v-if="status === 'error' && output"
+            >: {{ output }}</template
+          ></span
+        >
         <template v-if="status !== 'error' && output">
           <span aria-hidden="true"> · </span><span>{{ output }}</span>
         </template>
