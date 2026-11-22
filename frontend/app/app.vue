@@ -1,6 +1,6 @@
 <script setup lang="ts">
-const { theme, restoreLegacyTheme } = useAppTheme();
-restoreLegacyTheme();
+const { theme, restoreTheme } = useAppTheme();
+restoreTheme();
 
 useHead({
   htmlAttrs: { "data-theme": theme },

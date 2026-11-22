@@ -1,5 +1,5 @@
 import tailwindcss from "@tailwindcss/vite";
-import { appThemeBootstrap } from "./theme-preferences";
+import { appThemeBootstrap, appThemeCriticalStyle } from "./theme-preferences";
 
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
@@ -15,7 +15,7 @@ export default defineNuxtConfig({
     "/settings": { ssr: false },
     "/reports/**": { ssr: false },
   },
-  modules: ["@nuxt/eslint", "@nuxtjs/color-mode"],
+  modules: ["@nuxt/eslint"],
   components: [{ path: "~/components", extensions: ["vue"] }],
   css: [
     "@fontsource-variable/ibm-plex-sans",
@@ -25,10 +25,16 @@ export default defineNuxtConfig({
     "~/assets/css/tailwind.css",
   ],
   vite: { plugins: [tailwindcss()] },
-  colorMode: { preference: "system", fallback: "light", classSuffix: "" },
   app: {
     head: {
       htmlAttrs: { lang: "es" },
+      style: [
+        {
+          id: "branchpoint-theme-background",
+          textContent: appThemeCriticalStyle,
+          tagPriority: "critical",
+        },
+      ],
       script: [
         {
           id: "branchpoint-theme-init",

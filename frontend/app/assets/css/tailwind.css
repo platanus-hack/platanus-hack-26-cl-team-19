@@ -1,7 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (
+  &:where(
+    :root:is([data-theme="clasico"], [data-theme="brasa"]),
+    :root:is([data-theme="clasico"], [data-theme="brasa"]) *
+  )
+);
 
 /*
  * shadcn-vue reka-vega usa estos nombres; Reka UI expone data-state y data-orientation.
@@ -99,199 +104,6 @@
 
 :root {
   color-scheme: light;
-  --radius: 0.5rem;
-  --overlay-shadow: 0 12px 32px rgb(40 36 110 / 18%);
-  /* Superficies con temperatura índigo: fondo < panel < tarjeta, con borde visible entre ellas. */
-  --background: #f3f4fb;
-  --foreground: #181a2e;
-  --card: #ffffff;
-  --card-foreground: var(--foreground);
-  --popover: var(--card);
-  --popover-foreground: var(--foreground);
-  /* Marca: índigo eléctrico para acción, foco y selección. */
-  --primary: #4f46e5;
-  --primary-foreground: #ffffff;
-  --secondary: #e3e6f8;
-  --secondary-foreground: var(--foreground);
-  --muted: #e9ebf8;
-  --muted-foreground: #4a4f6b;
-  --accent: #dadefa;
-  --accent-foreground: var(--foreground);
-  --destructive: #c81e3a;
-  --destructive-foreground: #ffffff;
-  --border: #d3d7ee;
-  --input: #8288ad;
-  --ring: #4f46e5;
-  --sidebar: #e9ecf8;
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: #d9dcf6;
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: var(--border);
-  --sidebar-ring: var(--ring);
-  /* Tres colores de marca, fuera de la escala de grises:
-     brand = acción y selección, highlight = lo que bifurca o propone el agente,
-     info = datos y aristas. Ninguno reemplaza a status-* ni source-*. */
-  --brand: var(--primary);
-  --brand-foreground: var(--primary-foreground);
-  --highlight: #e11d8f;
-  --highlight-foreground: #ffffff;
-  --info: #0e7490;
-  --info-foreground: #ffffff;
-  --status-healthy: #e6f3eb;
-  --status-healthy-foreground: #215836;
-  --status-healthy-border: #4c8764;
-  --status-at-risk: #fff3d8;
-  --status-at-risk-foreground: #704700;
-  --status-at-risk-border: #98712e;
-  --status-saturated: #fbe8e4;
-  --status-saturated-foreground: #8a342a;
-  --status-saturated-border: #b46a5b;
-  --status-down: var(--status-saturated);
-  --status-down-foreground: var(--status-saturated-foreground);
-  --status-down-border: var(--status-saturated-border);
-  --source-observed: var(--muted);
-  --source-observed-foreground: var(--muted-foreground);
-  --source-observed-border: var(--input);
-  --source-calibrated: var(--muted);
-  --source-calibrated-foreground: var(--muted-foreground);
-  --source-calibrated-border: var(--input);
-  --source-estimated: var(--muted);
-  --source-estimated-foreground: var(--muted-foreground);
-  --source-estimated-border: var(--input);
-  --source-assumed: var(--muted);
-  --source-assumed-foreground: var(--muted-foreground);
-  --source-assumed-border: var(--input);
-}
-
-.dark {
-  color-scheme: dark;
-  --overlay-shadow: 0 12px 32px rgb(0 0 0 / 55%);
-  --background: #0f1124;
-  --foreground: #eef0ff;
-  --card: #181b36;
-  --primary: #8b85ff;
-  --primary-foreground: #0f1124;
-  --secondary: #262a4f;
-  --accent: #2d3262;
-  --muted: #20243f;
-  --muted-foreground: #aeb3d6;
-  --destructive: #f87171;
-  --destructive-foreground: #1a0a0c;
-  --border: #343964;
-  --input: #7f85b0;
-  --ring: #8b85ff;
-  --sidebar: #12142b;
-  --sidebar-accent: #222751;
-  --highlight: #f472b6;
-  --highlight-foreground: #2a0a1c;
-  --info: #22d3ee;
-  --info-foreground: #062a33;
-  --status-healthy: #162d22;
-  --status-healthy-foreground: #a4dfb7;
-  --status-healthy-border: #63936f;
-  --status-at-risk: #332713;
-  --status-at-risk-foreground: #f2ce85;
-  --status-at-risk-border: #b4904b;
-  --status-saturated: #3a211e;
-  --status-saturated-foreground: #ffb5a8;
-  --status-saturated-border: #bc796b;
-}
-
-/*
- * Temas oscuros del selector (ThemeSwitcher). "medianoche" es el .dark de arriba.
- * Los cuatro valores de tipografía usan solo las fuentes cargadas en nuxt.config.ts.
- */
-.dark[data-theme="bosque"] {
-  --background: #0b1410;
-  --foreground: #e6f4ec;
-  --card: #12211a;
-  --primary: #34d399;
-  --primary-foreground: #052e1d;
-  --secondary: #1c3228;
-  --secondary-foreground: #e6f4ec;
-  --muted: #172b22;
-  --muted-foreground: #a7c4b5;
-  --accent: #22402f;
-  --accent-foreground: #e6f4ec;
-  --destructive: #f87171;
-  --destructive-foreground: #2a0b0b;
-  --border: #2b4a3b;
-  --input: #6f9a86;
-  --ring: #34d399;
-  --sidebar: #0e1a15;
-  --sidebar-accent: #193127;
-  --brand: #34d399;
-  --brand-foreground: #052e1d;
-  --highlight: #e879f9;
-  --highlight-foreground: #2d0836;
-  --info: #38bdf8;
-  --info-foreground: #04263a;
-  --font-display: "IBM Plex Sans Variable", sans-serif;
-  --display-tracking: -0.02em;
-}
-
-.dark[data-theme="brasa"] {
-  --background: #15100c;
-  --foreground: #f6ede4;
-  --card: #1f1812;
-  --primary: #fbbf24;
-  --primary-foreground: #2a1a02;
-  --secondary: #2e2319;
-  --secondary-foreground: #f6ede4;
-  --muted: #261e16;
-  --muted-foreground: #c4b3a0;
-  --accent: #3a2c1e;
-  --accent-foreground: #f6ede4;
-  --destructive: #f87171;
-  --destructive-foreground: #2a0b0b;
-  --border: #3d2f22;
-  --input: #8a7360;
-  --ring: #fbbf24;
-  --sidebar: #110c09;
-  --sidebar-accent: #2a2016;
-  --brand: #fbbf24;
-  --brand-foreground: #2a1a02;
-  --highlight: #e879f9;
-  --highlight-foreground: #2d0836;
-  --info: #5eead4;
-  --info-foreground: #0b2e29;
-  --font-display: "IBM Plex Mono", monospace;
-  --display-tracking: 0;
-}
-
-.dark[data-theme="pixel"] {
-  --background: #06131d;
-  --foreground: #e4f1f9;
-  --card: #0c1f2d;
-  --primary: #2dd4bf;
-  --primary-foreground: #042a25;
-  --secondary: #123044;
-  --secondary-foreground: #e4f1f9;
-  --muted: #0f2636;
-  --muted-foreground: #9fbccd;
-  --accent: #173a50;
-  --accent-foreground: #e4f1f9;
-  --destructive: #f87171;
-  --destructive-foreground: #2a0b0b;
-  --border: #1e3d52;
-  --input: #5b7d90;
-  --ring: #2dd4bf;
-  --sidebar: #081722;
-  --sidebar-accent: #123044;
-  --brand: #2dd4bf;
-  --brand-foreground: #042a25;
-  --highlight: #f472b6;
-  --highlight-foreground: #2a0716;
-  --info: #60a5fa;
-  --info-foreground: #06203d;
-  --font-display: "Geist Pixel Variable", monospace;
-  --display-tracking: 0.02em;
-}
-
-:root[data-theme="clasico"] {
-  color-scheme: light;
   --radius: 0.375rem;
   --overlay-shadow: 0 8px 24px rgb(0 0 0 / 16%);
   --background: #fafafa;
@@ -353,7 +165,7 @@
   --info-foreground: var(--background);
 }
 
-.dark[data-theme="clasico"] {
+:root:is([data-theme="clasico"], [data-theme="brasa"]) {
   color-scheme: dark;
   --overlay-shadow: 0 8px 24px rgb(0 0 0 / 48%);
   --background: #151515;
@@ -384,6 +196,60 @@
   --highlight-foreground: var(--primary-foreground);
   --info: var(--muted-foreground);
   --info-foreground: var(--background);
+}
+
+:root[data-theme="brasa"] {
+  --background: #15100c;
+  --foreground: #f6ede4;
+  --card: #1f1812;
+  --primary: #fbbf24;
+  --primary-foreground: #2a1a02;
+  --secondary: #2e2319;
+  --secondary-foreground: #f6ede4;
+  --muted: #261e16;
+  --muted-foreground: #c4b3a0;
+  --accent: #3a2c1e;
+  --accent-foreground: #f6ede4;
+  --destructive: #f87171;
+  --destructive-foreground: #2a0b0b;
+  --border: #3d2f22;
+  --input: #8a7360;
+  --ring: #fbbf24;
+  --sidebar: #110c09;
+  --sidebar-accent: #2a2016;
+  --brand: #fbbf24;
+  --brand-foreground: #2a1a02;
+  --highlight: #e879f9;
+  --highlight-foreground: #2d0836;
+  --info: #5eead4;
+  --info-foreground: #0b2e29;
+  --font-display: "IBM Plex Mono", monospace;
+  --display-tracking: 0;
+}
+
+:root[data-theme="brasa-claro"] {
+  --background: #fbf3ec;
+  --foreground: #352018;
+  --card: #fffaf6;
+  --primary: #a4402c;
+  --primary-foreground: #ffffff;
+  --secondary: #f3dfd3;
+  --muted: #f5e7df;
+  --muted-foreground: #73564a;
+  --accent: #f3dace;
+  --destructive: #aa2828;
+  --destructive-foreground: #ffffff;
+  --border: #e2c9bc;
+  --input: #a77c6b;
+  --ring: #a4402c;
+  --sidebar: #f8e9df;
+  --sidebar-accent: #f1d8ca;
+  --highlight: #8f3e55;
+  --highlight-foreground: #ffffff;
+  --info: #536f68;
+  --info-foreground: #ffffff;
+  --font-display: "IBM Plex Mono", monospace;
+  --display-tracking: 0;
 }
 
 @layer base {

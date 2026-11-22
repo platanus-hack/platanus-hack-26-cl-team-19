@@ -6,7 +6,7 @@ withDefaults(defineProps<{ src: string; title: string; height?: string }>(), {
 });
 
 // Recarga el iframe al cambiar de tema para que herede la preferencia.
-const colorMode = useColorMode();
+const { theme } = useAppTheme();
 </script>
 
 <template>
@@ -21,7 +21,7 @@ const colorMode = useColorMode();
     </a>
     <ClientOnly>
       <iframe
-        :key="colorMode.value"
+        :key="theme"
         :src="src"
         :title="title"
         class="w-full rounded-md border border-border bg-background"
