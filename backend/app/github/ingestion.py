@@ -26,12 +26,13 @@ from typing import Any, Literal
 
 import anthropic
 import openai
+from pydantic import ValidationError
 
 from app.agent.loop import _provider_error, cost_usd
-from app.api.store import ProjectStore, RepoSource
+from app.api.store import CachedAnalysis, ProjectStore, RepoSource
 from app.github.client import GitHubApp, GitHubError, Repo
-from app.ingest.ai_graph import build_from_ai
-from app.ingest.analyzer import AnalysisFailed, analyze_repo
+from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai
+from app.ingest.analyzer import ANALYZER_FINGERPRINT, AnalysisFailed, AnalysisResult, analyze_repo
 from app.ingest.build_model import NoEndpoints
 from app.ingest.iac import scan_deployment
 from app.ingest.multirepo import RepoResult, add_repos, merge_repos, single_repo_sources
@@ -141,6 +142,47 @@ def team_token_cap() -> int:
         return DEFAULT_TEAM_EXTRACT_TOKENS
 
 
+@dataclass(frozen=True)
+class AnalysisCache:
+    """El caché del análisis de un repo de GitHub por commit (JAJ-146).
+
+    Guarda solo lo que entregó el LLM, que es el 99 % del tiempo de una ingesta: la IaC y el modelo se
+    rearman siempre con el tarball y el catálogo de hoy. Un error del caché nunca bota la ingesta: se
+    analiza como si no hubiera caché."""
+
+    store: ProjectStore
+    github_repo_id: int
+
+    def get(self, commit: str) -> CachedAnalysis | None:
+        try:
+            return self.store.find_analysis(self.github_repo_id, commit, ANALYZER_FINGERPRINT)
+        except Exception:  # noqa: BLE001
+            log.warning("No se pudo leer el caché de análisis del repo %s", self.github_repo_id, exc_info=True)
+            return None
+
+    def put(self, commit: str, result: AnalysisResult, provider: str | None, llm_model: str | None) -> None:
+        saved = CachedAnalysis(result.sub.model_dump(mode="json"), result.usage, result.steps, provider, llm_model)
+        try:
+            self.store.save_analysis(self.github_repo_id, commit, ANALYZER_FINGERPRINT, saved)
+        except Exception:  # noqa: BLE001
+            log.warning("No se pudo guardar el caché de análisis del repo %s", self.github_repo_id, exc_info=True)
+
+
+def _from_cache(cache: AnalysisCache | None, commit: str | None) -> tuple[AnalysisResult, CachedAnalysis] | None:
+    """La entrega guardada de ese commit como ``AnalysisResult``, sin vueltas ni tokens nuevos."""
+    if cache is None or not _is_full_sha(commit):
+        return None
+    saved = cache.get(commit)
+    if saved is None:
+        return None
+    try:
+        sub = ArchitectureSubmission.model_validate(saved.submission)
+    except ValidationError:  # el schema cambió sin cambiar la huella: se analiza de nuevo
+        log.warning("El análisis guardado de %s@%s ya no pasa el schema", cache.github_repo_id, commit)
+        return None
+    return AnalysisResult(sub, {}, 0), saved
+
+
 def model_from_tarball(
     data: bytes,
     repo_full_name: str,
@@ -150,22 +192,44 @@ def model_from_tarball(
     *,
     max_tokens_total: int | None = None,
     on_step: Any = None,
+    cache: AnalysisCache | None = None,
 ) -> dict[str, Any]:
+    """El modelo v1 del repo del tarball. Con ``cache`` y un commit completo, reutiliza la entrega del LLM
+    de ese commit si ya se analizó, y guarda la nueva si salió sin descartes."""
+    llm_model = getattr(llm, "model", None)
     with tempfile.TemporaryDirectory(prefix="branchpoint-") as tmp:  # se borra al salir, aunque falle
         root = extract_tarball(data, Path(tmp)).resolve()
-        result = analyze_repo(root, llm, repo_full_name, commit, max_tokens_total=max_tokens_total, on_step=on_step)
+        hit = _from_cache(cache, commit)
+        if hit is not None:
+            result, saved = hit
+        else:
+            result = analyze_repo(root, llm, repo_full_name, commit, max_tokens_total=max_tokens_total, on_step=on_step)
+            if cache is not None and _is_full_sha(commit) and not result.dropped:
+                cache.put(commit, result, provider, llm_model)
         iac = scan_deployment(root).to_dict()
         # sin respuestas: los SUPUESTO quedan por revisar (JAJ-59); root verifica los valores citados
         model = build_from_ai(result.sub, {}, via="ingesta", iac=iac, root=root)
     model["repo"]["path"] = repo_full_name  # no el nombre de la carpeta temporal
-    llm_model = getattr(llm, "model", None)
+    if hit is not None:  # quién lo analizó y cuánto costó entonces; esta ingesta no gastó tokens
+        model["repo"]["source"]["analysis"] = {
+            "provider": saved.provider,
+            "model": saved.llm_model,
+            "usage": {},
+            "steps": 0,
+            "cost": None,
+            "dropped": [],
+            "cached": {"usage": saved.usage, "steps": saved.steps},
+        }
+        return model
     model["repo"]["source"]["analysis"] = {
         "provider": provider,
         "model": llm_model,
         "usage": result.usage,
         "steps": result.steps,
-        "cost": cost_usd(llm_model, result.usage) if llm_model else None,
+        "cost": cost_usd(llm_model, result.usage, getattr(llm, "speed", None)) if llm_model else None,
         "dropped": result.dropped,
+        "effort": getattr(llm, "effort", None),
+        "speed": getattr(llm, "speed", None),
     }
     if result.dropped:
         model.setdefault("warnings", []).extend(
@@ -176,6 +240,11 @@ def model_from_tarball(
 
 def _is_sha(sha: str | None) -> bool:
     return bool(sha) and all(c in "0123456789abcdef" for c in sha) and 7 <= len(sha) <= 40
+
+
+def _is_full_sha(sha: str | None) -> bool:
+    """El caché solo usa el SHA completo: uno corto puede volverse ambiguo."""
+    return _is_sha(sha) and len(sha) == 40
 
 
 def _failure(e: Exception, llm: Any, where: str) -> str:
@@ -221,6 +290,7 @@ def run_ingestion(
             provider,
             max_tokens_total=max_tokens_total,
             on_step=lambda step, _tool: jobs.update(job_id, llm_steps=step),
+            cache=AnalysisCache(store, repo.id),
         )
         single_repo_sources(model, repo.full_name, job.branch, sha)
         analysis = model["repo"]["source"]["analysis"]
@@ -250,7 +320,7 @@ def _run_multi(
     principal, la ingesta falla; si falla un secundario, sigue con un aviso."""
     job = jobs.update(job_id, status="running", stage="analisis", llm_steps=0)
     targets = [(primary, job.branch, llm), *secondaries]
-    results = _analyze_all(jobs, job_id, github, targets, provider, max_tokens_total)
+    results = _analyze_all(jobs, job_id, github, store, targets, provider, max_tokens_total)
     (first, _), rest = results[0], results[1:]
     if first.model is None:
         jobs.update(job_id, status="failed", error_message=f"{primary.full_name}: {first.error}")
@@ -276,6 +346,7 @@ def _analyze_all(
     jobs: IngestionJobs,
     job_id: str,
     github: GitHubApp,
+    store: ProjectStore,
     targets: list[tuple[Repo, str, Any]],
     provider: str,
     max_tokens_total: int | None,
@@ -304,6 +375,7 @@ def _analyze_all(
                 provider,
                 max_tokens_total=max_tokens_total,
                 on_step=step,
+                cache=AnalysisCache(store, repo.id),
             )
         except Exception as e:  # noqa: BLE001 - un repo que falla no bota a los otros
             message = _failure(e, repo_llm, repo.full_name)
@@ -340,7 +412,7 @@ def run_add_repos(
     ``base``, con esos repos como servicios no simulados. Si fallan todos, no se guarda nada; si falla
     alguno, entra con un aviso, igual que al crear el proyecto. Nunca lanza."""
     job = jobs.update(job_id, status="running", stage="analisis", llm_steps=0)
-    results = _analyze_all(jobs, job_id, github, targets, provider, max_tokens_total)
+    results = _analyze_all(jobs, job_id, github, store, targets, provider, max_tokens_total)
     if all(r.model is None for r, _ in results):
         first = results[0][0]
         jobs.update(job_id, status="failed", error_message=f"{first.full_name}: {first.error}")

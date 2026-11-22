@@ -27,7 +27,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from app.agent.loop import model_for
+from app.agent.loop import AnthropicLLM, extract_options, model_for
 from app.api.auth import User, current_user, owner_of
 from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, UNAUTHORIZED, ApiError
 from app.api.routes.credentials import Provider, llm_key
@@ -435,6 +435,10 @@ def start_ingestion(
     )
     factory = request.app.state.openai_llm_factory if req.provider == "openai" else request.app.state.llm_factory
     llms = [factory(key.key, model=model_for(req.provider, "extract")) for _ in found]  # uno por repo
+    for extractor in llms:  # effort y fast mode según el entorno (JAJ-146); el chat no los usa
+        if isinstance(extractor, AnthropicLLM):
+            options = extract_options(extractor.model)
+            extractor.effort, extractor.speed = options.get("effort"), options.get("speed")
     repo, llm = found[0], llms[0]
     others = [(r.full_name, b) for r, b in zip(found[1:], branches[1:], strict=True)]
     cap = team_token_cap() if key.source == "team" else None  # el tope es solo para la key de Branchpoint

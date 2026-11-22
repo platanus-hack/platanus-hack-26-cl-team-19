@@ -158,6 +158,18 @@ class GitHubInstallation:
     account_login: str
 
 
+@dataclass(frozen=True)
+class CachedAnalysis:
+    """Lo que entregó el analizador para un commit (JAJ-146): la ``ArchitectureSubmission`` como dict, ya
+    verificada contra el repo, y quién y con cuánto la produjo."""
+
+    submission: dict[str, Any]
+    usage: dict[str, int]
+    steps: int
+    provider: str | None = None
+    llm_model: str | None = None
+
+
 INITIAL_SCENARIO = "actual"
 
 
@@ -347,6 +359,17 @@ class ProjectStore(Protocol):
         """La ``repo_connections.id`` de ese repo para ``owner``. Reutiliza la que ya existe."""
         ...
 
+    # ---------- Caché del análisis (JAJ-146) ----------
+
+    def find_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str) -> CachedAnalysis | None:
+        """El análisis guardado de ese commit con esa huella del analizador, o ``None``. No es de un usuario:
+        quien llama ya resolvió el commit con el token de instalación de quien importa."""
+        ...
+
+    def save_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str, analysis: CachedAnalysis) -> None:
+        """Guarda el análisis. Si ya había uno con esa clave, no hace nada."""
+        ...
+
     # ---------- Adjuntos del chat (IA-6) ----------
 
     def create_attachment(self, attachment: Attachment) -> Attachment:
@@ -428,6 +451,7 @@ class InMemoryProjectStore:
         self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
         self._chats: dict[str, list[dict[str, Any]]] = {}  # proyecto → mensajes del chat
         self._reports: dict[str, tuple[str, dict[str, Any]]] = {}  # id → (proyecto, reporte) (JAJ-127)
+        self._analyses: dict[tuple[int, str, str], CachedAnalysis] = {}  # (repo, commit, huella) (JAJ-146)
 
     def create(
         self,
@@ -602,6 +626,14 @@ class InMemoryProjectStore:
     ) -> str:
         with self._lock:
             return self._connections.setdefault((owner, repo_id), uuid.uuid4().hex[:12])
+
+    def find_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str) -> CachedAnalysis | None:
+        saved = self._analyses.get((github_repo_id, commit_sha, analyzer))
+        return copy.deepcopy(saved) if saved is not None else None
+
+    def save_analysis(self, github_repo_id: int, commit_sha: str, analyzer: str, analysis: CachedAnalysis) -> None:
+        with self._lock:
+            self._analyses.setdefault((github_repo_id, commit_sha, analyzer), copy.deepcopy(analysis))
 
     def create_attachment(self, attachment: Attachment) -> Attachment:
         with self._lock:

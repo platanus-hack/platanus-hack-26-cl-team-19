@@ -124,3 +124,17 @@ def test_chat_survives_a_restart_and_keeps_its_order(database_url, store, model)
         reopened.close()
     store.save_chat(project.id, [])
     assert store.get_chat(project.id) == []
+
+
+def test_analysis_cache_round_trip(store):
+    """El caché de análisis por repo, commit y huella (JAJ-146). La primera entrega guardada gana."""
+    from app.api.store import CachedAnalysis
+
+    sha = "06ff98cfa9b925e35b866e5abdf9e792006a36bb"
+    first = CachedAnalysis({"framework": "express", "endpoints": []}, {"output": 400}, 2, "anthropic", "claude-x")
+    assert store.find_analysis(7, sha, "huella") is None
+    store.save_analysis(7, sha, "huella", first)
+    store.save_analysis(7, sha, "huella", CachedAnalysis({"framework": "otra"}, {}, 9))
+    assert store.find_analysis(7, sha, "huella") == first
+    assert store.find_analysis(7, sha, "otra-huella") is None
+    assert store.find_analysis(8, sha, "huella") is None

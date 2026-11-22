@@ -13,6 +13,7 @@ falso que devuelve tool calls fijas.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from collections.abc import Iterator
@@ -25,6 +26,8 @@ import openai
 from app.agent.mcp import INSTRUCTIONS
 from app.agent.tools import AgentTools
 from app.costs.prices import manual
+
+log = logging.getLogger(__name__)
 
 MODEL = "claude-opus-5-5"
 OPENAI_MODEL = "gpt-4.1-mini"
@@ -69,11 +72,49 @@ class LLM(Protocol):
     def complete(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Turn: ...
 
 
-class AnthropicLLM:
-    """Claude por la API, con la API key seleccionada para el turno."""
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+FAST_MODELS = frozenset({"claude-opus-5-5"})  # los que aceptan speed="fast" en la API de Anthropic
 
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+
+def extract_options(model: str) -> dict[str, str]:
+    """Effort y velocidad del LLM que lee el repo (JAJ-146), de ``BRANCHPOINT_ANTHROPIC_EXTRACT_EFFORT``
+    (low … max) y ``BRANCHPOINT_ANTHROPIC_EXTRACT_SPEED`` (``fast``). Sin variables, nada: el effort por
+    defecto del modelo y velocidad estándar.
+
+    Producción usa Opus 5.5 con ``fast`` (2,5 veces más rápido y el doble de caro); desarrollo, Sonnet 5.5 con
+    ``medium`` (spikes/jaj-146-cache-repos). ``fast`` con un modelo que no lo soporta se ignora con un aviso,
+    para que cambiar solo el modelo no rompa la ingesta."""
+    options: dict[str, str] = {}
+    effort = os.environ.get("BRANCHPOINT_ANTHROPIC_EXTRACT_EFFORT", "").strip().lower()
+    if effort in EFFORTS:
+        options["effort"] = effort
+    elif effort:
+        log.warning("BRANCHPOINT_ANTHROPIC_EXTRACT_EFFORT=%r no es un effort válido; se ignora", effort)
+    speed = os.environ.get("BRANCHPOINT_ANTHROPIC_EXTRACT_SPEED", "").strip().lower()
+    if speed == "fast" and model in FAST_MODELS:
+        options["speed"] = "fast"
+    elif speed == "fast":
+        log.warning("%s no tiene fast mode; BRANCHPOINT_ANTHROPIC_EXTRACT_SPEED=fast se ignora", model)
+    elif speed not in ("", "standard"):
+        log.warning("BRANCHPOINT_ANTHROPIC_EXTRACT_SPEED=%r no es fast ni standard; se ignora", speed)
+    return options
+
+
+class AnthropicLLM:
+    """Claude por la API, con la API key seleccionada para el turno. ``effort`` y ``speed`` van solo si se
+    dan (la extracción, ``extract_options``); el chat usa los valores por defecto del modelo."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        *,
+        effort: str | None = None,
+        speed: str | None = None,
+    ) -> None:
         self.model = model or model_for("anthropic", "chat")
+        self.effort = effort
+        self.speed = speed
         self._client = (
             anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=180.0)
             if api_key
@@ -81,6 +122,11 @@ class AnthropicLLM:
         )
 
     def complete(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Turn:
+        extra: dict[str, Any] = {}
+        if self.effort:
+            extra["output_config"] = {"effort": self.effort}
+        if self.speed:
+            extra["speed"] = self.speed
         with self._client.messages.stream(
             model=self.model,
             max_tokens=MAX_TOKENS,
@@ -88,6 +134,7 @@ class AnthropicLLM:
             system=system,
             tools=tools,
             messages=with_cache_breakpoint(messages),
+            **extra,
         ) as stream:
             msg = stream.get_final_message()
         u = msg.usage
@@ -124,19 +171,21 @@ def with_cache_breakpoint(messages: list[dict[str, Any]]) -> list[dict[str, Any]
 TOKEN_KINDS = ("input", "output", "cache_read", "cache_write")  # las claves de usage y de usd_per_million
 
 
-def cost_usd(model: str, usage: dict[str, int]) -> dict[str, Any] | None:
+def cost_usd(model: str, usage: dict[str, int], speed: str | None = None) -> dict[str, Any] | None:
     """Costo de los tokens con la tabla de precios del repo (``manual.json``), no un número inventado.
 
     Los cuatro precios salen de la tabla, incluida la escritura de caché (``cache_write``, la de 5
-    minutos: antes era un ×1,25 escrito aquí, JAJ-109). ``None`` si el modelo no está en la tabla o le
-    falta alguno: mejor sin costo que con uno que no tiene fuente."""
+    minutos: antes era un ×1,25 escrito aquí, JAJ-109). Con ``speed="fast"`` se multiplican por el
+    ``fast_multiplier`` del modelo. ``None`` si el modelo no está en la tabla, le falta algún precio o no
+    tiene multiplicador para fast mode: mejor sin costo que con uno que no tiene fuente."""
     try:
         table = manual()["llm_tokens"]
         p = table["usd_per_million"][model]
         rates = {kind: p[kind] for kind in TOKEN_KINDS}
+        factor = table["fast_multiplier"][model] if speed == "fast" else 1
     except KeyError:
         return None
-    usd = sum(usage.get(kind, 0) * rate for kind, rate in rates.items()) / 1e6
+    usd = sum(usage.get(kind, 0) * rate for kind, rate in rates.items()) * factor / 1e6
     return {"value": round(usd, 4), "unit": "US$", "label": "ESTIMADO", "source": table["source"]}
 
 
