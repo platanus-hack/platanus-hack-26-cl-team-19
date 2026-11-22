@@ -13,6 +13,7 @@
   },
   "table_rows_default": {"value": 100000, "unit": "filas", "label": "SUPUESTO", "source": "Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro", "date": "2026-11-21"},
   "n_plus_one_list_default": {"value": 20, "unit": "iteraciones", "label": "SUPUESTO", "source": "Largo de la lista que recorre un N+1, sin dato", "date": "2026-11-21"},
+  "cache_hit_ratio_default": {"value": 0.8, "unit": "fracción", "label": "SUPUESTO", "source": "Tasa de aciertos de partida para una caché de lecturas sin dato del usuario. Por confirmar con el usuario", "date": "2026-11-22"},
   "api": {
     "cpu_ms": {"framework": "fastapi", "value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "CPU de FastAPI por request en un endpoint async con asyncpg, a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms). Se usa en endpoints async", "date": "2026-11-21"},
     "cpu_ms_sync": {"framework": "fastapi", "value": 2.1, "unit": "ms", "label": "CALIBRADO", "source": "Endpoint def con SQLModel + psycopg (stack del template), lectura por PK, sostenido con 16-64 clientes (1,4 ms con 1 cliente; 3,4 ms con COUNT + lista de 100). Se usa en endpoints def", "date": "2026-11-21"},
