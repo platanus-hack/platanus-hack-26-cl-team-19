@@ -307,6 +307,9 @@ export function createEditorApi(
     },
     listProjects: () => fetchApi<Project[]>("/projects"),
     getProject: (id: string) => fetchApi<Project>(projectPath(id)),
+    // Borra el proyecto con todo lo suyo (JAJ-144); la conexión con el repo se conserva.
+    deleteProject: (id: string) =>
+      fetchApi(projectPath(id), { method: "DELETE" }),
     listModels: () => fetchApi<ModelSummary[]>("/models"),
     createProject: (sample: string, name?: string) =>
       post<Project>("/projects", { sample, name }),

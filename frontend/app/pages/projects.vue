@@ -5,8 +5,10 @@ import {
   GitBranch,
   Search,
   SlidersHorizontal,
+  Trash2,
 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import DeleteProjectDialog from "@/components/projects/DeleteProjectDialog.vue";
 import NewProjectDialog from "@/components/projects/NewProjectDialog.vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -107,6 +109,13 @@ function openCreatedProject(projectId: string) {
   return navigateTo({ path: "/editor", query: { project: projectId } });
 }
 
+const projectToDelete = shallowRef<Project | null>(null);
+
+function removeDeletedProject(projectId: string) {
+  projects.value = projects.value.filter(({ id }) => id !== projectId);
+  projectToDelete.value = null;
+}
+
 onMounted(loadProjects);
 </script>
 
@@ -200,7 +209,11 @@ onMounted(loadProjects);
         aria-label="Proyectos"
         class="divide-y divide-border overflow-hidden rounded-md border border-border bg-card"
       >
-        <li v-for="project in visibleProjects" :key="project.id">
+        <li
+          v-for="project in visibleProjects"
+          :key="project.id"
+          class="relative"
+        >
           <component
             :is="project.versions.length ? NuxtLink : 'div'"
             :to="
@@ -213,7 +226,7 @@ onMounted(loadProjects);
                 ? `Abrir editor de ${project.name}`
                 : undefined
             "
-            class="group/project block px-4 py-3 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+            class="group/project block py-3 ps-4 pe-13 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
             :class="{ 'hover:bg-muted/50': project.versions.length }"
           >
             <div class="flex items-center gap-3">
@@ -279,8 +292,24 @@ onMounted(loadProjects);
               </li>
             </ul>
           </component>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="absolute end-3 top-3 text-muted-foreground hover:text-destructive"
+            :aria-label="`Borrar ${project.name}`"
+            title="Borrar proyecto"
+            @click="projectToDelete = project"
+          >
+            <Trash2 aria-hidden="true" />
+          </Button>
         </li>
       </ul>
     </main>
+
+    <DeleteProjectDialog
+      :project="projectToDelete"
+      @close="projectToDelete = null"
+      @deleted="removeDeletedProject"
+    />
   </div>
 </template>
