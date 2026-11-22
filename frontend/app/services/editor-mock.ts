@@ -386,6 +386,11 @@ export function createMockEditorApi(
           .toReversed(),
       ),
     getProject: async (id) => structuredClone(getProject(id)),
+    deleteProject: async (id) => {
+      getProject(id);
+      projects.delete(id);
+      persist();
+    },
     createProject: async (_sample, name) => {
       const project = makeProject(crypto.randomUUID());
       project.name = name ?? project.name;
