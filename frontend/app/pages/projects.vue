@@ -2,13 +2,13 @@
 import AppHeader from "@/components/AppHeader.vue";
 import {
   ArrowUpRight,
-  Folder,
   GitBranch,
   Search,
   SlidersHorizontal,
 } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import NewProjectSheet from "@/components/projects/NewProjectSheet.vue";
+import ProjectDiagramThumbnail from "@/components/projects/ProjectDiagramThumbnail.vue";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,27 +84,26 @@ const visibleProjects = computed(() => {
         ]),
       ].some((value) => value?.toLocaleLowerCase().includes(search)),
   );
-  return sortBy.value === "name"
-    ? filtered.toSorted((a, b) =>
-        a.name.localeCompare(b.name, "es", { sensitivity: "base" }),
-      )
-    : filtered;
+  const sorted =
+    sortBy.value === "name"
+      ? filtered.toSorted((a, b) =>
+          a.name.localeCompare(b.name, "es", { sensitivity: "base" }),
+        )
+      : filtered;
+  return sorted.map((project) => ({
+    project,
+    latest: project.versions.reduce<Project["versions"][number] | undefined>(
+      (latest, version) =>
+        !latest || version.number > latest.number ? version : latest,
+      undefined,
+    ),
+  }));
 });
 
 function clearFilters() {
   query.value = "";
   repositoryFilter.value = "all";
   sortBy.value = "recent";
-}
-
-function projectSummary(project: Project) {
-  const count = project.repositories?.length ?? 0;
-  if (count > 1) return `${count} repositorios`;
-  return project.versions.reduce<Project["versions"][number] | undefined>(
-    (latest, version) =>
-      !latest || version.number > latest.number ? version : latest,
-    undefined,
-  )?.label;
 }
 
 function openCreatedProject(projectId: string) {
@@ -205,7 +204,7 @@ onMounted(loadProjects);
         class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
       >
         <li
-          v-for="project in visibleProjects"
+          v-for="{ project, latest } in visibleProjects"
           :key="project.id"
           class="min-w-0"
         >
@@ -221,26 +220,25 @@ onMounted(loadProjects);
                 ? `Abrir editor de ${project.name}`
                 : undefined
             "
-            class="block rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            class="block h-full rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             :class="{ 'group/project': project.versions.length }"
           >
             <Card
-              class="aspect-square justify-between gap-4 p-5 transition-colors group-hover/project:border-foreground/40"
+              class="h-full justify-between gap-4 p-5 transition-colors group-hover/project:border-foreground/40"
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                  <div
-                    class="mb-3 grid size-9 place-items-center rounded-md border border-border text-muted-foreground"
-                  >
-                    <Folder class="size-4" aria-hidden="true" />
-                  </div>
                   <h2
                     class="line-clamp-2 wrap-break-word text-base font-semibold"
                   >
                     {{ project.name }}
                   </h2>
                   <p class="mt-1 text-xs text-muted-foreground">
-                    {{ projectSummary(project) ?? "Sin versión" }}
+                    {{
+                      (project.repositories?.length ?? 0) > 1
+                        ? `${project.repositories?.length} repositorios`
+                        : (latest?.label ?? "Sin versión")
+                    }}
                   </p>
                 </div>
                 <ArrowUpRight
@@ -249,6 +247,12 @@ onMounted(loadProjects);
                   aria-hidden="true"
                 />
               </div>
+
+              <ProjectDiagramThumbnail
+                :project-id="project.id"
+                :version="latest?.number"
+                :api="api"
+              />
 
               <div class="min-w-0 border-t border-border pt-3">
                 <ul

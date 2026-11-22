@@ -32,6 +32,8 @@ const props = defineProps<{
   /** true mientras se reproduce la corrida: las partículas se mueven. */
   animating?: boolean;
   animateLayout?: boolean;
+  /** Vista estática dentro de un enlace de proyecto. */
+  thumbnail?: boolean;
 }>();
 
 const emit = defineEmits<{ select: [id: string | null]; explain: [] }>();
@@ -400,9 +402,11 @@ const alertOf = (status?: SaturationStatus) =>
 
 <template>
   <div
-    class="relative flex min-h-80 flex-1 flex-col overflow-hidden bg-[radial-gradient(var(--color-border)_1px,transparent_1px)] [background-size:1rem_1rem]"
+    class="relative flex flex-1 flex-col overflow-hidden bg-[radial-gradient(var(--color-border)_1px,transparent_1px)] [background-size:1rem_1rem]"
+    :class="thumbnail ? 'pointer-events-none h-full min-h-0' : 'min-h-80'"
   >
     <div
+      v-if="!thumbnail"
       class="absolute top-3 right-3 z-10 flex items-center rounded-md border border-border bg-card"
       role="toolbar"
       aria-label="Zoom del diagrama"
@@ -591,8 +595,9 @@ const alertOf = (status?: SaturationStatus) =>
                 height: `${NODE_HEIGHT}px`,
               }"
             >
-              <button
-                type="button"
+              <component
+                :is="thumbnail ? 'div' : 'button'"
+                :type="thumbnail ? undefined : 'button'"
                 class="relative flex size-full items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-sm text-card-foreground transition-colors hover:bg-muted aria-pressed:ring-2 aria-pressed:ring-ring aria-pressed:ring-offset-2 aria-pressed:ring-offset-background"
                 :class="
                   node.simulated === false
@@ -603,7 +608,7 @@ const alertOf = (status?: SaturationStatus) =>
                           'ring-2 ring-status-saturated-border ring-offset-2 ring-offset-background',
                       ]
                 "
-                :aria-pressed="node.id === selectedId"
+                :aria-pressed="thumbnail ? undefined : node.id === selectedId"
                 :title="
                   [
                     node.name,
@@ -616,7 +621,10 @@ const alertOf = (status?: SaturationStatus) =>
                     .filter(Boolean)
                     .join(' · ')
                 "
-                @click="emit('select', node.id === selectedId ? null : node.id)"
+                @click="
+                  !thumbnail &&
+                  emit('select', node.id === selectedId ? null : node.id)
+                "
               >
                 <TechIcon
                   v-if="node.tech?.main"
@@ -677,7 +685,7 @@ const alertOf = (status?: SaturationStatus) =>
                   />
                   <span class="sr-only">{{ alertOf(node.status)!.label }}</span>
                 </template>
-              </button>
+              </component>
               <span
                 v-if="node.bottleneck"
                 class="absolute -top-2.5 left-2 rounded-sm border border-status-saturated-border bg-card px-1 text-[0.625rem] leading-4 text-status-saturated-foreground"
@@ -710,7 +718,10 @@ const alertOf = (status?: SaturationStatus) =>
       </div>
     </div>
 
-    <div v-if="bottleneck" class="absolute inset-x-3 bottom-3 z-10">
+    <div
+      v-if="bottleneck && !thumbnail"
+      class="absolute inset-x-3 bottom-3 z-10"
+    >
       <Alert class="flex items-center gap-2 bg-card px-3 py-2">
         <OctagonAlert
           class="shrink-0 text-status-saturated-foreground"
