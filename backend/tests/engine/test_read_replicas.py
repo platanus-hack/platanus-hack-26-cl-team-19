@@ -34,6 +34,8 @@ def test_a_replica_takes_the_reads_off_the_primary(raw):
     assert after.latency.p95_ms < before.latency.p95_ms / 2
     assert {"replica_cpu:1", "replica_pool:1", "replica_cpu:2", "replica_pool:2"} <= {x.name for x in after.resources}
     assert REPLICA_WARNING in after.warnings
+    assert "api->db_replica" in (after.measured_edges or [])
+    assert any((second.edge_calls or {}).get("api->db_replica") for second in after.series)
 
 
 def test_reads_are_split_between_replicas(raw):
@@ -51,6 +53,8 @@ def test_writes_stay_on_the_primary(raw):
     r = run(apply_ops(raw, [{"op": "add_read_replica", "count": 1}]).model)
     assert util(r, "replica_cpu:1") == 0
     assert util(r, "db_cpu") > 0
+    assert "api->db_replica" not in (r.measured_edges or [])
+    assert any((second.edge_calls or {}).get("api->db") for second in r.series)
 
 
 def test_replica_uses_cpu_credits_like_the_primary(raw):

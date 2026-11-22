@@ -138,14 +138,14 @@ class VersionRef(ProjectRef):
 
 
 class SimulateArgs(VersionRef):
-    scenario: str = Field("cyberday", description="Escenario del proyecto (de list_scenarios).")
+    scenario: str = Field("actual", description="Escenario del proyecto (de list_scenarios).")
     seed: int = Field(0, ge=0, le=1_000_000, description="Misma semilla = mismo resultado.")
 
 
 class CompareArgs(ProjectRef):
     a: int = Field(ge=1, description="Versión base.")
     b: int = Field(ge=1, description="Versión a comparar contra la base.")
-    scenario: str = Field("cyberday", description="Escenario del proyecto, el mismo para las dos.")
+    scenario: str = Field("actual", description="Escenario del proyecto, el mismo para las dos.")
     seed: int = Field(0, ge=0, le=1_000_000)
 
 
@@ -389,7 +389,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_model": "Resumen de una versión: despliegue, tráfico, escenarios, endpoints con archivo:línea, metas y "
     "cuántos SUPUESTO tiene. No incluye el JSON completo.",
     "list_assumptions": "Los números SUPUESTO de una versión, con su fuente: lo que conviene preguntarle al usuario.",
-    "list_scenarios": "Los escenarios del proyecto (pico_normal, cyberday...) y su tasa (× el pico o req/s fijas).",
+    "list_scenarios": "Los escenarios del proyecto (actual y los que cree el usuario) y su tasa (× el pico o req/s fijas).",
     "simulate": "Simula una versión bajo un escenario del proyecto. Devuelve p95, errores, throughput, el cuello "
     "de botella con su archivo:línea, la procedencia y si cumple las metas (goals.meets_all: true, false, o null "
     "si nada falla pero algo no se pudo evaluar, como el presupuesto sin precio; dilo así). Si saturation.saturated "

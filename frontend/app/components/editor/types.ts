@@ -166,16 +166,14 @@ export interface DiagramEdge {
   label?: string;
 }
 
-/**
- * Flujo de un conector en un segundo de la corrida (JAJ-129). Es una estimación: el motor no entrega
- * req/s por arista (JAJ-136), así que sale de las llegadas del segundo y de la mezcla de endpoints.
- */
+/** Flujo de un conector en un segundo de la corrida. */
 export interface DiagramFlow {
   from: string;
   to: string;
-  /** req/s estimados que pasan por el conector. */
+  /** Llamadas iniciadas por segundo si la corrida midió esta arista. */
   rps: number;
-  /** Fracción del flujo que termina en error (0 a 1). */
+  measured: boolean;
+  /** Proporción estimada de errores para la animación de corridas antiguas. */
   errorShare: number;
   /** Fracción del pico de la corrida (0 a 1): define cuántas partículas se dibujan. */
   intensity: number;

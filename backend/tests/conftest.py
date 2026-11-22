@@ -17,6 +17,37 @@ import pytest
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "initial_scenarios: el proyecto nace solo con 'actual', como en producción")
+
+
+@pytest.fixture(autouse=True)
+def _model_scenarios_in_new_projects(request, monkeypatch):
+    """En producción un proyecto nace solo con ``actual``. Muchos tests simulan ``cyberday`` ×20 (o
+    ``pico_normal``) sobre un proyecto recién creado para tener carga: aquí el proyecto nace además
+    con los escenarios de ``traffic.scenarios`` del modelo. Los tests marcados con
+    ``initial_scenarios`` prueban lo de producción."""
+    if request.node.get_closest_marker("initial_scenarios"):
+        return
+    from app.api import store
+    from app.db import postgres_store
+
+    real = store.initial_scenarios
+
+    def with_model_scenarios(model):
+        scenarios = {s.name: s for s in real(model)}
+        for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
+            multiplier, rps = store.value(sc.get("multiplier")), store.value(sc.get("rps"))
+            if multiplier is not None and multiplier > 0:
+                scenarios[name] = store.ProjectScenario(name, float(multiplier), None)
+            elif rps is not None and rps > 0:
+                scenarios[name] = store.ProjectScenario(name, None, float(rps))
+        return list(scenarios.values())
+
+    monkeypatch.setattr(store, "initial_scenarios", with_model_scenarios)
+    monkeypatch.setattr(postgres_store, "initial_scenarios", with_model_scenarios)
+
+
 @pytest.fixture(autouse=True)
 def _no_login_from_env(monkeypatch):
     """Los tests no leen el login del entorno: con SUPABASE_URL en el .env de alguien, create_app()

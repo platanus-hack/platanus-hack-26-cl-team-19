@@ -128,7 +128,7 @@ export interface GraphEndpoint {
 
 export interface Graph {
   nodes: GraphNode[];
-  edges: { source: string; target: string; endpoints: string[] }[];
+  edges: { id?: string; source: string; target: string; endpoints: string[] }[];
   endpoints?: GraphEndpoint[];
   slowdown_targets?: string[];
 }
@@ -174,12 +174,14 @@ export interface Run {
   series: {
     arrivals: number;
     target_rps?: number | null;
+    edge_calls?: Record<string, number> | null;
     ok: number;
     errors: number;
     latency: { p95_ms: number | null };
     queue: Record<string, number>;
     utilization: Record<string, number>;
   }[];
+  measured_edges?: string[] | null;
   warnings: string[];
 }
 

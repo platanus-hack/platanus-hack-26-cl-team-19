@@ -143,6 +143,32 @@ def _component_details(component: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def edge_id(source: str, target: str) -> str:
+    return f"{source}->{target}"
+
+
+def queue_nodes(name: str) -> tuple[str, str]:
+    return f"queue:{name}", f"worker:{name}"
+
+
+def step_target(model: ArchitectureModel, source: str, step: Step) -> str | None:
+    """Target del mismo paso tanto en el grafo como al ejecutarlo (JAJ-136)."""
+    if (
+        step.resource == RESOURCE_DB_CONNECTION
+        and source == "api"
+        and model.db.read_replicas
+        and step.shape in READ_SHAPES
+    ):
+        return "db_replica"
+    if step.resource == RESOURCE_EXTERNAL and step.service:
+        prefix = "service" if step.service.lower() in model.secondary_services else "external"
+        return f"{prefix}:{_slug(step.service)}"
+    if step.resource == RESOURCE_BACKGROUND:
+        return queue_nodes(step.queue)[0] if step.queue else "queue"
+    target = _TARGET.get(step.resource) if isinstance(step.resource, str) else None
+    return target[0] if target else None
+
+
 def _secondary_id(component: dict[str, Any]) -> str:
     if component.get("role") == "service":
         return f"service:{_slug(component['name'])}"
@@ -151,15 +177,9 @@ def _secondary_id(component: dict[str, Any]) -> str:
 
 def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
     dep = raw.get("deployment", {})
-    # Componentes que propuso la IA, y el servicio con nombre de cada llamada externa (archivo:línea)
+    # Componentes que propuso la IA
     ai_components = [s for s in dep.get("services", []) if s.get("origin")]
     by_name = {s["name"].lower(): s for s in ai_components}
-    service_at = {
-        step["at"]: step["service"]
-        for ep in raw.get("endpoints", [])
-        for step in ep.get("steps", [])
-        if step.get("service") and step.get("at")
-    }
     api_raw, db_raw = dep.get("api", {}), dep.get("db", {})
     nodes: dict[str, GraphNode] = {
         "api": GraphNode(
@@ -179,21 +199,34 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
     }
     edges: dict[tuple[str, str], _EdgeAcc] = {}
 
-    def node_for(resource: str | None, queue: str | None, at: str | None = None) -> str | None:
-        if resource == RESOURCE_EXTERNAL and at in service_at:
-            name = service_at[at]
+    def ensure_queue_node(node_id: str, name: str | None) -> None:
+        if node_id in nodes:
+            return
+        q = model.queues.get(name) if name else None
+        nodes[node_id] = GraphNode(
+            node_id,
+            "queue",
+            f"Cola {name}" if name else "Cola (sin configurar)",
+            [node_id] if q else [],
+            {"max_length": q.max_length} if q else {"configured": False},
+        )
+
+    def node_for(source: str, step: Step) -> str | None:
+        node_id = step_target(model, source, step)
+        if node_id is None or node_id in nodes:
+            return node_id
+        if node_id == "db_replica":
+            return replica_node()
+        resource = step.resource
+        if resource == RESOURCE_EXTERNAL and step.service:
+            name = step.service
             component = by_name.get(name.lower())
-            if component and component.get("role") == "service":  # un repo secundario (IA-5)
-                node_id = _secondary_id(component)
-                if node_id not in nodes:
-                    nodes[node_id] = GraphNode(
-                        node_id, "service", name, [], _component_details(component), component.get("repo"), False
-                    )
-                return node_id
-            node_id = f"external:{_slug(name)}"
-            if node_id not in nodes:
-                details = _component_details(component)
-                nodes[node_id] = GraphNode(node_id, "external", name, [], details)
+            if component and node_id.startswith("service:"):
+                nodes[node_id] = GraphNode(
+                    node_id, "service", name, [], _component_details(component), component.get("repo"), False
+                )
+            else:
+                nodes[node_id] = GraphNode(node_id, "external", name, [], _component_details(component))
             return node_id
         if resource in _TARGET:
             node_id, kind, label = _TARGET[resource]
@@ -213,18 +246,8 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
                 nodes[node_id] = GraphNode(node_id, kind, label, resources, details)
             return node_id
         if resource == RESOURCE_BACKGROUND:
-            node_id = f"queue:{queue}" if queue else "queue"
-            if node_id not in nodes:
-                q = model.queues.get(queue) if queue else None
-                nodes[node_id] = GraphNode(
-                    node_id,
-                    "queue",
-                    f"Cola {queue}" if queue else "Cola (sin configurar)",
-                    [node_id] if q else [],
-                    {"max_length": q.max_length} if q else {"configured": False},
-                )
-            return node_id
-        return None  # CPU de la API u otra espera: no sale del nodo
+            ensure_queue_node(node_id, step.queue)
+        return node_id
 
     def replica_node() -> str:
         """JAJ-140: las réplicas de lectura, un solo nodo con los recursos de todas."""
@@ -245,12 +268,9 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
             )
         return "db_replica"
 
-    def add_steps(source: str, who: str, steps: Iterable[Step], replica_reads: bool = False) -> None:
+    def add_steps(source: str, who: str, steps: Iterable[Step]) -> None:
         for step in steps:
-            if replica_reads and step.resource == RESOURCE_DB_CONNECTION and step.shape in READ_SHAPES:
-                target: str | None = replica_node()
-            else:
-                target = node_for(step.resource, step.queue, step.at)
+            target = node_for(source, step)
             if target is None:
                 continue
             edges.setdefault((source, target), _EdgeAcc(source, target)).add(who, step)
@@ -259,13 +279,13 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
     graph_endpoints = []
     for ep in model.endpoints:
         # las requests leen de las réplicas; los trabajos de las colas, de la primaria (como el motor)
-        add_steps("api", ep.id, walk_steps(ep.steps), replica_reads=model.db.read_replicas > 0)
+        add_steps("api", ep.id, walk_steps(ep.steps))
         r = raw_by_id.get(ep.id, {})
         graph_endpoints.append(GraphEndpoint(ep.id, r.get("method"), r.get("path"), r.get("at"), ep.weight))
 
     for name, q in model.queues.items():
-        queue_id = node_for(RESOURCE_BACKGROUND, name)
-        worker_id = f"worker:{name}"
+        queue_id, worker_id = queue_nodes(name)
+        ensure_queue_node(queue_id, name)
         nodes[worker_id] = GraphNode(worker_id, "worker", f"Workers de {name}", [], {"workers": q.workers})
         edges[(queue_id, worker_id)] = _EdgeAcc(queue_id, worker_id)
         add_steps(worker_id, f"cola {name}", walk_steps(q.job_steps))
@@ -307,7 +327,7 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
         model=model.name,
         nodes=list(nodes.values()),
         edges=[
-            GraphEdge(f"{e.source}->{e.target}", e.source, e.target, e.endpoints, e.calls, e.refs)
+            GraphEdge(edge_id(e.source, e.target), e.source, e.target, e.endpoints, e.calls, e.refs)
             for e in edges.values()
         ],
         endpoints=graph_endpoints,

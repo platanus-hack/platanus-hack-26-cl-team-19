@@ -29,8 +29,8 @@ from app.api.store import (
     ReportSummary,
     RepoSource,
     Version,
+    initial_scenarios,
     report_summary,
-    scenarios_from_model,
 )
 
 _SUMMARY = "number, origin::text as origin, parent_number, note, created_at"
@@ -275,7 +275,7 @@ class PostgresProjectStore:
             with conn.cursor() as cur:
                 cur.executemany(
                     "insert into scenarios (project_id, name, multiplier, rps) values (%s, %s, %s, %s)",
-                    [(row["id"], s.name, s.multiplier, s.rps) for s in scenarios_from_model(model)],
+                    [(row["id"], s.name, s.multiplier, s.rps) for s in initial_scenarios(model)],
                 )
                 primary = source.repo_full_name if source else None
                 cur.executemany(

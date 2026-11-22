@@ -2,7 +2,7 @@
 import BrandIcon from "@/components/BrandIcon.vue";
 import AppHeader from "@/components/AppHeader.vue";
 import { ArrowRight, Check } from "@lucide/vue";
-import NewProjectSheet from "@/components/projects/NewProjectSheet.vue";
+import NewProjectDialog from "@/components/projects/NewProjectDialog.vue";
 import OnboardingActions from "@/components/onboarding/OnboardingActions.vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -173,7 +173,7 @@ async function addDemoRepository() {
                 repos en GitHub
               </a>
             </Button>
-            <NewProjectSheet from-sample @created="openCreatedProject" />
+            <NewProjectDialog from-sample @created="openCreatedProject" />
           </OnboardingActions>
           <Button
             variant="link"
@@ -207,7 +207,7 @@ async function addDemoRepository() {
               />
               Buscar repositorios
             </Button>
-            <NewProjectSheet from-sample @created="openCreatedProject" />
+            <NewProjectDialog from-sample @created="openCreatedProject" />
           </OnboardingActions>
         </template>
 
@@ -235,7 +235,7 @@ async function addDemoRepository() {
             >
               Ya instalé la app
             </Button>
-            <NewProjectSheet from-sample @created="openCreatedProject" />
+            <NewProjectDialog from-sample @created="openCreatedProject" />
           </OnboardingActions>
           <Button
             variant="link"

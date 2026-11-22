@@ -14,14 +14,8 @@ import ComponentGallery from "@/components/design/ComponentGallery.vue";
 import { galleryGroups } from "@/components/design/gallery";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const colorMode = useColorMode();
+const { selected, options, selectTheme } = useThemeSelection();
 useSeoMeta({ title: "Sistema de diseño · Branchpoint" });
-
-const themes = [
-  { value: "system", label: "Sistema" },
-  { value: "light", label: "Claro" },
-  { value: "dark", label: "Oscuro" },
-] as const;
 
 const surfaces = [
   {
@@ -136,15 +130,16 @@ const spacing = [
           <label class="flex items-center gap-2 text-sm text-muted-foreground">
             Tema
             <select
-              v-model="colorMode.preference"
+              :value="selected"
               class="min-h-9 rounded-md border border-input bg-card px-2 text-card-foreground"
+              @change="selectTheme(($event.target as HTMLSelectElement).value)"
             >
               <option
-                v-for="theme in themes"
-                :key="theme.value"
-                :value="theme.value"
+                v-for="theme in options"
+                :key="theme.id"
+                :value="theme.id"
               >
-                {{ theme.label }}
+                {{ theme.name }}
               </option>
             </select>
           </label>
