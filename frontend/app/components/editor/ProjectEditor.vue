@@ -8,6 +8,7 @@ import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
 import EditorAgentPanel from "@/components/editor/EditorAgentPanel.vue";
 import EditorFailureCost from "@/components/editor/EditorFailureCost.vue";
+import DeploymentPicker from "@/components/editor/DeploymentPicker.vue";
 import EditorInspector from "@/components/editor/EditorInspector.vue";
 import EditorShell from "@/components/editor/EditorShell.vue";
 import EditorToolPanel from "@/components/editor/EditorToolPanel.vue";
@@ -61,6 +62,10 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportPath } from "@/services/reports-api";
+import {
+  currentDeployment,
+  deploymentKind,
+} from "@/services/deployment-options";
 import {
   costComponentLabel,
   simulationProvenance,
@@ -117,6 +122,9 @@ const {
   saveScenario,
   createVersion,
   acceptChatProposal,
+  changeDeployment,
+  deploymentOptions,
+  loadDeploymentOptions,
   simulate,
   loadCosts,
   compare,
@@ -193,6 +201,19 @@ const canSaveVersion = computed(() => {
   return Number.isInteger(count) && count >= 1 && count <= 50;
 });
 const busy = computed(() => !!pending.value);
+// JAJ-148: la DB, la API y el frontend se pueden mover a otro proveedor o plan desde el inspector
+const selectedDeployment = computed(() =>
+  isMock || !version.value ? null : deploymentKind(selectedNode.value),
+);
+watch(selectedDeployment, (kind) => {
+  if (kind) void loadDeploymentOptions();
+});
+async function onChangeDeployment(
+  ops: Record<string, unknown>[],
+  note: string,
+) {
+  await changeDeployment(ops, note);
+}
 const provenance = isMock
   ? { origin: "assumed" as const, source: "Datos de demostración" }
   : simulationProvenance;
@@ -1064,6 +1085,16 @@ function openVersionDraft() {
             : "Simula un escenario para ver el uso del componente."
         }}
       </p>
+      <div v-if="selectedDeployment" class="border-t border-border p-4">
+        <DeploymentPicker
+          :kind="selectedDeployment"
+          :options="deploymentOptions?.[selectedDeployment] ?? null"
+          :current="currentDeployment(version?.model, selectedDeployment)"
+          :busy="busy"
+          :version-label="version ? `v${version.number}` : undefined"
+          @apply="onChangeDeployment"
+        />
+      </div>
       <div
         v-if="!isMock && selectedDependency"
         class="flex flex-col gap-2 border-t border-border p-4"

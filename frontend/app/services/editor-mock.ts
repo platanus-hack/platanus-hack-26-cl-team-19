@@ -294,7 +294,13 @@ export function createMockEditorApi(
   { landing = false } = {},
 ): Omit<
   ReturnType<typeof createEditorApi>,
-  "chat" | "acceptChatProposal" | "getChat" | "saveChat"
+  | "chat"
+  | "acceptChatProposal"
+  | "getChat"
+  | "saveChat"
+  // JAJ-148: el catálogo de planes y las operaciones viven en el backend
+  | "deploymentOptions"
+  | "applyOps"
 > {
   const primary = makeProject(
     DEMO_PROJECT_ID,
