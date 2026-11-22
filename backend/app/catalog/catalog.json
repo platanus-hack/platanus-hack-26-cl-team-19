@@ -1,42 +1,42 @@
 {
-  "_doc": "Catálogo de números por defecto del modelo. Cada valor trae su etiqueta de procedencia (JAJ-8), fuente y fecha. build_model.py lo cruza con el grafo del repo y las respuestas del usuario.",
+  "_doc": "Catálogo de números por defecto del modelo. Cada valor trae su etiqueta de procedencia, fuente y fecha. build_model.py lo cruza con el grafo del repo y las respuestas del usuario.",
   "db_shapes": {
-    "pk": {"value": 0.10, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local", "date": "2026-11-21"},
-    "lookup": {"value": 0.10, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (no se verifica en el esquema)", "date": "2026-11-21"},
-    "range": {"value": 0.14, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas", "date": "2026-11-21"},
-    "count": {"value": 0.14, "unit": "ms", "label": "ESTIMADO", "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice", "date": "2026-11-21"},
-    "count_all": {"per_row": 0.00005, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla", "date": "2026-11-21"},
-    "scan": {"per_row": 0.00005, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms", "date": "2026-11-21"},
-    "commit": {"value": 1.1, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: escritura con commit, pgbench, disco local", "date": "2026-11-21"},
+    "pk": {"value": 0.10, "unit": "ms", "label": "CALIBRADO", "source": "Lectura por PK, pgbench, 1 M filas, Postgres 16 con 1 CPU y caché caliente, Docker local", "date": "2026-11-21"},
+    "lookup": {"value": 0.10, "unit": "ms", "label": "ESTIMADO", "source": "Lectura por PK. Supone que la columna del filtro tiene índice (no se verifica en el esquema)", "date": "2026-11-21"},
+    "range": {"value": 0.14, "unit": "ms", "label": "ESTIMADO", "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas", "date": "2026-11-21"},
+    "count": {"value": 0.14, "unit": "ms", "label": "ESTIMADO", "source": "Rango por índice. Supone que el filtro del COUNT usa un índice", "date": "2026-11-21"},
+    "count_all": {"per_row": 0.00005, "unit": "ms", "label": "CALIBRADO", "source": "Escaneo completo de 1 M filas en 50 ms. COUNT(*) sin filtro recorre la tabla", "date": "2026-11-21"},
+    "scan": {"per_row": 0.00005, "unit": "ms", "label": "CALIBRADO", "source": "Escaneo completo de 1 M filas en 50 ms", "date": "2026-11-21"},
+    "commit": {"value": 1.1, "unit": "ms", "label": "CALIBRADO", "source": "Escritura con commit, pgbench, disco local", "date": "2026-11-21"},
     "stage": {"value": 0.0, "unit": "ms", "label": "OBSERVADO", "source": "session.add/delete solo marcan la sesión; el SQL sale en el commit", "date": "2026-11-21"},
     "unknown": {"value": 0.14, "unit": "ms", "label": "SUPUESTO", "source": "Query que no se pudo clasificar (SQL en texto o builder externo). Se asume un rango por índice; revisar", "date": "2026-11-21"}
   },
   "table_rows_default": {"value": 100000, "unit": "filas", "label": "SUPUESTO", "source": "Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro", "date": "2026-11-21"},
   "n_plus_one_list_default": {"value": 20, "unit": "iteraciones", "label": "SUPUESTO", "source": "Largo de la lista que recorre un N+1, sin dato", "date": "2026-11-21"},
   "api": {
-    "cpu_ms": {"framework": "fastapi", "value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-43: CPU de FastAPI por request en un endpoint async con asyncpg, a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms). Se usa en endpoints async", "date": "2026-11-21"},
-    "cpu_ms_sync": {"framework": "fastapi", "value": 2.1, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: endpoint def con SQLModel + psycopg (stack del template), lectura por PK, sostenido con 16-64 clientes (1,4 ms con 1 cliente; 3,4 ms con COUNT + lista de 100). Se usa en endpoints def", "date": "2026-11-21"},
-    "latency_ms": {"value": 0.25, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: latencia cliente ↔ API con k6 y 1 VU, Docker local", "date": "2026-11-21"},
+    "cpu_ms": {"framework": "fastapi", "value": 0.68, "unit": "ms", "label": "CALIBRADO", "source": "CPU de FastAPI por request en un endpoint async con asyncpg, a 200 req/s, medida con k6 (a 5 req/s sube a 2,5 ms). Se usa en endpoints async", "date": "2026-11-21"},
+    "cpu_ms_sync": {"framework": "fastapi", "value": 2.1, "unit": "ms", "label": "CALIBRADO", "source": "Endpoint def con SQLModel + psycopg (stack del template), lectura por PK, sostenido con 16-64 clientes (1,4 ms con 1 cliente; 3,4 ms con COUNT + lista de 100). Se usa en endpoints def", "date": "2026-11-21"},
+    "latency_ms": {"value": 0.25, "unit": "ms", "label": "CALIBRADO", "source": "Latencia cliente ↔ API con k6 y 1 VU, Docker local", "date": "2026-11-21"},
     "threads_per_worker": {"value": 40, "unit": "hilos", "label": "ESTIMADO", "source": "Threadpool por defecto de AnyIO/Starlette para endpoints `def`", "date": "2026-11-21"},
     "workers_default": {"value": 1, "unit": "procesos", "label": "ESTIMADO", "source": "uvicorn y `fastapi run` levantan 1 worker si no se configura", "date": "2026-11-21"}
   },
   "cpu_steps": {
-    "password_hash": {"value": 110, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop", "date": "2026-11-21"},
-    "password_hash_bcrypt": {"value": 188, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-46: pwdlib BcryptHasher() por defecto (cost 12), 1 CPU. Solo para contraseñas guardadas antes con bcrypt", "date": "2026-11-21"}
+    "password_hash": {"value": 110, "unit": "ms", "label": "CALIBRADO", "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop", "date": "2026-11-21"},
+    "password_hash_bcrypt": {"value": 188, "unit": "ms", "label": "CALIBRADO", "source": "Verificación con pwdlib BcryptHasher() por defecto (cost 12), 1 CPU. Solo para contraseñas guardadas antes con bcrypt", "date": "2026-11-21"}
   },
   "app_rps_per_task": {
-    "_doc": "JAJ-46: capacidad de 1 worker en 1 núcleo del laptop de calibración, como referencia para JAJ-11 (rps_por_tarea). build_model.py no la usa: el motor la calcula desde los tiempos.",
-    "no_db": {"value": 7050, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "JAJ-46: endpoint async sin DB", "date": "2026-11-21"},
-    "read_pk": {"value": 470, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "JAJ-46: SQLModel síncrono, sostenido con carga (718 con 1 cliente)", "date": "2026-11-21"},
-    "list_100": {"value": 290, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "JAJ-46: COUNT + 100 filas, sostenido con carga (414 con 2 clientes)", "date": "2026-11-21"}
+    "_doc": "Capacidad de 1 worker en 1 núcleo del laptop de calibración, como referencia para el costo por tarea. build_model.py no la usa: el motor la calcula desde los tiempos.",
+    "no_db": {"value": 7050, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "Endpoint async sin DB", "date": "2026-11-21"},
+    "read_pk": {"value": 470, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "SQLModel síncrono, sostenido con carga (718 con 1 cliente)", "date": "2026-11-21"},
+    "list_100": {"value": 290, "unit": "req/s por worker y núcleo", "label": "CALIBRADO", "source": "COUNT + 100 filas, sostenido con carga (414 con 2 clientes)", "date": "2026-11-21"}
   },
   "cpu_core_factor": {
     "_doc": "Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
     "local": {"value": 1.0, "unit": "×", "label": "CALIBRADO", "source": "Laptop de calibración (i7-13620H): los tiempos del catálogo se midieron ahí", "date": "2026-11-21"},
-    "graviton2": {"value": 1.95, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g", "date": "2026-11-21"},
-    "graviton3": {"value": 1.55, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: Geekbench 6 un núcleo, i7-13620H 2.343-2.498 vs c7g.metal 1.546 (un solo resultado público). m7g, c7g, db.m7g. ±30 %", "date": "2026-11-21"},
-    "x86_cloud": {"value": 1.95, "unit": "×", "label": "SUPUESTO", "source": "JAJ-143: proveedores que no publican el procesador (Neon, Fly, Render). Sin medición propia: se usa el factor más lento del catálogo (Graviton2), por revisar", "date": "2026-11-21"},
-    "graviton4": {"value": 1.25, "unit": "×", "label": "ESTIMADO", "source": "JAJ-46: factor de Graviton3 / 1,25 (Phoronix: ~25 % más por núcleo). m8g, r8g", "date": "2026-11-21"}
+    "graviton2": {"value": 1.95, "unit": "×", "label": "ESTIMADO", "source": "Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g", "date": "2026-11-21"},
+    "graviton3": {"value": 1.55, "unit": "×", "label": "ESTIMADO", "source": "Geekbench 6 un núcleo, i7-13620H 2.343-2.498 vs c7g.metal 1.546 (un solo resultado público). m7g, c7g, db.m7g. ±30 %", "date": "2026-11-21"},
+    "x86_cloud": {"value": 1.95, "unit": "×", "label": "SUPUESTO", "source": "Proveedores que no publican el procesador (Neon, Fly, Render). Sin medición propia: se usa el factor más lento del catálogo (Graviton2), por revisar", "date": "2026-11-21"},
+    "graviton4": {"value": 1.25, "unit": "×", "label": "ESTIMADO", "source": "Factor de Graviton3 / 1,25 (Phoronix: ~25 % más por núcleo). m8g, r8g", "date": "2026-11-21"}
   },
   "burstable_baseline_per_vcpu": {
     "_doc": "Instancias con créditos de CPU: con carga sostenida rinden su base por vCPU, salvo en modo unlimited (que cobra el exceso).",
@@ -45,9 +45,9 @@
   },
   "pools": {
     "sqlalchemy": {
-      "pool_size": {"value": 5, "unit": "conexiones", "label": "ESTIMADO", "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8)", "date": "2026-11-21"},
-      "max_overflow": {"value": 10, "unit": "conexiones", "label": "ESTIMADO", "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8)", "date": "2026-11-21"},
-      "pool_timeout_s": {"value": 30, "unit": "s", "label": "ESTIMADO", "source": "Default de QueuePool, SQLAlchemy 2.1.9 (JAJ-8)", "date": "2026-11-21"}
+      "pool_size": {"value": 5, "unit": "conexiones", "label": "ESTIMADO", "source": "Default de QueuePool, SQLAlchemy 2.1.9", "date": "2026-11-21"},
+      "max_overflow": {"value": 10, "unit": "conexiones", "label": "ESTIMADO", "source": "Default de QueuePool, SQLAlchemy 2.1.9", "date": "2026-11-21"},
+      "pool_timeout_s": {"value": 30, "unit": "s", "label": "ESTIMADO", "source": "Default de QueuePool, SQLAlchemy 2.1.9", "date": "2026-11-21"}
     },
     "asyncpg": {
       "pool_size": {"value": 10, "unit": "conexiones", "label": "ESTIMADO", "source": "Default de asyncpg.create_pool (min_size=10, max_size=10)", "date": "2026-11-21"},
@@ -56,16 +56,16 @@
     }
   },
   "other_steps": {
-    "cache": {"value": 0.03, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: GET/SET de Redis 7.4, redis-benchmark, 512 B", "date": "2026-11-21"},
-    "background": {"value": 0.03, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: encolar en Redis (LPUSH). El trabajo del worker se modela aparte", "date": "2026-11-21"},
-    "external": {"value": null, "unit": "ms", "label": "SUPUESTO", "source": "JAJ-8: latencia de servicios externos sin fuente; la ingresa el usuario", "date": "2026-11-21"}
+    "cache": {"value": 0.03, "unit": "ms", "label": "CALIBRADO", "source": "GET/SET de Redis 7.4, redis-benchmark, 512 B", "date": "2026-11-21"},
+    "background": {"value": 0.03, "unit": "ms", "label": "CALIBRADO", "source": "Encolar en Redis (LPUSH). El trabajo del worker se modela aparte", "date": "2026-11-21"},
+    "external": {"value": null, "unit": "ms", "label": "SUPUESTO", "source": "Latencia de servicios externos sin fuente; la ingresa el usuario", "date": "2026-11-21"}
   },
   "db_plans": {
     "_sources": {
-      "supabase": "JAJ-11: supabase.com/pricing.md, leído el 2026-11-21 (límites de conexiones también en JAJ-8). vCPU de Micro, Small y Medium (compartidos): supuesto de JAJ-11",
-      "rds_postgres": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor)",
-      "local": "JAJ-8: Postgres 16 en Docker con 1 CPU",
-      "neon": "JAJ-143: neon.com/docs/reference/compatibility (max_connections por tamaño = RAM / 9531392; 1 CU = 1 vCPU y 4 GB) leído el 2026-11-21. El precio por CU-hora (plan Launch) sale de app/costs/prices/manual.json (JAJ-11). Con pooler (PgBouncer) acepta hasta 10.000 clientes. Con autoscaling, max_connections sale del tamaño mínimo. Neon no publica el procesador (SUPUESTO)",
+      "supabase": "Precios de supabase.com/pricing.md, leídos el 2026-11-21 (también los límites de conexiones). vCPU de Micro, Small y Medium (compartidos): supuesto",
+      "rds_postgres": "Archivo de precios de AWS vía fuente secundaria. max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor)",
+      "local": "Postgres 16 en Docker con 1 CPU",
+      "neon": "neon.com/docs/reference/compatibility (max_connections por tamaño = RAM / 9531392; 1 CU = 1 vCPU y 4 GB) leído el 2026-11-21. El precio por CU-hora (plan Launch) sale de app/costs/prices/manual.json. Con pooler (PgBouncer) acepta hasta 10.000 clientes. Con autoscaling, max_connections sale del tamaño mínimo. Neon no publica el procesador (SUPUESTO)",
       "processor": "Procesador de cada plan para cpu_core_factor. RDS: db.t4g es Graviton2 y db.m7g Graviton3 (AWS). Supabase no publica el procesador: su cómputo es ARM y AWS cuenta que migró a Graviton; se asume Graviton2, el núcleo más lento de los tres (SUPUESTO)"
     },
     "supabase": {
@@ -97,18 +97,18 @@
     }
   },
   "app_plans": {
-    "_source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
+    "_source": "Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
     "fargate": {"usd_vcpu_hour": 0.03238, "usd_gb_hour": 0.00356, "processor": "graviton2", "processor_label": "ESTIMADO"},
     "local": {"usd_vcpu_hour": 0, "usd_gb_hour": 0, "processor": "local", "processor_label": "CALIBRADO"},
     "fly": {
-      "_source": "JAJ-143: fly.io/pricing, leído el 2026-11-21. Las máquinas performance tienen 100 % de CPU dedicada (fly.io/docs/machines/cpu-performance). Las shared (1/16 de núcleo sostenido) no están: el motor no simula sus créditos en la API. Fly no publica el procesador (SUPUESTO)",
+      "_source": "Precios de fly.io/pricing, leídos el 2026-11-21. Las máquinas performance tienen 100 % de CPU dedicada (fly.io/docs/machines/cpu-performance). Las shared (1/16 de núcleo sostenido) no están: el motor no simula sus créditos en la API. Fly no publica el procesador (SUPUESTO)",
       "plans": {
         "performance-1x": {"vcpu": 1, "memory_gb": 2, "usd_month": 33, "processor": "x86_cloud", "processor_label": "SUPUESTO"},
         "performance-2x": {"vcpu": 2, "memory_gb": 4, "usd_month": 66, "processor": "x86_cloud", "processor_label": "SUPUESTO"}
       }
     },
     "render": {
-      "_source": "JAJ-143: render.com/pricing y render.com/docs/compute-plans, leídos el 2026-11-21 (los nombres starter, standard, pro... son los IDs anteriores a agosto de 2026). El plan free se suspende tras 15 minutos sin tráfico: el arranque en frío no se simula. Render no publica el procesador (SUPUESTO)",
+      "_source": "Precios de render.com/pricing y render.com/docs/compute-plans, leídos el 2026-11-21 (los nombres starter, standard, pro... son los IDs anteriores a agosto de 2026). El plan free se suspende tras 15 minutos sin tráfico: el arranque en frío no se simula. Render no publica el procesador (SUPUESTO)",
       "plans": {
         "free":      {"vcpu": 0.1, "memory_gb": 0.5, "usd_month": 0,   "processor": "x86_cloud", "processor_label": "SUPUESTO"},
         "starter":   {"vcpu": 0.5, "memory_gb": 0.5, "usd_month": 7,   "processor": "x86_cloud", "processor_label": "SUPUESTO"},
@@ -121,13 +121,13 @@
     }
   },
   "frontend_plans": {
-    "_doc": "Dónde se sirve el frontend (JAJ-143). Define su costo y su tecnología. No cambia la simulación: el motor simula la API, y el frontend estático o en el borde no comparte sus recursos.",
+    "_doc": "Dónde se sirve el frontend. Define su costo y su tecnología. No cambia la simulación: el motor simula la API, y el frontend estático o en el borde no comparte sus recursos.",
     "vercel": {
-      "_source": "JAJ-143: vercel.com/pricing, leído el 2026-11-21. Pro: US$20 al mes por miembro, con US$20 de uso incluido; el uso extra (Active CPU, memoria, transferencia) no se estima",
+      "_source": "Precios de vercel.com/pricing, leídos el 2026-11-21. Pro: US$20 al mes por miembro, con US$20 de uso incluido; el uso extra (Active CPU, memoria, transferencia) no se estima",
       "plans": {"hobby": {"usd_month": 0}, "pro": {"usd_month": 20}}
     },
     "cloudfront": {
-      "_source": "JAJ-11: planes de tarifa plana de CloudFront; los precios salen de app/costs/prices/manual.json",
+      "_source": "Planes de tarifa plana de CloudFront; los precios salen de app/costs/prices/manual.json",
       "prices": "cloudfront_flat_rate"
     },
     "local": {
@@ -136,27 +136,27 @@
     }
   },
   "network_rtt_ms": {
-    "_doc": "Ida y vuelta de red entre la API y la DB por cada consulta (JAJ-143). La conexión queda tomada durante la espera, pero la CPU de la DB no. Los tiempos de JAJ-8 se midieron con la DB en la misma máquina, así que en local no se suma nada.",
-    "local": {"value": 0, "unit": "ms", "label": "CALIBRADO", "source": "JAJ-8: DB en Docker en la misma máquina; la red ya está en los tiempos calibrados", "date": "2026-11-21"},
+    "_doc": "Ida y vuelta de red entre la API y la DB por cada consulta. La conexión queda tomada durante la espera, pero la CPU de la DB no. Los tiempos calibrados se midieron con la DB en la misma máquina, así que en local no se suma nada.",
+    "local": {"value": 0, "unit": "ms", "label": "CALIBRADO", "source": "DB en Docker en la misma máquina; la red ya está en los tiempos calibrados", "date": "2026-11-21"},
     "same_region": {"value": 1, "unit": "ms", "label": "SUPUESTO", "source": "AWS (whitepaper Fault Isolation Boundaries y Architecture Blog): dentro de una zona, menos de 1 ms; entre zonas de una región, un dígito de ms. Se asume 1 ms con la API y la DB en la misma región, por revisar", "date": "2026-11-21"}
   },
   "traffic": {
-    "_source": "JAJ-11: perfiles de uso y factores de pico. Requests por sesión = consultas por sesión de JAJ-11 / 6 consultas por request.",
+    "_source": "Perfiles de uso y factores de pico. Requests por sesión = consultas por sesión del perfil / 6 consultas por request.",
     "profiles": {
       "ligero": {"sessions_per_month": 4,  "requests_per_session": 10},
       "medio":  {"sessions_per_month": 8,  "requests_per_session": 17},
       "pesado": {"sessions_per_month": 12, "requests_per_session": 25}
     },
-    "k_hour": {"value": 2.5, "unit": "×", "label": "SUPUESTO", "source": "JAJ-11: hora pico sobre el promedio, de guías generales de capacidad", "date": "2026-11-21"},
-    "mau_default": {"value": 10000, "unit": "usuarios/mes", "label": "SUPUESTO", "source": "Valor por defecto mientras el usuario no declare su tráfico: se reemplaza con la respuesta del chat (JAJ-59)", "date": "2026-11-21"},
-    "read_share": {"value": 0.85, "unit": "fracción", "label": "SUPUESTO", "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET", "date": "2026-11-21"},
+    "k_hour": {"value": 2.5, "unit": "×", "label": "SUPUESTO", "source": "Hora pico sobre el promedio, de guías generales de capacidad", "date": "2026-11-21"},
+    "mau_default": {"value": 10000, "unit": "usuarios/mes", "label": "SUPUESTO", "source": "Valor por defecto mientras el usuario no declare su tráfico: se reemplaza con la respuesta del chat", "date": "2026-11-21"},
+    "read_share": {"value": 0.85, "unit": "fracción", "label": "SUPUESTO", "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET", "date": "2026-11-21"},
     "scenarios": {
       "pico_normal": {"multiplier": 1,  "label": "SUPUESTO", "source": "Hora pico de un día normal"},
-      "cyberday":    {"multiplier": 20, "label": "SUPUESTO", "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)"}
+      "cyberday":    {"multiplier": 20, "label": "SUPUESTO", "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas"}
     }
   },
   "business_defaults": {
-    "ticket_usd": {"value": 45, "unit": "US$", "label": "SUPUESTO", "source": "JAJ-11: ticket promedio sin datos reales", "date": "2026-11-21"},
-    "conversion": {"value": 0.02, "unit": "fracción", "label": "SUPUESTO", "source": "JAJ-11: conversión sin datos reales", "date": "2026-11-21"}
+    "ticket_usd": {"value": 45, "unit": "US$", "label": "SUPUESTO", "source": "Ticket promedio de una tienda en línea, sin datos reales del usuario", "date": "2026-11-21"},
+    "conversion": {"value": 0.02, "unit": "fracción", "label": "SUPUESTO", "source": "Conversión típica de una tienda en línea, sin datos reales del usuario", "date": "2026-11-21"}
   }
 }

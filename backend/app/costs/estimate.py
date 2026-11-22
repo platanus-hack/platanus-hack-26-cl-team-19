@@ -56,7 +56,7 @@ MB_DB_EGRESS_PER_USER = 4.0  # egreso de Supabase por usuario al mes
 RDS_MIN_STORAGE_GB = 20.0  # disco mínimo de RDS
 ALB_NEW_CONNECTION_SHARE = 0.10  # fracción de requests que abren una conexión nueva
 CACHE_BASE_GB = 1.0  # tamaño base de la caché, más 1 KB por usuario
-SPIKE_SOURCE = "JAJ-11: supuesto del modelo de costos (spikes/jaj-11-costos/costs.py)"
+SPIKE_SOURCE = "Supuesto del modelo de costos de Branchpoint"
 
 
 def _num(v: float, unit: str, label: str, source: str, d: str | None = None, **extra: Any) -> dict[str, Any]:
@@ -135,7 +135,7 @@ def _api_line(raw: dict[str, Any], region: str) -> CostLine | str:
     if provider in PLAN_PRICED_API:
         return _api_plan_line(api, provider)
     if provider != "fargate":
-        return f"API en '{provider}': sin precios en el catálogo (JAJ-11, JAJ-143)."
+        return f"API en '{provider}': sin precios en el catálogo."
     vcpu_p, gb_p = (
         aws_price(region, "fargate_linux_arm", "vcpu_hour"),
         aws_price(region, "fargate_linux_arm", "gb_hour"),
@@ -163,7 +163,7 @@ def _db_line(raw: dict[str, Any], region: str, mau: float | None, mau_label: str
     if provider == "supabase":
         sb = manual_block("supabase")
         if plan not in sb["compute_month"]:
-            return f"DB Supabase '{plan}': el plan no está en manual.json (JAJ-11)."
+            return f"DB Supabase '{plan}': el plan no está en el catálogo de precios."
         compute = sb["compute_month"][plan]["usd"]
         base = sb["plans_month"]["pro"] + max(0, compute - sb["compute_credit_month"])
         disk = max(0.0, gb_db - sb["included"]["disk_gb"]) * sb["overage"]["disk_gb_month"]
@@ -190,7 +190,7 @@ def _db_line(raw: dict[str, Any], region: str, mau: float | None, mau_label: str
         try:
             hour = aws_price(region, "rds_postgres", "single_az_per_hour", plan)
         except KeyError:
-            return f"DB RDS '{plan}': el plan no está en aws.json (JAJ-11)."
+            return f"DB RDS '{plan}': el plan no está en el catálogo de precios de AWS."
         gp3 = aws_price(region, "rds_postgres", "gp3_gb_month")
         gb = max(RDS_MIN_STORAGE_GB, gb_db)
         usd = hour.usd * HOURS_MONTH + gb * gp3.usd
@@ -212,7 +212,7 @@ def _db_line(raw: dict[str, Any], region: str, mau: float | None, mau_label: str
         )
     if provider == "neon":
         return _neon_line(plan, gb_db, mau, mau_label)
-    return f"DB en '{provider}': sin precios en el MVP (JAJ-11)."
+    return f"DB en '{provider}': todavía sin precios en el catálogo."
 
 
 def _neon_line(plan: str | None, gb_db: float, mau: float | None, mau_label: str | None) -> CostLine | str:
@@ -221,7 +221,7 @@ def _neon_line(plan: str | None, gb_db: float, mau: float | None, mau_label: str
     nn = manual_block("neon")
     sizes = load_catalog()["db_plans"]["neon"]
     if plan not in sizes:
-        return f"DB Neon '{plan}': el tamaño no está en el catálogo (JAJ-143)."
+        return f"DB Neon '{plan}': el tamaño no está en el catálogo."
     cu = sizes[plan]["cu"]
     gb_egress = (mau or 0) * MB_DB_EGRESS_PER_USER / 1024
     compute = cu * HOURS_MONTH * nn["cu_hour"]["launch"]
@@ -329,7 +329,7 @@ def _api_plan_line(api: dict[str, Any], provider: str) -> CostLine | str:
     entry = load_catalog()["app_plans"][provider]
     plan = entry["plans"].get(api.get("plan") or "")
     if plan is None:
-        return f"API en {provider}: el plan '{api.get('plan')}' no está en el catálogo (JAJ-143)."
+        return f"API en {provider}: el plan '{api.get('plan')}' no está en el catálogo."
     replicas = value(api["replicas"], 1)
     usd = replicas * plan["usd_month"]
     return CostLine(
@@ -426,7 +426,7 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
         round(total, 2),
         "US$/mes",
         _weakest(*(_label(line.usd_month) for line in lines)),
-        "Suma de los componentes con precio (JAJ-72)" + (f"; sin precio: {len(unpriced)}" if unpriced else ""),
+        "Suma de los componentes con precio" + (f"; sin precio: {len(unpriced)}" if unpriced else ""),
         derived=True,
     )
     return CostEstimate(

@@ -64,21 +64,21 @@
         "value": 0.25,
         "unit": "ms",
         "label": "CALIBRADO",
-        "source": "JAJ-8: latencia cliente ↔ API con k6 y 1 VU, Docker local",
+        "source": "Latencia cliente ↔ API con k6 y 1 VU, Docker local",
         "date": "2026-11-21"
       },
       "usd_month": {
         "value": 57.67,
         "unit": "US$/mes",
         "label": "ESTIMADO",
-        "source": "JAJ-11: Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
+        "source": "Fargate Linux/ARM en us-east-1, ejemplo de la página oficial de AWS. Fargate en ARM corre sobre Graviton2 (AWS, anuncio de Fargate con Graviton2)",
         "date": "2026-11-21"
       },
       "cpu_core_factor": {
         "value": 1.95,
         "unit": "×",
         "label": "ESTIMADO",
-        "source": "API en fargate: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "source": "API en fargate: procesador graviton2. Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
         "date": "2026-11-21",
         "processor": "graviton2"
       }
@@ -90,21 +90,21 @@
         "value": 2,
         "unit": "vCPU",
         "label": "ESTIMADO",
-        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
+        "source": "Archivo de precios de AWS vía fuente secundaria. max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
         "date": "2026-11-21"
       },
       "max_connections": {
         "value": 450,
         "unit": "conexiones",
         "label": "ESTIMADO",
-        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
+        "source": "Archivo de precios de AWS vía fuente secundaria. max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
         "date": "2026-11-21"
       },
       "usd_month": {
         "value": 47.45,
         "unit": "US$/mes",
         "label": "ESTIMADO",
-        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730 (JAJ-11)",
+        "source": "Archivo de precios de AWS vía fuente secundaria. max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario. Supabase: 25 + max(0, compute − 10); RDS: US$/hora × 730",
         "date": "2026-11-21"
       },
       "pool_per_worker": {
@@ -136,7 +136,7 @@
         "value": 1.95,
         "unit": "×",
         "label": "ESTIMADO",
-        "source": "Plan rds_postgres db.t4g.medium: procesador graviton2. JAJ-46: factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
+        "source": "Plan rds_postgres db.t4g.medium: procesador graviton2. Factor de Graviton3 × 1,25 (AWS: C7g hasta 25 % sobre C6g). t4g, m6g, db.t4g. Cuántas veces más rinde 1 núcleo del laptop de calibración (i7-13620H) que 1 vCPU del plan. Los tiempos de CPU del catálogo son de ese núcleo: en la nube se multiplican por el factor (capacidad_nube = capacidad_local / factor).",
         "date": "2026-11-21",
         "processor": "graviton2"
       },
@@ -216,7 +216,7 @@
       "value": 17,
       "unit": "requests/sesión",
       "label": "SUPUESTO",
-      "source": "JAJ-11: perfil medio, sin dato del usuario",
+      "source": "Perfil medio de uso de una app web, sin dato del usuario",
       "date": "2026-11-21",
       "needs_review": true
     },
@@ -245,7 +245,7 @@
           "value": 20,
           "unit": "×",
           "label": "SUPUESTO",
-          "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+          "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas",
           "date": "2026-11-21",
           "needs_review": true
         },
@@ -296,7 +296,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -314,7 +314,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -332,7 +332,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -359,7 +359,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -386,7 +386,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -413,7 +413,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -469,7 +469,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -492,7 +492,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -510,7 +510,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -528,7 +528,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -546,7 +546,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -566,7 +566,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -586,7 +586,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -606,7 +606,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -641,7 +641,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -664,7 +664,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -682,7 +682,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -700,7 +700,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -718,7 +718,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -738,7 +738,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -758,7 +758,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -778,7 +778,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -813,7 +813,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -855,7 +855,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -873,7 +873,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -900,7 +900,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -927,7 +927,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -954,7 +954,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -1011,7 +1011,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1034,7 +1034,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1052,7 +1052,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1070,7 +1070,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1089,7 +1089,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1108,7 +1108,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1127,7 +1127,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1147,7 +1147,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1167,7 +1167,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1187,7 +1187,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1222,7 +1222,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1245,7 +1245,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1263,7 +1263,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1281,7 +1281,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1301,7 +1301,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1321,7 +1321,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1341,7 +1341,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1376,7 +1376,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1399,7 +1399,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1417,7 +1417,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1435,7 +1435,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1453,7 +1453,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1473,7 +1473,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1493,7 +1493,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1513,7 +1513,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1548,7 +1548,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1571,7 +1571,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1589,7 +1589,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1607,7 +1607,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1625,7 +1625,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1645,7 +1645,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1665,7 +1665,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -1685,7 +1685,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1720,7 +1720,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1743,7 +1743,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1775,7 +1775,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1798,7 +1798,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -1816,7 +1816,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1835,7 +1835,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1854,7 +1854,7 @@
             "value": 110,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-46: verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
+            "source": "Verificación con pwdlib Argon2Hasher() por defecto (argon2id m=65536,t=3,p=4), como full-stack-fastapi-template 77e550a; p50 106 ms, media 123 ms, 1 CPU. Hash nuevo: 105 ms. Libera el GIL: ocupa un núcleo, no el event loop",
             "date": "2026-11-21"
           },
           "via": [
@@ -1888,7 +1888,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -1911,7 +1911,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1929,7 +1929,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1947,7 +1947,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -1965,7 +1965,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -1985,7 +1985,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -2005,7 +2005,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -2025,7 +2025,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "repeat": {
@@ -2082,7 +2082,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2105,7 +2105,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2123,7 +2123,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2141,7 +2141,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2159,7 +2159,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -2179,7 +2179,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -2199,7 +2199,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -2219,7 +2219,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2254,7 +2254,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2277,7 +2277,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2295,7 +2295,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2313,7 +2313,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2331,7 +2331,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2349,7 +2349,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
+            "source": "Rango por índice de 50 filas. Supone índice en el filtro o en el ORDER BY y unas 50 filas",
             "date": "2026-11-21"
           },
           "via": [
@@ -2369,7 +2369,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -2389,7 +2389,7 @@
             "value": 0.14,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: rango por índice. Supone que el filtro del COUNT usa un índice",
+            "source": "Rango por índice. Supone que el filtro del COUNT usa un índice",
             "date": "2026-11-21"
           },
           "via": [
@@ -2409,7 +2409,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2444,7 +2444,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2467,7 +2467,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2485,7 +2485,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2518,7 +2518,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2541,7 +2541,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2559,7 +2559,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2577,7 +2577,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2610,7 +2610,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2633,7 +2633,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2651,7 +2651,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2669,7 +2669,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2702,7 +2702,7 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2725,7 +2725,7 @@
             "value": 5.0,
             "unit": "ms",
             "label": "SUPUESTO",
-            "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+            "source": "Escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
             "date": "2026-11-21",
             "needs_review": true
           },
@@ -2759,7 +2759,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2782,7 +2782,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2814,7 +2814,7 @@
         "value": 0.1214,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
@@ -2837,7 +2837,7 @@
             "value": 1.1,
             "unit": "ms",
             "label": "CALIBRADO",
-            "source": "JAJ-8: escritura con commit, pgbench, disco local",
+            "source": "Escritura con commit, pgbench, disco local",
             "date": "2026-11-21"
           },
           "via": [
@@ -2855,7 +2855,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2873,7 +2873,7 @@
             "value": 0.1,
             "unit": "ms",
             "label": "ESTIMADO",
-            "source": "JAJ-8: lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
+            "source": "Lectura por PK. Supone que la columna del filtro tiene índice (el AST no lo verifica)",
             "date": "2026-11-21"
           },
           "via": [
@@ -2906,14 +2906,14 @@
         "value": 0.0125,
         "unit": "fracción",
         "label": "SUPUESTO",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "date": "2026-11-21",
         "needs_review": true
       }
     }
   ],
   "checks": {
-    "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación (JAJ-9).",
+    "_doc": "Cotas analíticas simples para revisar el modelo. No reemplazan la simulación.",
     "connections": {
       "app_max": {
         "value": 20,
@@ -2927,7 +2927,7 @@
         "value": 450,
         "unit": "conexiones",
         "label": "ESTIMADO",
-        "source": "JAJ-11: archivo de precios de AWS vía fuente secundaria. JAJ-8: max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
+        "source": "Archivo de precios de AWS vía fuente secundaria. max_connections = RAM / 9531392 (aproximado, la RAM útil es algo menor). Plan rds_postgres db.t4g.medium declarado por el usuario",
         "date": "2026-11-21"
       },
       "status": "ok"
@@ -2964,7 +2964,7 @@
         "value": 52.5,
         "unit": "req/s",
         "label": "SUPUESTO",
-        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos de JAJ-8 son de 1 núcleo del laptop × cpu_core_factor)",
+        "source": "vCPU de la DB (la base sostenida si tiene créditos) / tiempo de queries por request en la nube (los tiempos calibrados son de 1 núcleo del laptop × cpu_core_factor)",
         "date": "2026-11-21",
         "needs_review": true,
         "derived": true
@@ -2992,7 +2992,7 @@
           "value": 6353.0,
           "unit": "US$/hora",
           "label": "SUPUESTO",
-          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae",
           "date": "2026-11-21",
           "needs_review": true,
           "derived": true
@@ -3010,7 +3010,7 @@
           "value": 127059.0,
           "unit": "US$/hora",
           "label": "SUPUESTO",
-          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae (JAJ-11)",
+          "source": "sesiones/hora × conversión × ticket: ventas en juego por hora si el sistema se cae",
           "date": "2026-11-21",
           "needs_review": true,
           "derived": true
@@ -3022,7 +3022,7 @@
     "total": 39,
     "by_source": [
       {
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "count": 19,
         "needs_review": true,
         "example_path": "endpoints[0].weight"
@@ -3058,7 +3058,7 @@
         "example_path": "traffic.peak_rps"
       },
       {
-        "source": "JAJ-11: perfil medio, sin dato del usuario",
+        "source": "Perfil medio de uso de una app web, sin dato del usuario",
         "count": 1,
         "needs_review": true,
         "example_path": "traffic.requests_per_session"
@@ -3070,7 +3070,7 @@
         "example_path": "traffic.scenarios.pico_normal.multiplier"
       },
       {
-        "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+        "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas",
         "count": 1,
         "needs_review": true,
         "example_path": "traffic.scenarios.cyberday.multiplier"
@@ -3094,7 +3094,7 @@
         "example_path": "endpoints[3].steps[0].time"
       },
       {
-        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "source": "Escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
         "count": 1,
         "needs_review": true,
         "example_path": "endpoints[16].steps[0].time"
@@ -3133,7 +3133,7 @@
         "path": "traffic.requests_per_session",
         "value": 17,
         "unit": "requests/sesión",
-        "source": "JAJ-11: perfil medio, sin dato del usuario",
+        "source": "Perfil medio de uso de una app web, sin dato del usuario",
         "needs_review": true
       },
       {
@@ -3147,7 +3147,7 @@
         "path": "traffic.scenarios.cyberday.multiplier",
         "value": 20,
         "unit": "×",
-        "source": "Escenario CyberDay ×20 del guion de la demo (P-JAJ-1)",
+        "source": "Escenario CyberDay: 20 veces el pico normal, como en un evento de ventas",
         "needs_review": true
       },
       {
@@ -3196,21 +3196,21 @@
         "path": "endpoints[0].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[1].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[2].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
@@ -3252,49 +3252,49 @@
         "path": "endpoints[3].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[4].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[5].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[6].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[7].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[8].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[9].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
@@ -3308,70 +3308,70 @@
         "path": "endpoints[10].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[11].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[12].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[13].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[14].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[15].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[16].steps[0].time",
         "value": 5.0,
         "unit": "ms",
-        "source": "JAJ-8: escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
+        "source": "Escaneo completo de 1 M filas en 50 ms × 100000 filas de tags (Tamaño de tabla sin dato. Define el costo de escaneos y COUNT(*) sin filtro)",
         "needs_review": true
       },
       {
         "path": "endpoints[16].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[17].weight",
         "value": 0.1214,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       },
       {
         "path": "endpoints[18].weight",
         "value": 0.0125,
         "unit": "fracción",
-        "source": "JAJ-11: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
+        "source": "Perfil de uso típico de una API web: 85 % de lecturas. Se reparte en partes iguales entre los endpoints GET",
         "needs_review": true
       }
     ]

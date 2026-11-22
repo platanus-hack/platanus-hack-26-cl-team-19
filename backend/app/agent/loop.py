@@ -196,7 +196,7 @@ def system_prompt(project_id: str) -> str:
         "de los números. Si el usuario pide probar un componente (caché, cola, pooler, réplicas de la API o "
         "de lectura de la DB, plan de la DB), propónlo con propose_version. Si pregunta qué cambiar, sugiere "
         "operaciones de ops_schema, cada una con lo que esperas que mejore. Al aceptar la tarjeta, el editor "
-        "abre la versión nueva y la simula (JAJ-141)."
+        "abre la versión nueva y la simula."
     )
 
 
