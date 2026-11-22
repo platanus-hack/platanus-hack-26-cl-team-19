@@ -87,16 +87,13 @@ class ChangeFrontendHost(_Op):
 
 
 class SetTrafficBase(_Op):
-    """Solo desde el editor: pico de req/s y peso de cada endpoint que escribió el usuario (JAJ-170).
+    """Solo desde el editor: el pico de req/s global que escribió el usuario (JAJ-170).
 
-    Quedan SUPUESTO declarados por el usuario. Los escenarios se recalculan como pico × multiplicador y los
-    pesos se normalizan para que sumen 1."""
+    Queda SUPUESTO declarado por el usuario y los escenarios se recalculan como pico × multiplicador. El
+    reparto entre endpoints se ajusta por escenario, en la mezcla de endpoints."""
 
     op: Literal["set_traffic_base"]
-    peak_rps: float | None = Field(None, gt=0, le=1_000_000, description="Requests por segundo en la hora pico.")
-    endpoint_weights: dict[str, float] | None = Field(
-        None, description="Peso de cada endpoint por id ('GET /items/'), en cualquier escala: se normaliza."
-    )
+    peak_rps: float = Field(gt=0, le=1_000_000, description="Requests por segundo en la hora pico.")
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si la dijo en el chat.")
 
 
@@ -368,44 +365,16 @@ def _declared_by_user(quote: str | None) -> str:
 
 
 def _set_traffic_base(m: dict[str, Any], op: SetTrafficBase, catalog: dict[str, Any], warnings: list[str]) -> str:
-    if op.peak_rps is None and not op.endpoint_weights:
-        raise OpError("Manda peak_rps, endpoint_weights o los dos.")
-    source = _declared_by_user(op.quote)
-    changes = []
-    if op.peak_rps is not None:
-        traffic = m.setdefault("traffic", {})
-        before = value((traffic.get("peak_rps") or {}), None)
-        traffic["peak_rps"] = _num(op.peak_rps, "req/s", "SUPUESTO", source)
-        # todos los escenarios: pico × multiplicador, como set_traffic (JAJ-103)
-        for sc in (traffic.get("scenarios") or {}).values():
-            mult = sc.get("multiplier")
-            mult = mult.get("value") if isinstance(mult, dict) else mult
-            if mult:
-                sc["rps"] = _num(
-                    round(op.peak_rps * mult, 2), "req/s", "SUPUESTO", "pico × multiplicador", derived=True
-                )
-        changes.append(f"pico {before if before is not None else '—'} → {op.peak_rps:g} req/s")
-    if op.endpoint_weights:
-        endpoints = {e["id"]: e for e in m.get("endpoints", [])}
-        unknown = [eid for eid in op.endpoint_weights if eid not in endpoints]
-        if unknown:
-            raise OpError(f"No existen los endpoints {', '.join(unknown)}. Hay: {', '.join(endpoints)}.")
-        if any(w < 0 for w in op.endpoint_weights.values()):
-            raise OpError("Los pesos no pueden ser negativos.")
-        raw = {eid: op.endpoint_weights.get(eid, value(e.get("weight"), 0) or 0) for eid, e in endpoints.items()}
-        total = sum(raw.values())
-        if total <= 0:
-            raise OpError("Al menos un endpoint tiene que tener peso mayor que 0.")
-        for eid, e in endpoints.items():
-            w = round(raw[eid] / total, 4)
-            if eid in op.endpoint_weights:
-                e["weight"] = _num(w, "fracción", "SUPUESTO", f"{source}: peso del endpoint / suma de los pesos")
-            elif isinstance(e.get("weight"), dict):
-                e["weight"] = {**e["weight"], "value": w}
-            else:
-                e["weight"] = w
-        changes.append(f"peso de {len(op.endpoint_weights)} endpoint(s)")
-    return "Tráfico declarado: " + "; ".join(changes)
+    traffic = m.setdefault("traffic", {})
+    before = value(traffic.get("peak_rps"), None)
+    traffic["peak_rps"] = _num(op.peak_rps, "req/s", "SUPUESTO", _declared_by_user(op.quote))
+    # todos los escenarios: pico × multiplicador, como set_traffic (JAJ-103)
+    for sc in (traffic.get("scenarios") or {}).values():
+        mult = sc.get("multiplier")
+        mult = mult.get("value") if isinstance(mult, dict) else mult
+        if mult:
+            sc["rps"] = _num(round(op.peak_rps * mult, 2), "req/s", "SUPUESTO", "pico × multiplicador", derived=True)
+    return f"Tráfico declarado: pico {before if before is not None else '—'} → {op.peak_rps:g} req/s"
 
 
 # ---------- add_pooler ----------

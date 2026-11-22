@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// JAJ-170: el tráfico real de la versión, el pico de req/s y el peso de cada endpoint, por ejemplo sacados de
-// los logs. Parte con los valores del modelo y su procedencia; guardar crea una versión nueva.
+// JAJ-170: el tráfico real de la versión, el pico de req/s global, por ejemplo sacado de los logs. Parte con el
+// valor del modelo y su procedencia; guardar crea una versión nueva. El reparto por endpoint va en Escenarios.
 import ProvenanceBadge from "@/components/design/ProvenanceBadge.vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,9 +9,7 @@ import type { ArchitectureModel } from "@/services/editor-api";
 import { toProvenance } from "@/services/editor-view";
 import {
   currentTraffic,
-  draftError,
-  draftFrom,
-  draftTotal,
+  peakError,
   trafficNote,
   trafficOps,
 } from "@/services/traffic-base";
@@ -20,7 +18,7 @@ const props = defineProps<{
   model?: ArchitectureModel;
   versionLabel?: string;
   busy?: boolean;
-  /** Modo demo: se ven los valores, pero no se guarda una versión. */
+  /** Modo demo: se ve el valor, pero no se guarda una versión. */
   readonly?: boolean;
 }>();
 const emit = defineEmits<{
@@ -28,110 +26,52 @@ const emit = defineEmits<{
 }>();
 
 const base = computed(() => currentTraffic(props.model));
-const draft = ref(draftFrom(base.value));
+const peak = ref<number | string | undefined>(base.value.peak ?? undefined);
 watch(base, (value) => {
-  draft.value = draftFrom(value);
+  peak.value = value.peak ?? undefined;
 });
 
-const query = ref("");
-const visible = computed(() => {
-  const q = query.value.trim().toLowerCase();
-  return q
-    ? base.value.endpoints.filter(({ id }) => id.toLowerCase().includes(q))
-    : base.value.endpoints;
-});
-const total = computed(() => draftTotal(draft.value));
-const error = computed(() => draftError(draft.value));
-const ops = computed(() => trafficOps(base.value, draft.value));
+const error = computed(() => peakError(peak.value));
+const ops = computed(() => trafficOps(base.value, peak.value));
 
 function apply() {
   if (error.value || !ops.value.length) return;
-  emit("apply", ops.value, trafficNote(ops.value));
+  emit("apply", ops.value, trafficNote(Number(peak.value)));
 }
 
-const ids = { peak: useId(), search: useId() };
+const id = useId();
 </script>
 
 <template>
   <section class="flex flex-col gap-4 text-sm" aria-label="Tráfico real">
     <p class="text-xs text-muted-foreground">
-      Lo que usa la simulación del tráfico de tu sistema. Parte con los
-      supuestos de la versión; si tienes logs o métricas, escribe los valores
-      reales. Quedan como supuestos declarados por ti.
+      El tráfico global de tu sistema. Parte con el supuesto de la versión; si
+      tienes logs o métricas, escribe el valor real. Queda como supuesto
+      declarado por ti.
     </p>
 
     <div class="grid gap-1.5">
       <div class="flex items-center justify-between gap-2">
-        <Label :for="ids.peak">Pico (req/s)</Label>
+        <Label :for="id">Pico (req/s)</Label>
         <ProvenanceBadge
-          v-if="base.peak.provenance"
-          :provenance="toProvenance(base.peak.provenance)"
+          v-if="base.provenance"
+          :provenance="toProvenance(base.provenance)"
           compact
         />
       </div>
       <Input
-        :id="ids.peak"
-        v-model="draft.peak"
+        :id="id"
+        v-model="peak"
         type="number"
         min="0"
         step="any"
         :disabled="busy || readonly"
       />
       <p class="text-xs text-muted-foreground">
-        El máximo de requests por segundo en la hora pico. Los escenarios lo
-        multiplican (por ejemplo, CyberDay).
+        El máximo de requests por segundo en la hora pico. Cada escenario lo
+        multiplica (por ejemplo, CyberDay). El reparto entre endpoints se ajusta
+        en Escenarios.
       </p>
-    </div>
-
-    <div class="flex flex-col gap-2">
-      <div class="flex items-baseline justify-between gap-2">
-        <h3 class="font-semibold">Peso de cada endpoint</h3>
-        <span
-          class="font-mono text-xs tabular-nums"
-          :class="total === 100 ? 'text-muted-foreground' : ''"
-          >{{ total }} %</span
-        >
-      </div>
-      <p class="text-xs text-muted-foreground">
-        Porcentaje del tráfico de cada uno. Si no suma 100 %, se reparte en
-        proporción.
-      </p>
-      <Input
-        :id="ids.search"
-        v-model="query"
-        type="search"
-        placeholder="Buscar endpoint"
-        aria-label="Buscar endpoint"
-      />
-      <ul class="flex max-h-72 flex-col gap-1.5 overflow-y-auto pr-1">
-        <li
-          v-for="endpoint in visible"
-          :key="endpoint.id"
-          class="flex items-center justify-between gap-2"
-        >
-          <span class="min-w-0 truncate font-mono text-xs">{{
-            endpoint.id
-          }}</span>
-          <span class="flex shrink-0 items-center gap-1">
-            <Input
-              v-model="draft.percents[endpoint.id]"
-              type="number"
-              min="0"
-              max="100"
-              step="any"
-              class="h-8 w-20 text-right"
-              :aria-label="`Porcentaje del tráfico de ${endpoint.id}`"
-              :disabled="busy || readonly"
-            />
-            <span class="text-xs text-muted-foreground">%</span>
-            <ProvenanceBadge
-              v-if="endpoint.percent.provenance"
-              :provenance="toProvenance(endpoint.percent.provenance)"
-              compact
-            />
-          </span>
-        </li>
-      </ul>
     </div>
 
     <p v-if="error" class="text-xs text-status-at-risk-foreground">
