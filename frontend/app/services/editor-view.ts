@@ -43,6 +43,7 @@ export function toProvenance(metric: ModelNumber): MetricProvenance {
 }
 
 const SCENARIO_LABELS: Record<string, string> = {
+  actual: "Actual",
   cyberday: "CyberDay",
   pico_normal: "Pico normal",
 };

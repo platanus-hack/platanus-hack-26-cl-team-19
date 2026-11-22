@@ -1123,6 +1123,7 @@ function openVersionDraft() {
     <template #canvas>
       <ArchitectureDiagram
         v-if="graph"
+        :fixed="embedded"
         :nodes="nodes"
         :edges="edges"
         :bottleneck="bottleneck"

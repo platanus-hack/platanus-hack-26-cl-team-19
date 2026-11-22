@@ -146,12 +146,12 @@ def build_mcp(store: ProjectStore, auth: SupabaseAuth | None, limiter: Limiter |
 
     @server.tool(description=_d("simulate"))
     def simulate(
-        project_id: str, ctx: Context, version: int | None = None, scenario: str = "cyberday", seed: int = 0
+        project_id: str, ctx: Context, version: int | None = None, scenario: str = "actual", seed: int = 0
     ) -> Any:
         return run("simulate", ctx, project_id=project_id, version=version, scenario=scenario, seed=seed)
 
     @server.tool(description=_d("compare"))
-    def compare(project_id: str, a: int, b: int, ctx: Context, scenario: str = "cyberday", seed: int = 0) -> Any:
+    def compare(project_id: str, a: int, b: int, ctx: Context, scenario: str = "actual", seed: int = 0) -> Any:
         return run("compare", ctx, project_id=project_id, a=a, b=b, scenario=scenario, seed=seed)
 
     @server.tool(description=_d("estimate_cost"))

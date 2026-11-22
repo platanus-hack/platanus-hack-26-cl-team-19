@@ -51,16 +51,14 @@ def test_unknown_or_malformed_ids_are_none(store, model):
     assert store.get_version(project.id, 9) is None
 
 
-def test_create_loads_the_model_scenarios(database_url, store, model):
+@pytest.mark.initial_scenarios
+def test_create_starts_with_the_current_traffic(database_url, store, model):
     project = store.create("tienda", model, None)
     with psycopg.connect(database_url) as conn:
         rows = conn.execute(
             "select name, multiplier, rps from scenarios where project_id = %s order by name", (project.id,)
         ).fetchall()
-    assert [(name, float(mult), rps) for name, mult, rps in rows] == [
-        ("cyberday", 20.0, None),
-        ("pico_normal", 1.0, None),
-    ]
+    assert [(name, float(mult), rps) for name, mult, rps in rows] == [("actual", 1.0, None)]
 
 
 def test_concurrent_versions_get_distinct_numbers(store, model):

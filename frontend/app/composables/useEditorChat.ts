@@ -8,6 +8,7 @@ import {
   type ChatProvider,
 } from "@/services/chat-stream";
 import { createEditorApi } from "@/services/editor-api";
+import { scenarioLabel } from "@/services/editor-view";
 
 type ToolMessage = Extract<ChatMessage, { role: "tool" }>;
 type Conversation = {
@@ -27,7 +28,9 @@ export function toolResult(event: Extract<ChatEvent, { type: "tool_result" }>) {
   let output: string | undefined;
   if (typeof result?.p95_ms === "number")
     output = [
-      result.scenario === "cyberday" ? "CyberDay" : result.scenario,
+      typeof result.scenario === "string"
+        ? scenarioLabel(result.scenario)
+        : undefined,
       `Latencia p95 de ${number(result.p95_ms)} ms`,
     ]
       .filter(Boolean)

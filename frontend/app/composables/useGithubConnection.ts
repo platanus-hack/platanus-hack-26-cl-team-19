@@ -42,7 +42,7 @@ export function githubErrorMessage(cause: unknown): string {
 
 /**
  * `immediate: false` no pide nada a GitHub hasta llamar `loadRepos()`: así una página que quizá
- * no use la conexión (el sheet de Nuevo proyecto, el onboarding que redirige) no gasta rate limit.
+ * no use la conexión (el diálogo de Nuevo proyecto, el onboarding que redirige) no gasta rate limit.
  */
 export function useGithubConnection({
   immediate = true,
@@ -106,6 +106,7 @@ export function useGithubConnection({
   );
   const progress = computed(() => {
     const job = ingestion.value;
+    if (job?.status === "queued") return "En cola para empezar el análisis…";
     if (!job?.stage) return "Revisando el acceso al repo…";
     if (job.stage === "analisis" && job.llm_steps)
       return `Analizando con IA · paso ${job.llm_steps}`;

@@ -158,20 +158,28 @@ class GitHubInstallation:
     account_login: str
 
 
-def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
-    """Los escenarios de ``traffic.scenarios`` del modelo, para cargarlos al crear un proyecto.
+INITIAL_SCENARIO = "actual"
 
-    Se guarda el multiplicador cuando lo hay: así la tasa se recalcula con el pico de cada versión
-    (decisión 4 del README de ``app/db``). Si no, las req/s.
+
+def initial_scenarios(model: dict[str, Any]) -> list[ProjectScenario]:
+    """El escenario con que nace un proyecto: ``actual``, el tráfico de hoy. El usuario crea los demás.
+
+    Su tasa sale de ``traffic.scenarios.pico_normal`` del modelo si lo trae; si no, es ×1 el pico
+    (``traffic.peak_rps``). Se guarda el multiplicador cuando lo hay: así la tasa se recalcula con el
+    pico de cada versión (decisión 4 del README de ``app/db``). Sin pico ni ``pico_normal``, el
+    proyecto nace sin escenarios.
     """
-    scenarios = []
-    for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
-        multiplier, rps = value(sc.get("multiplier")), value(sc.get("rps"))  # con procedencia o escalar
-        if multiplier is not None and multiplier > 0:
-            scenarios.append(ProjectScenario(name, float(multiplier), None))
-        elif rps is not None and rps > 0:
-            scenarios.append(ProjectScenario(name, None, float(rps)))
-    return scenarios
+    traffic = model.get("traffic") or {}
+    normal = (traffic.get("scenarios") or {}).get("pico_normal") or {}
+    multiplier, rps = value(normal.get("multiplier")), value(normal.get("rps"))  # con procedencia o escalar
+    if multiplier is not None and multiplier > 0:
+        return [ProjectScenario(INITIAL_SCENARIO, float(multiplier), None)]
+    if rps is not None and rps > 0:
+        return [ProjectScenario(INITIAL_SCENARIO, None, float(rps))]
+    peak = value(traffic.get("peak_rps"))
+    if peak is not None and peak > 0:
+        return [ProjectScenario(INITIAL_SCENARIO, 1.0, None)]
+    return []
 
 
 @dataclass(frozen=True)
@@ -446,7 +454,7 @@ class InMemoryProjectStore:
             self.sources[project.id] = source
         with self._lock:
             self._projects[project.id] = project
-            self._scenarios[project.id] = {s.name: s for s in scenarios_from_model(model)}
+            self._scenarios[project.id] = {s.name: s for s in initial_scenarios(model)}
         return project
 
     def get(self, project_id: str, owner: str | None = None) -> Project | None:

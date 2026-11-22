@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowDown } from "@lucide/vue";
+import { usePreferredReducedMotion } from "@vueuse/core";
 import AppWordmark from "@/components/AppWordmark.vue";
 import ThemeSwitcher from "@/components/ThemeSwitcher.vue";
 import HeroLandscape from "@/components/landing/HeroLandscape.vue";
@@ -17,6 +18,42 @@ useSeoMeta({
 // La home es también el login: quien entra sin sesión a una ruta protegida vuelve aquí.
 const { enabled, hasSession, signInWithGitHub } = useSupabaseAuth();
 const pending = ref(false);
+const reducedMotion = usePreferredReducedMotion();
+
+const SCROLL_MS = 1100;
+const easeInOutCubic = (t: number) =>
+  t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
+
+/** Baja con una animación suave hasta la sección y deja el ancla en la URL, como el enlace. */
+function scrollToSection(id: string) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  history.replaceState(history.state, "", `#${id}`);
+  const margin = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+  const from = window.scrollY;
+  const to = from + target.getBoundingClientRect().top - margin;
+  if (reducedMotion.value === "reduce") {
+    window.scrollTo(0, to);
+    return;
+  }
+  const start = performance.now();
+  // La rueda o el teclado del usuario cortan la animación
+  const cancel = () => (cancelled = true);
+  let cancelled = false;
+  window.addEventListener("wheel", cancel, { once: true, passive: true });
+  window.addEventListener("touchstart", cancel, { once: true, passive: true });
+  function step(now: number) {
+    const t = Math.min(1, (now - start) / SCROLL_MS);
+    if (cancelled) return;
+    window.scrollTo(0, from + (to - from) * easeInOutCubic(t));
+    if (t < 1) requestAnimationFrame(step);
+    else {
+      window.removeEventListener("wheel", cancel);
+      window.removeEventListener("touchstart", cancel);
+    }
+  }
+  requestAnimationFrame(step);
+}
 const error = ref(false);
 
 onMounted(async () => {
@@ -91,7 +128,9 @@ async function continueWithGitHub() {
               @sign-in="continueWithGitHub"
             />
             <Button variant="ghost" as-child>
-              <a href="#como-funciona"
+              <a
+                href="#como-funciona"
+                @click.prevent="scrollToSection('como-funciona')"
                 >Explorar funciones <ArrowDown data-icon="inline-end"
               /></a>
             </Button>

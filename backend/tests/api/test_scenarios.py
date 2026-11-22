@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.main import create_app
 from app.api.run_cache import RUN_CACHE_HEADER
-from app.api.store import InMemoryProjectStore, ProjectScenario
+from app.api.store import InMemoryProjectStore, ProjectScenario, initial_scenarios
 from app.samples import load_sample
 
 SAMPLE = "full-stack-fastapi-template"
@@ -40,14 +40,30 @@ def with_peak(peak):
     return model
 
 
-def test_project_starts_with_the_model_scenarios(client, pid):
+@pytest.mark.initial_scenarios
+def test_project_starts_only_with_the_current_traffic(client, pid):
+    """El proyecto nace con ``actual`` (el pico normal del modelo); los demás los crea el usuario."""
     r = client.get(f"/projects/{pid}/scenarios")
     assert r.status_code == 200
     assert r.json() == [
-        {"name": "cyberday", "multiplier": 20.0, "rps": None, "description": None, **NO_OVERRIDES},
-        {"name": "pico_normal", "multiplier": 1.0, "rps": None, "description": None, **NO_OVERRIDES},
+        {"name": "actual", "multiplier": 1.0, "rps": None, "description": None, **NO_OVERRIDES},
     ]
-    assert client.get(f"/projects/{pid}/scenarios/cyberday").json()["multiplier"] == 20.0
+    run = client.post(f"/projects/{pid}/versions/1/runs", json={"seed": 1, "duration_s": 5})
+    assert run.status_code == 200 and run.json()["scenario"] == "actual"
+
+
+@pytest.mark.initial_scenarios
+@pytest.mark.parametrize(
+    "traffic, expected",
+    [
+        ({"peak_rps": 10, "scenarios": {"pico_normal": {"multiplier": 1.5}}}, ("actual", 1.5, None)),
+        ({"scenarios": {"pico_normal": {"rps": 40}}}, ("actual", None, 40.0)),
+        ({"peak_rps": 10, "scenarios": {"cyberday": {"multiplier": 20}}}, ("actual", 1.0, None)),
+    ],
+)
+def test_initial_scenario_follows_the_model_normal_traffic(traffic, expected):
+    assert [(s.name, s.multiplier, s.rps) for s in initial_scenarios({"traffic": traffic})] == [expected]
+    assert initial_scenarios({"traffic": {}}) == []
 
 
 def test_unknown_scenario_is_404_and_422_in_spanish(client, pid):
@@ -56,7 +72,7 @@ def test_unknown_scenario_is_404_and_422_in_spanish(client, pid):
     r = client.post(f"/projects/{pid}/versions/1/runs", json={**RUN, "scenario": "black_friday"})
     err = r.json()["error"]
     assert r.status_code == 422 and err["code"] == "unknown_scenario"
-    assert err["available"] == ["cyberday", "pico_normal"] and "El proyecto no tiene" in err["message"]
+    assert err["available"] == ["actual", "cyberday", "pico_normal"] and "El proyecto no tiene" in err["message"]
 
 
 def test_project_scenario_works_for_any_version(client, pid):
@@ -133,7 +149,7 @@ def test_put_replaces_and_switches_rate_kind(client, pid):
         "description": None,
         **NO_OVERRIDES,
     }
-    assert len(client.get(f"/projects/{pid}/scenarios").json()) == 2
+    assert len(client.get(f"/projects/{pid}/scenarios").json()) == 3
 
 
 @pytest.mark.parametrize(
@@ -179,6 +195,7 @@ def test_rate_for():
     assert ProjectScenario("x", None, 7.0).rate_for(model) == 7.0
 
 
+@pytest.mark.initial_scenarios
 def test_scenarios_survive_a_restart(database_url, clean_pg_store):
     """Criterio 3."""
     from app.db.postgres_store import PostgresProjectStore
@@ -191,7 +208,7 @@ def test_scenarios_survive_a_restart(database_url, clean_pg_store):
     restarted = PostgresProjectStore.from_url(database_url)
     try:
         scenarios = restarted.list_scenarios(pid)
-        assert [s.name for s in scenarios] == ["black_friday", "cyberday", "pico_normal"]
-        assert scenarios[0].rps == 100 and scenarios[0].traffic_step == step
+        assert [s.name for s in scenarios] == ["actual", "black_friday"]
+        assert scenarios[1].rps == 100 and scenarios[1].traffic_step == step
     finally:
         restarted.close()

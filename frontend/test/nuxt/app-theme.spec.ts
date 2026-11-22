@@ -1,12 +1,15 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
 import { mountSuspended } from "@nuxt/test-utils/runtime";
 import { describe, expect, it } from "vitest";
 import {
   APP_THEMES,
+  APP_THEME_STORAGE_KEY,
+  appThemeBootstrap,
   DEFAULT_APP_THEME,
   isAppThemeId,
-} from "../../app/composables/useAppTheme";
+} from "../../theme-preferences";
 import ThemeSwitcher from "../../app/components/ThemeSwitcher.vue";
 
 // vitest corre desde frontend/ (script "test").
@@ -16,28 +19,47 @@ const css = readFileSync(
 );
 
 describe("temas de la app", () => {
-  it("ofrece cinco temas con ids únicos y el de por defecto entre ellos", () => {
-    const ids = APP_THEMES.map((theme) => theme.id);
-
-    expect(APP_THEMES).toHaveLength(5);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain(DEFAULT_APP_THEME);
+  it("ofrece dos pares de temas y usa Gris oscuro como tema principal", () => {
+    expect(APP_THEMES.map(({ id }) => id)).toEqual([
+      "clasico",
+      "clasico-claro",
+      "brasa",
+      "brasa-claro",
+    ]);
+    expect(DEFAULT_APP_THEME).toBe("clasico");
+    expect(css).toContain(':root[data-theme="brasa"]');
+    expect(css).toContain(':root[data-theme="brasa-claro"]');
   });
 
-  it("tiene un bloque CSS oscuro para cada tema distinto del de por defecto", () => {
-    for (const theme of APP_THEMES) {
-      if (theme.id === DEFAULT_APP_THEME) continue;
-      expect(css).toContain(`.dark[data-theme="${theme.id}"]`);
-    }
+  it("restaura una selección guardada sobre el tema de un HTML prerenderizado", () => {
+    const dataset = { theme: DEFAULT_APP_THEME };
+    runInNewContext(appThemeBootstrap, {
+      document: {
+        cookie: `${APP_THEME_STORAGE_KEY}=brasa-claro`,
+        documentElement: { dataset },
+      },
+      localStorage: { getItem: () => "light" },
+    });
+    expect(dataset.theme).toBe("brasa-claro");
   });
 
-  it("conserva ambas variantes de la paleta clásica", () => {
-    expect(css).toContain(':root[data-theme="clasico"]');
-    expect(isAppThemeId("clasico")).toBe(true);
+  it("conserva el Gris claro guardado por versiones anteriores", () => {
+    const dataset = { theme: DEFAULT_APP_THEME };
+    runInNewContext(appThemeBootstrap, {
+      document: {
+        cookie: "branchpoint-theme=clasico",
+        documentElement: { dataset },
+      },
+      localStorage: {
+        getItem: (key: string) => (key === "nuxt-color-mode" ? "light" : null),
+      },
+    });
+    expect(dataset.theme).toBe("clasico-claro");
   });
 
   it("reconoce solo ids de tema válidos", () => {
-    expect(isAppThemeId("bosque")).toBe(true);
+    expect(isAppThemeId("clasico")).toBe(true);
+    expect(isAppThemeId("bosque")).toBe(false);
     expect(isAppThemeId("claro")).toBe(false);
     expect(isAppThemeId(null)).toBe(false);
   });
