@@ -201,6 +201,21 @@ def test_change_api_host_to_render_takes_the_plan_machine(model):
     assert "plan" not in back and back["provider"] == "fargate"
 
 
+def test_change_api_host_sets_replicas_and_the_cost_follows(model):
+    """JAJ-148: el inspector elige réplicas y vCPU; el costo es réplicas × (vCPU × US$/vCPU-h + GB × US$/GB-h)."""
+    one = apply_ops(model, [{"op": "change_api_host", "provider": "fargate", "vcpu": 1, "replicas": 1}]).model
+    three = apply_ops(model, [{"op": "change_api_host", "provider": "fargate", "vcpu": 1, "replicas": 3}]).model
+    api = three["deployment"]["api"]
+    assert api["replicas"]["value"] == 3
+    assert api["usd_month"]["value"] == pytest.approx(3 * one["deployment"]["api"]["usd_month"]["value"], abs=0.02)
+    cost = next(line for line in estimate_cost(three).lines if line.id == "api")
+    assert cost.usd_month["value"] == pytest.approx(api["usd_month"]["value"], rel=0.05)
+    render = apply_ops(model, [{"op": "change_api_host", "provider": "render", "plan": "pro", "replicas": 2}]).model
+    assert render["deployment"]["api"]["usd_month"]["value"] == 170
+    # más réplicas, más núcleos: el motor las simula
+    assert load_model(three).api.cores == 3 * load_model(one).api.cores
+
+
 def test_neon_pooler_is_pgbouncer(model):
     r = apply_ops(model, [{"op": "change_db_plan", "provider": "neon", "plan": "1cu"}, {"op": "add_pooler"}])
     pooler = r.model["deployment"]["db"]["pooler"]

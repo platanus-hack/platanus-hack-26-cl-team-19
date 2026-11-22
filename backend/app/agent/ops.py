@@ -74,6 +74,9 @@ class ChangeApiHost(_Op):
         description="Plan en fly (performance-1x...) o render (starter, standard, pro...). En fargate y local, nada.",
     )
     vcpu: float | None = Field(None, gt=0, le=16, description="Solo fargate y local: vCPU por réplica.")
+    replicas: int | None = Field(
+        None, ge=1, le=50, description="Réplicas de la API (máquinas separadas). Sin valor, se mantienen."
+    )
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió el cambio.")
 
 
@@ -279,11 +282,17 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
     api = m["deployment"]["api"]
     before = f"{api.get('provider', 'local')}" + (f" {api['plan']}" if api.get("plan") else "")
     vcpu = api["vcpu"] if op.vcpu is None else _design(op.vcpu, "vCPU", f"{op.vcpu:g} vCPU por réplica", op.quote)
+    replicas = (
+        api["replicas"]
+        if op.replicas is None
+        else _design(op.replicas, "réplicas", f"{op.replicas} réplicas de la API", op.quote)
+    )
     mem = api.get("memory_gb") or _num(2, "GB", "SUPUESTO", "Valor por defecto", needs_review=True)
     why = f"«{op.quote}»" if op.quote else "propuesto por el agente"
-    profile = _profile(deploy.app_profile, op.provider, op.plan, api["replicas"], vcpu, mem, why, catalog)
+    profile = _profile(deploy.app_profile, op.provider, op.plan, replicas, vcpu, mem, why, catalog)
     api.update(
         provider=op.provider,
+        replicas=replicas,
         vcpu=profile.get("vcpu", vcpu),
         memory_gb=profile.get("memory_gb", mem),
         usd_month=profile["usd_month"],
@@ -294,7 +303,10 @@ def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, An
     else:
         api.pop("plan", None)
     after = op.provider + (f" {op.plan}" if op.plan else "")
-    return f"API: {before} → {after} ({value(api['vcpu']):g} vCPU por réplica, US${value(api['usd_month']):,.2f}/mes)"
+    return (
+        f"API: {before} → {after} ({value(api['replicas'])} × {value(api['vcpu']):g} vCPU, "
+        f"US${value(api['usd_month']):,.2f}/mes)"
+    )
 
 
 # ---------- change_db_plan ----------

@@ -68,6 +68,7 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       provider: "fargate",
       plan: null,
       vcpu: 1,
+      replicas: 2,
     });
     expect(currentDeployment(model, "frontend")).toBeNull();
   });
@@ -92,10 +93,20 @@ describe("dónde corre cada componente (JAJ-148)", () => {
   it("no ofrece crear una versión igual a la actual", () => {
     const current = currentDeployment(model, "api");
     expect(
-      sameDeployment(current, { provider: "fargate", plan: null, vcpu: 1 }),
+      sameDeployment(current, {
+        provider: "fargate",
+        plan: null,
+        vcpu: 1,
+        replicas: 2,
+      }),
     ).toBe(true);
     expect(
-      sameDeployment(current, { provider: "fargate", plan: null, vcpu: 2 }),
+      sameDeployment(current, {
+        provider: "fargate",
+        plan: null,
+        vcpu: 1,
+        replicas: 3,
+      }),
     ).toBe(false);
   });
 
@@ -140,11 +151,13 @@ describe("dónde corre cada componente (JAJ-148)", () => {
       },
     };
     const size = apiSize(model);
-    expect(size).toEqual({ replicas: 2, memoryGb: 2 });
-    const one = apiCost(fargate, undefined, 1, size)!.value!;
-    const four = apiCost(fargate, undefined, 4, size)!.value!;
+    expect(size).toEqual({ memoryGb: 2 });
+    const one = apiCost(fargate, undefined, 1, 2, size)!.value!;
+    const four = apiCost(fargate, undefined, 4, 2, size)!.value!;
+    const threeReplicas = apiCost(fargate, undefined, 1, 3, size)!.value!;
     expect(one).toBeCloseTo(2 * (1 * 0.04 + 2 * 0.005) * 730, 2);
     expect(four).toBeGreaterThan(one);
+    expect(threeReplicas).toBeCloseTo((one / 2) * 3, 2);
     const render: ProviderOption = {
       id: "render",
       label: "Render",
@@ -162,6 +175,15 @@ describe("dónde corre cada componente (JAJ-148)", () => {
         },
       ],
     };
-    expect(apiCost(render, render.plans[0], 0, size)!.value).toBe(170);
+    expect(apiCost(render, render.plans[0], 0, 2, size)!.value).toBe(170);
+    expect(
+      deploymentOps("api", {
+        provider: "render",
+        plan: "pro",
+        replicas: 3,
+      }),
+    ).toEqual([
+      { op: "change_api_host", provider: "render", plan: "pro", replicas: 3 },
+    ]);
   });
 });

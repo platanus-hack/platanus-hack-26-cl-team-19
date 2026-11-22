@@ -32,6 +32,8 @@ export interface DeploymentChoice {
   provider: string;
   plan: string | null;
   vcpu?: number | null;
+  /** Solo la API: réplicas (máquinas separadas, cada una con sus vCPU). */
+  replicas?: number | null;
 }
 
 export const DEPLOYMENT_TITLES: Record<DeploymentKind, string> = {
@@ -71,21 +73,18 @@ export function currentDeployment(
     provider: raw.provider,
     plan: raw.plan ?? null,
     vcpu: numberOf(raw.vcpu) ?? null,
+    ...(kind === "api" ? { replicas: numberOf(raw.replicas) ?? 1 } : {}),
   };
 }
 
 export interface ApiSize {
-  replicas: number;
   memoryGb: number;
 }
 
-/** Réplicas y memoria por réplica de la API en la versión abierta: con ellas se calcula el costo. */
+/** Memoria por réplica de la API en la versión abierta: entra en el costo de Fargate y local. */
 export function apiSize(model: ArchitectureModel | undefined): ApiSize {
   const api = (model?.deployment as Record<string, Deployed | undefined>)?.api;
-  return {
-    replicas: numberOf(api?.replicas) ?? 1,
-    memoryGb: numberOf(api?.memory_gb) ?? 2,
-  };
+  return { memoryGb: numberOf(api?.memory_gb) ?? 2 };
 }
 
 const HOURS_MONTH = 730;
@@ -97,16 +96,17 @@ export function apiCost(
   provider: ProviderOption,
   plan: PlanOption | undefined,
   vcpu: number,
+  replicaCount: number,
   size: ApiSize,
 ): PlanSpec | null {
-  const replicas = `${size.replicas} réplica${size.replicas === 1 ? "" : "s"}`;
+  const replicas = `${replicaCount} réplica${replicaCount === 1 ? "" : "s"}`;
   if (provider.sized_by_vcpu) {
     const perVcpu = provider.example?.usd_vcpu_hour;
     const perGb = provider.example?.usd_gb_hour;
     if (!perVcpu || !perGb || perVcpu.value === null || perGb.value === null)
       return null;
     const usd =
-      size.replicas *
+      replicaCount *
       (vcpu * perVcpu.value + size.memoryGb * perGb.value) *
       HOURS_MONTH;
     return {
@@ -120,7 +120,7 @@ export function apiCost(
   if (!perPlan || perPlan.value === null) return null;
   return {
     ...perPlan,
-    value: Math.round(perPlan.value * size.replicas * 100) / 100,
+    value: Math.round(perPlan.value * replicaCount * 100) / 100,
     source: `${perPlan.source}. ${replicas} × US$${perPlan.value}/mes`,
   };
 }
@@ -147,6 +147,7 @@ export function deploymentOps(
       op: "change_api_host",
       provider: choice.provider,
       ...(choice.plan ? { plan: choice.plan } : { vcpu: choice.vcpu ?? 1 }),
+      ...(choice.replicas ? { replicas: choice.replicas } : {}),
     },
   ];
 }
@@ -159,7 +160,8 @@ export function sameDeployment(
     !!a &&
     a.provider === b.provider &&
     (a.plan ?? null) === (b.plan ?? null) &&
-    (b.plan !== null || (a.vcpu ?? null) === (b.vcpu ?? null))
+    (b.plan !== null || (a.vcpu ?? null) === (b.vcpu ?? null)) &&
+    (a.replicas ?? null) === (b.replicas ?? null)
   );
 }
 
@@ -170,7 +172,8 @@ export function deploymentNote(
 ) {
   const provider =
     options.find(({ id }) => id === choice.provider)?.label ?? choice.provider;
-  const size = choice.plan ?? `${choice.vcpu ?? 1} vCPU`;
+  const machine = choice.plan ?? `${choice.vcpu ?? 1} vCPU`;
+  const size = choice.replicas ? `${choice.replicas} × ${machine}` : machine;
   return `${DEPLOYMENT_TITLES[kind]} en ${provider} ${size} (elegido en el editor)`;
 }
 

@@ -44,11 +44,13 @@ const emit = defineEmits<{
 const providerId = ref("");
 const planId = ref("");
 const vcpu = ref<number | string>(1);
+const replicas = ref<number | string>(1);
 
 function reset() {
   providerId.value = props.current?.provider ?? "";
   planId.value = props.current?.plan ?? "";
   vcpu.value = props.current?.vcpu ?? 1;
+  replicas.value = props.current?.replicas ?? 1;
 }
 watch(() => [props.current, props.kind], reset, { immediate: true });
 
@@ -69,10 +71,12 @@ const plan = computed(() =>
   provider.value?.plans.find(({ id }) => id === planId.value),
 );
 const vcpuNumber = computed(() => Number(vcpu.value));
+const replicaNumber = computed(() => Number(replicas.value));
 const choice = computed<DeploymentChoice>(() => ({
   provider: providerId.value,
   plan: provider.value?.sized_by_vcpu ? null : planId.value || null,
   vcpu: provider.value?.sized_by_vcpu ? vcpuNumber.value : null,
+  ...(props.kind === "api" ? { replicas: replicaNumber.value } : {}),
 }));
 const rows = computed(() => {
   const specs = {
@@ -85,12 +89,17 @@ const rows = computed(() => {
       provider.value,
       plan.value,
       vcpuNumber.value,
+      replicaNumber.value,
       props.size,
     );
   return specRows(specs);
 });
 const valid = computed(() => {
   if (!provider.value) return false;
+  if (props.kind === "api") {
+    const n = replicaNumber.value;
+    if (!Number.isInteger(n) || n < 1 || n > 50) return false;
+  }
   if (provider.value.sized_by_vcpu)
     return vcpuNumber.value > 0 && vcpuNumber.value <= 16;
   return !!plan.value;
@@ -110,6 +119,7 @@ const ids = {
   provider: useId(),
   plan: useId(),
   vcpu: useId(),
+  replicas: useId(),
 };
 </script>
 
@@ -164,9 +174,7 @@ const ids = {
         <p class="text-xs text-muted-foreground">
           Se paga por vCPU-hora y GB-hora.
           <template v-if="size"
-            >El costo es de {{ size.replicas }}
-            {{ size.replicas === 1 ? "réplica" : "réplicas" }} con
-            {{ size.memoryGb }} GB cada una.</template
+            >Cada réplica tiene {{ size.memoryGb }} GB.</template
           >
         </p>
       </div>
@@ -187,6 +195,24 @@ const ids = {
             </SelectGroup>
           </SelectContent>
         </Select>
+      </div>
+
+      <div v-if="kind === 'api' && provider" class="grid gap-1.5">
+        <Label :for="ids.replicas">Réplicas</Label>
+        <Input
+          :id="ids.replicas"
+          v-model="replicas"
+          type="number"
+          min="1"
+          max="50"
+          step="1"
+          :disabled="busy"
+        />
+        <p class="text-xs text-muted-foreground">
+          Máquinas separadas, cada una con
+          {{ provider.sized_by_vcpu ? "sus vCPU" : "el plan" }}. El costo y la
+          capacidad se multiplican por las réplicas.
+        </p>
       </div>
 
       <dl v-if="rows.length" class="flex flex-col gap-1.5">
