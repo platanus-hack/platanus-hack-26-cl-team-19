@@ -86,10 +86,6 @@ class Endpoint:
     base_cpu_ms: float  # CPU de la API propia del framework, sin contar los pasos de CPU
     steps: tuple[Step, ...]
 
-    @property
-    def uses_db(self) -> bool:
-        return any(s.resource == RESOURCE_DB_CONNECTION for s in walk_steps(self.steps))
-
 
 @dataclass(frozen=True)
 class QueueDeployment:
