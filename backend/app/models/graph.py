@@ -109,6 +109,22 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "servicio"
 
 
+def _technology(block: Any) -> dict[str, Any]:
+    """El bloque ``technology`` del modelo (JAJ-87) para el nodo: el texto corto y su procedencia."""
+    if not isinstance(block, dict) or not block.get("name"):
+        return {}
+    text = f"{block['name']} {block['version']}" if block.get("version") else block["name"]
+    return {"technology": text, "technology_source": {k: block.get(k) for k in ("label", "source", "at")}}
+
+
+def _hosting(raw: dict[str, Any]) -> dict[str, Any]:
+    """Dónde corre el componente (JAJ-143): proveedor, plan y costo del perfil."""
+    out = {k: raw.get(k) for k in ("provider", "plan") if raw.get(k) is not None}
+    if isinstance(raw.get("usd_month"), dict):
+        out["usd_month"] = raw["usd_month"].get("value")
+    return out
+
+
 def _component_details(component: dict[str, Any] | None) -> dict[str, Any]:
     if not component:
         return {}
@@ -150,7 +166,8 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
             label="API",
             resources=list(_RUN_RESOURCES["api"]),
             details={
-                "provider": api_raw.get("provider"),
+                **_hosting(api_raw),
+                **_technology(api_raw.get("technology")),
                 "replicas": model.api.replicas,
                 "vcpu": model.api.vcpu,
                 "workers": model.api.workers,
@@ -184,8 +201,9 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
                 if kind == "db":
                     resources = list(_RUN_RESOURCES["db"])
                     details = {
-                        "provider": db_raw.get("provider"),
-                        "plan": db_raw.get("plan"),
+                        **_hosting(db_raw),
+                        **_technology(db_raw.get("technology")),
+                        "network_rtt_ms": model.db.network_rtt_ms,
                         "vcpu": model.db.vcpu,
                         "max_connections": model.db.max_connections,
                         "app_connections": model.app_connections,
@@ -246,6 +264,13 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
             node_id = f"component:{_slug(component['name'])}"
         if node_id not in nodes:
             nodes[node_id] = GraphNode(node_id, role, component["name"], [], details)
+
+    if front := dep.get("frontend"):
+        # dónde se sirve el frontend (JAJ-143): un nodo antes de la API, que el motor no simula
+        nodes["frontend"] = GraphNode("frontend", "frontend", "Frontend", [], {**_hosting(front), "simulated": False})
+        acc = edges.setdefault(("frontend", "api"), _EdgeAcc("frontend", "api"))
+        acc.endpoints = [ep.id for ep in model.endpoints]
+        acc.calls = 1  # una request del navegador por request a la API
 
     sources = (raw.get("repo") or {}).get("sources") or []
     if len(sources) > 1:  # varios repos: lo simulado es del principal

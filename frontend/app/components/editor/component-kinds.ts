@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   Box,
   Cog,
   Database,
@@ -19,6 +20,7 @@ export const componentKinds = {
   queue: { label: "Cola", icon: Layers },
   worker: { label: "Worker", icon: Cog },
   external: { label: "Externo", icon: Globe },
+  frontend: { label: "Frontend", icon: AppWindow },
   service: { label: "Servicio", icon: ServerCog },
   storage: { label: "Storage", icon: HardDrive },
   search: { label: "Búsqueda", icon: Search },

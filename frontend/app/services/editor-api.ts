@@ -71,6 +71,7 @@ export interface GraphNode {
     | "queue"
     | "worker"
     | "external"
+    | "frontend"
     | "service"
     | "storage"
     | "search"
@@ -79,8 +80,13 @@ export interface GraphNode {
   resources: string[];
   details: {
     replicas?: number;
+    /** JAJ-143: dónde corre (proveedor y plan del catálogo) y cuánto cuesta al mes. */
+    provider?: string;
     plan?: string;
+    usd_month?: number;
+    /** JAJ-87: la tecnología (PostgreSQL 16, Express 4.19.2) y de dónde salió. */
     technology?: string;
+    technology_source?: { label?: string; source?: string; at?: string | null };
     endpoints?: number;
     error?: string;
   };

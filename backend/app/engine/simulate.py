@@ -8,7 +8,9 @@ Recursos que se arman desde el ``deployment`` del modelo:
 * ``db_pool``: conexiones, ``pool por worker × workers × réplicas`` (tope: conexiones de la DB).
   Sin pooler, pasar el tope de la DB es un error al conectarse; con pooler, la request espera.
   Esperar más que el timeout del pool es un error.
-* ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo.
+* ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo. Si la DB está en otra
+  máquina (``network_rtt_ms``, JAJ-143), cada consulta además espera la ida y vuelta de red con la
+  conexión tomada.
 * ``queue:<nombre>``: workers de cada cola (``deployment.queues``). Encolar es casi instantáneo
   para la request; el trabajo espera un worker libre y usa la CPU de la DB si hace consultas
   (con su propia conexión, no la del pool de la API). Si la cola está en su largo máximo, encolar
@@ -228,6 +230,7 @@ def simulate(
     in_flight: dict[int, tuple[Endpoint, float]] = {}
     api_latency_s = model.api.latency_ms / 1000
     pool_timeout_s = model.db.pool_timeout_s
+    db_rtt_s = model.db.network_rtt_ms / 1000
 
     def hold(res: Resource, scale: float, ms: float, owner: str, at: str | None) -> Generator[Any, Any, None]:
         yield res.acquire()
@@ -252,6 +255,8 @@ def simulate(
                         conn[:] = [True, take(pool, owner, step.at)]
                     if ms > 0:
                         yield from hold(db_cpu, db_scale, ms, owner, step.at)
+                    if db_rtt_s:
+                        yield db_rtt_s  # la red hasta la DB: la conexión sigue tomada, la CPU de la DB no
                 elif res == RESOURCE_API_CPU and conn is not None:
                     if ms > 0:
                         yield from hold(api_cpu, api_scale, ms, owner, step.at)

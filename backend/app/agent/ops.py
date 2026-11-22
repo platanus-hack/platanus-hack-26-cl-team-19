@@ -25,12 +25,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from app.catalog import load_catalog
+from app.catalog import deploy, load_catalog
 from app.models.architecture import RESOURCE_API_CPU, RESOURCE_DB_CONNECTION, load_model, value
 
-HOURS_MONTH = 730
-RANK = {"OBSERVADO": 0, "CALIBRADO": 1, "ESTIMADO": 2, "SUPUESTO": 3}
 NOT_CACHEABLE_SHAPES = {"commit", "stage"}  # escrituras: no se cachean
+POOLER_KIND = {"supabase": "supavisor", "neon": "pgbouncer"}
 
 
 class OpError(ValueError):
@@ -55,12 +54,36 @@ class ChangeDbPlan(_Op):
     """Cambia el plan de la DB por uno del catálogo: vCPU, conexiones, procesador y costo."""
 
     op: Literal["change_db_plan"]
-    plan: str = Field(description="Plan del catálogo, por ejemplo 'small' (Supabase) o 'db.m7g.large' (RDS).")
-    provider: str | None = Field(None, description="supabase, rds_postgres o local. Sin valor, el actual.")
+    plan: str = Field(
+        description="Plan del catálogo, por ejemplo 'small' (Supabase), '1cu' (Neon) o 'db.m7g.large' (RDS)."
+    )
+    provider: str | None = Field(None, description="supabase, neon, rds_postgres o local. Sin valor, el actual.")
+
+
+class ChangeApiHost(_Op):
+    """Mueve la API a otro proveedor del catálogo (fargate, fly, render, local). Recalcula el costo y el procesador."""
+
+    op: Literal["change_api_host"]
+    provider: str = Field(description="fargate, fly, render o local.")
+    plan: str | None = Field(
+        None,
+        description="Plan en fly (performance-1x...) o render (starter, standard, pro...). En fargate y local, nada.",
+    )
+    vcpu: float | None = Field(None, gt=0, le=16, description="Solo fargate y local: vCPU por réplica.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió el cambio.")
+
+
+class ChangeFrontendHost(_Op):
+    """Dice dónde se sirve el frontend (vercel, cloudfront, local). Solo cambia el costo: el motor no lo simula."""
+
+    op: Literal["change_frontend_host"]
+    provider: str = Field(description="vercel, cloudfront o local.")
+    plan: str = Field(description="vercel: hobby o pro. cloudfront: free, pro, business o premium. local: local.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él lo dijo.")
 
 
 class AddPooler(_Op):
-    """Pone un pooler en modo transacción (Supavisor de Supabase) entre la app y la DB."""
+    """Pone un pooler en modo transacción (Supavisor en Supabase, PgBouncer en Neon) entre la app y la DB."""
 
     op: Literal["add_pooler"]
 
@@ -123,6 +146,8 @@ class ScaleWorkers(_Op):
 Op = Annotated[
     ScaleApi
     | ChangeDbPlan
+    | ChangeApiHost
+    | ChangeFrontendHost
     | AddPooler
     | AddCache
     | MoveToQueue
@@ -195,107 +220,99 @@ def _design(v: Any, unit: str, what: str, quote: str | None) -> dict[str, Any]:
     return _num(v, unit, "SUPUESTO", f"Propuesta del agente: {what}", needs_review=True)
 
 
-def _weakest(*labels: str) -> str:
-    return max(labels, key=lambda lab: RANK[lab])
-
-
-def _core_factor(catalog: dict[str, Any], plan: dict[str, Any], where: str) -> dict[str, Any]:
-    """Igual que ``core_factor`` de build_model.py: cuánto más lento es 1 vCPU del plan."""
-    proc = plan.get("processor", "local")
-    f = catalog["cpu_core_factor"][proc]
-    label = _weakest(f["label"], plan.get("processor_label", f["label"]))
-    out = _num(
-        f["value"],
-        "×",
-        label,
-        f"{where}: procesador {proc}. {f['source']}. {catalog['cpu_core_factor']['_doc']}",
-        processor=proc,
-    )
-    if label == "SUPUESTO":
-        out["needs_review"] = True
-    return out
+def _profile(build: Any, *args: Any) -> dict[str, Any]:
+    """Un perfil de ``app.catalog.deploy``, con sus errores como ``OpError`` para que el LLM corrija."""
+    try:
+        return build(*args)
+    except deploy.UnknownPlan as e:
+        raise OpError(str(e)) from None
 
 
 # ---------- scale_api ----------
 def _scale_api(m: dict[str, Any], op: ScaleApi, catalog: dict[str, Any], warnings: list[str]) -> str:
     api = m["deployment"]["api"]
-    provider = api.get("provider", "local")
-    price = catalog["app_plans"].get(provider)
-    if price is None or provider.startswith("_"):
-        known = ", ".join(k for k in catalog["app_plans"] if not k.startswith("_"))
-        raise OpError(f"La API está en '{provider}', que no está en el catálogo de precios. Hay: {known}.")
+    provider, plan = api.get("provider", "local"), api.get("plan")
+    if op.vcpu is not None and plan is not None:
+        raise OpError(
+            f"En {provider} los vCPU los fija el plan ({plan}). Para cambiarlos, usa change_api_host con otro plan."
+        )
     before = f"{value(api['replicas'])} × {value(api['vcpu'])} vCPU"
     api["replicas"] = _design(op.replicas, "réplicas", f"{op.replicas} réplicas de la API", op.quote)
     if op.vcpu is not None:
         api["vcpu"] = _design(op.vcpu, "vCPU", f"{op.vcpu:g} vCPU por réplica", op.quote)
-    vcpu, mem = float(value(api["vcpu"])), float(value(api.get("memory_gb"), 2))
-    usd = op.replicas * (vcpu * price["usd_vcpu_hour"] + mem * price["usd_gb_hour"]) * HOURS_MONTH
-    api["usd_month"] = _num(
-        round(usd, 2),
-        "US$/mes",
-        "ESTIMADO",
-        f"{catalog['app_plans']['_source']}. réplicas × (vCPU × US$/vCPU-h + GB × US$/GB-h) × {HOURS_MONTH} h",
+    mem = api.get("memory_gb") or _num(2, "GB", "SUPUESTO", "Valor por defecto", needs_review=True)
+    profile = _profile(
+        deploy.app_profile, provider, plan, api["replicas"], api["vcpu"], mem, "plan actual de la versión", catalog
     )
-    return f"API: {before} → {op.replicas} × {vcpu:g} vCPU (US${usd:,.2f}/mes)"
+    api["usd_month"] = profile["usd_month"]
+    usd = value(profile["usd_month"])
+    return f"API: {before} → {op.replicas} × {value(api['vcpu']):g} vCPU (US${usd:,.2f}/mes)"
+
+
+# ---------- change_api_host ----------
+def _change_api_host(m: dict[str, Any], op: ChangeApiHost, catalog: dict[str, Any], warnings: list[str]) -> str:
+    api = m["deployment"]["api"]
+    before = f"{api.get('provider', 'local')}" + (f" {api['plan']}" if api.get("plan") else "")
+    vcpu = api["vcpu"] if op.vcpu is None else _design(op.vcpu, "vCPU", f"{op.vcpu:g} vCPU por réplica", op.quote)
+    mem = api.get("memory_gb") or _num(2, "GB", "SUPUESTO", "Valor por defecto", needs_review=True)
+    why = f"«{op.quote}»" if op.quote else "propuesto por el agente"
+    profile = _profile(deploy.app_profile, op.provider, op.plan, api["replicas"], vcpu, mem, why, catalog)
+    api.update(
+        provider=op.provider,
+        vcpu=profile.get("vcpu", vcpu),
+        memory_gb=profile.get("memory_gb", mem),
+        usd_month=profile["usd_month"],
+        cpu_core_factor=profile["cpu_core_factor"],
+    )
+    if profile.get("plan"):
+        api["plan"] = profile["plan"]
+    else:
+        api.pop("plan", None)
+    after = op.provider + (f" {op.plan}" if op.plan else "")
+    return f"API: {before} → {after} ({value(api['vcpu']):g} vCPU por réplica, US${value(api['usd_month']):,.2f}/mes)"
 
 
 # ---------- change_db_plan ----------
 def _change_db_plan(m: dict[str, Any], op: ChangeDbPlan, catalog: dict[str, Any], warnings: list[str]) -> str:
     db = m["deployment"]["db"]
-    plans = catalog["db_plans"]
-    providers = [k for k, v in plans.items() if isinstance(v, dict) and not k.startswith("_")]
     provider = op.provider or db.get("provider", "local")
-    if provider not in providers:
-        raise OpError(f"El proveedor '{provider}' no está en el catálogo. Hay: {', '.join(providers)}.")
-    plan = plans[provider].get(op.plan)
-    if plan is None:
-        raise OpError(f"{provider} no tiene el plan '{op.plan}' en el catálogo. Hay: {', '.join(plans[provider])}.")
     before = f"{db.get('provider')} {db.get('plan')}"
-    src = f"{plans['_sources'][provider]}. Plan {provider} {op.plan} propuesto por el agente"
-    if provider == "supabase":
-        usd = plans["supabase_base_usd_month"] + max(
-            0, plan["compute_usd_month"] - plans["supabase_compute_credit_usd_month"]
-        )
-        formula = "Supabase: 25 + max(0, compute − 10)"
-    else:
-        usd = plan["usd_hour"] * HOURS_MONTH
-        formula = f"US$/hora × {HOURS_MONTH}"
-    db.update(
-        provider=provider,
-        plan=op.plan,
-        vcpu=_num(plan["vcpu"], "vCPU", plan["vcpu_label"], src),
-        max_connections=_num(plan["max_connections"], "conexiones", "ESTIMADO", src),
-        usd_month=_num(round(usd, 2), "US$/mes", "ESTIMADO", f"{src}. {formula} (JAJ-11)"),
-        cpu_core_factor=_core_factor(catalog, plan, f"Plan {provider} {op.plan}"),
-    )
-    base = catalog["burstable_baseline_per_vcpu"].get(op.plan)
-    if base is not None:
-        per_vcpu = {**base}
-        sustained = round(plan["vcpu"] * base["value"], 3)
-        db["cpu_credits"] = {
-            "baseline_per_vcpu": per_vcpu,
-            "sustained_vcpu": _num(
-                sustained,
-                "vCPU",
-                _weakest(plan["vcpu_label"], base["label"]),
-                f"vCPU × base por vCPU: lo que rinde {op.plan} con carga sostenida",
-                derived=True,
-            ),
-        }
+    profile = _profile(deploy.db_profile, provider, op.plan, "propuesto por el agente", catalog)
+    same_provider = provider == db.get("provider")
+    for key in ("cpu_credits", "pooler_connections"):
+        db.pop(key, None)
+    if not same_provider:  # otro proveedor: lo que se vio en el repo ya no describe esta DB
+        for key in ("technology", "provider_seen_at"):
+            db.pop(key, None)
+    elif "technology" in db:
+        profile.pop("technology", None)
+    db.update(profile)
+    if "cpu_credits" in db:
+        sustained = value(db["cpu_credits"]["sustained_vcpu"])
         warnings.append(
-            f"{op.plan} tiene créditos de CPU: con carga sostenida rinde {sustained:g} vCPU, no {plan['vcpu']}."
+            f"{op.plan} tiene créditos de CPU: con carga sostenida rinde {sustained:g} vCPU, no {value(db['vcpu'])}."
         )
-    else:
-        db.pop("cpu_credits", None)
-    if "pooler_connections" in plan:
-        db["pooler_connections"] = _num(plan["pooler_connections"], "conexiones", "ESTIMADO", src)
-        if "pooler" in db:
+    if "pooler" in db:
+        if "pooler_connections" in db:
             db["pooler"]["client_connections"] = copy.deepcopy(db["pooler_connections"])
-    else:
-        db.pop("pooler_connections", None)
-        if db.pop("pooler", None) is not None:
+            db["pooler"]["kind"] = POOLER_KIND.get(provider, db["pooler"].get("kind"))
+        else:
+            db.pop("pooler")
             warnings.append(f"{provider} {op.plan} no tiene pooler en el catálogo: la versión queda sin pooler.")
-    return f"DB: {before} → {provider} {op.plan} ({plan['vcpu']} vCPU, {plan['max_connections']} conexiones)"
+    return f"DB: {before} → {provider} {op.plan} ({value(db['vcpu'])} vCPU, {value(db['max_connections'])} conexiones)"
+
+
+# ---------- change_frontend_host ----------
+def _change_frontend_host(
+    m: dict[str, Any], op: ChangeFrontendHost, catalog: dict[str, Any], warnings: list[str]
+) -> str:
+    dep = m["deployment"]
+    before = dep.get("frontend")
+    why = f"«{op.quote}»" if op.quote else "propuesto por el agente"
+    dep["frontend"] = _profile(deploy.frontend_profile, op.provider, op.plan, why, catalog)
+    warnings.append("El frontend no cambia la simulación: solo su costo.")
+    was = f"{before['provider']} {before['plan']}" if before else "sin frontend"
+    return f"Frontend: {was} → {op.provider} {op.plan} (US${value(dep['frontend']['usd_month']):,.2f}/mes)"
 
 
 # ---------- add_pooler ----------
@@ -307,9 +324,10 @@ def _add_pooler(m: dict[str, Any], op: AddPooler, catalog: dict[str, Any], warni
     if clients is None:
         raise OpError(
             f"El plan {db.get('provider')} {db.get('plan')} no tiene pooler en el catálogo. "
-            "En el MVP solo Supabase lo trae (Supavisor); para usarlo, cambia el plan con change_db_plan."
+            "Lo traen Supabase (Supavisor) y Neon (PgBouncer); para usarlo, cambia el plan con change_db_plan."
         )
-    db["pooler"] = {"kind": "supavisor", "mode": "transaction", "client_connections": copy.deepcopy(clients)}
+    kind = POOLER_KIND.get(db.get("provider"), "pgbouncer")
+    db["pooler"] = {"kind": kind, "mode": "transaction", "client_connections": copy.deepcopy(clients)}
     return (
         f"DB: pooler en modo transacción ({value(clients)} conexiones de clientes sobre "
         f"{value(db['max_connections'])} de Postgres)"
@@ -529,6 +547,8 @@ def _scale_workers(m: dict[str, Any], op: ScaleWorkers, catalog: dict[str, Any],
 _APPLY = {
     ScaleApi: _scale_api,
     ChangeDbPlan: _change_db_plan,
+    ChangeApiHost: _change_api_host,
+    ChangeFrontendHost: _change_frontend_host,
     AddPooler: _add_pooler,
     AddCache: _add_cache,
     MoveToQueue: _move_to_queue,

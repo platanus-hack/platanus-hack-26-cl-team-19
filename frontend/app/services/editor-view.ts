@@ -93,6 +93,7 @@ const KINDS = new Set<ComponentKind>([
   "queue",
   "worker",
   "external",
+  "frontend",
   "service",
   "storage",
   "search",
@@ -197,6 +198,47 @@ export function toBottleneck(run: Run): Bottleneck | null {
   };
 }
 
+const PROVIDER_NAMES: Record<string, string> = {
+  supabase: "Supabase",
+  neon: "Neon",
+  rds_postgres: "Amazon RDS",
+  fargate: "AWS Fargate",
+  fly: "Fly.io",
+  render: "Render",
+  vercel: "Vercel",
+  cloudfront: "CloudFront",
+  local: "Local",
+};
+
+/** «PostgreSQL 16 · Neon 1cu · US$77/mes»: qué es y dónde corre el componente (JAJ-87, JAJ-143). */
+export function hostingSummary(node: GraphNode): string | undefined {
+  const { technology, provider, plan, usd_month: usd } = node.details;
+  const where = provider
+    ? [PROVIDER_NAMES[provider] ?? provider, plan].filter(Boolean).join(" ")
+    : undefined;
+  const cost =
+    usd === undefined || usd === null
+      ? undefined
+      : `US$${usd.toLocaleString("es-CL", { maximumFractionDigits: 0 })}/mes`;
+  const parts = [technology, where, cost].filter(Boolean);
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
+/** El inspector del frontend: no se simula, pero se sabe dónde se sirve y cuánto cuesta (JAJ-143). */
+export function toHostedNode(node: GraphNode): InspectedNode | null {
+  if (node.kind !== "frontend") return null;
+  return {
+    name: node.label,
+    kind: "frontend",
+    status: "healthy",
+    notSimulated:
+      "El motor simula la API: el frontend no cambia la simulación, solo suma su costo.",
+    summary: hostingSummary(node),
+    metrics: [],
+    capacity: { label: "", used: 0, total: 0, unit: "" },
+  };
+}
+
 export function toInspectedNode(
   node: GraphNode,
   run: Run | null,
@@ -211,6 +253,7 @@ export function toInspectedNode(
     name: node.label,
     kind: nodeKind(node),
     status: saturation(mostUsed.utilization),
+    summary: hostingSummary(node),
     capacity: {
       label: mostUsed.label,
       used: Math.round(mostUsed.utilization * 100),

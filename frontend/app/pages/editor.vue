@@ -64,6 +64,7 @@ import {
   toBottleneck,
   toComparisonRows,
   toEdges,
+  toHostedNode,
   toInspectedNode,
   toUnsimulatedNode,
   toNodes,
@@ -163,6 +164,7 @@ const inspected = computed(() => {
   )?.fullName;
   return (
     toUnsimulatedNode(node, primary) ??
+    toHostedNode(node) ??
     toInspectedNode(node, run.value, provenance)
   );
 });

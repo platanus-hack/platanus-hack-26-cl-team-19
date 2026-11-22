@@ -129,6 +129,8 @@ export type ComponentKind =
   | "queue"
   | "worker"
   | "external"
+  // dónde se sirve el frontend (JAJ-143): no se simula, suma su costo
+  | "frontend"
   // de la IA (ADR 0002) y de los repos secundarios (IA-5)
   | "service"
   | "storage"

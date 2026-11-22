@@ -64,7 +64,7 @@ const FRAMEWORKS: [RegExp, TechIconName, string][] = [
 const PLATFORMS: [RegExp, TechIconName, string][] = [
   [/supabase/, "supabase-icon", "Supabase"],
   [
-    /fargate|\becs\b|\bec2\b|lambda|\brds|aurora|elasticache|dynamo|\baws\b/,
+    /fargate|\becs\b|\bec2\b|lambda|\brds|aurora|elasticache|dynamo|cloudfront|\baws\b/,
     "aws",
     "AWS",
   ],
@@ -113,8 +113,11 @@ export function nodeTech(node: GraphNode, model?: ArchitectureModel): NodeTech {
 
   let main: TechBadge | undefined;
   if (node.kind === "api") {
+    // la tecnología del nodo (JAJ-87) trae el framework con su versión; si no, el del repo
     const framework =
-      (model as ModelExtras | undefined)?.repo?.source?.framework ?? "";
+      details.technology ??
+      (model as ModelExtras | undefined)?.repo?.source?.framework ??
+      "";
     main = match(framework.toLowerCase(), FRAMEWORKS);
   } else if (node.kind === "service") {
     main = match(technology, FRAMEWORKS) ?? match(technology, TECHNOLOGIES);

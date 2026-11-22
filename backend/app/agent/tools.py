@@ -45,7 +45,7 @@ from app.api.run_cache import cached_run
 from app.api.scenario_versions import version_scenario
 from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
-from app.catalog import load_catalog
+from app.catalog import deploy, load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
 from app.costs.estimate import describe_missing
 from app.ingest.ai_graph import ArchitectureSubmission, build_from_ai, replace_architecture
@@ -172,7 +172,10 @@ class SetTrafficArgs(VersionRef):
 
 class SetDeploymentArgs(VersionRef):
     field: Literal["api.replicas", "api.vcpu", "db.plan"]
-    value: str = Field(description="El valor que dijo el usuario (ej. '3', '0.5', 'db.m7g.large').")
+    value: str = Field(
+        description="El valor que dijo el usuario (ej. '3', '0.5', 'db.m7g.large', '1cu' para Neon 1 CU). Con "
+        "db.plan, el proveedor sale del plan si solo uno lo tiene."
+    )
     quote: str = Field(min_length=3, max_length=500, description="La frase textual del usuario.")
 
 
@@ -250,6 +253,11 @@ def _require_in_quote(value: float, quote: str, what: str, *, also: tuple[float,
 
 def _num(value: Any, unit: str, label: str, source: str, **extra: Any) -> dict[str, Any]:
     return {"value": value, "unit": unit, "label": label, "source": source, "date": date.today().isoformat(), **extra}
+
+
+def _compact(text: str) -> str:
+    """Sin espacios ni signos, para encontrar «1cu» en «Neon 1 CU» o «db.t4g.micro» en «db t4g micro»."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
 def _weakest(*labels: str) -> str:
@@ -761,9 +769,13 @@ class AgentTools:
         project = self._project(a.project_id)
         base = self._version(project, a.version)
         if a.field == "db.plan":
-            if a.value.lower() not in a.quote.lower():
+            if _compact(a.value) not in _compact(a.quote):
                 raise ToolError(f"El plan '{a.value}' no aparece en quote ({a.quote!r}).")
-            ops = [{"op": "change_db_plan", "plan": a.value}]
+            plan_op: dict[str, Any] = {"op": "change_db_plan", "plan": a.value}
+            owners = [p for p, plans in deploy.db_providers().items() if a.value in plans]
+            if len(owners) == 1:  # «usamos Neon 1 CU»: el plan dice el proveedor (JAJ-143)
+                plan_op["provider"] = owners[0]
+            ops = [plan_op]
         else:
             try:
                 number = float(a.value.replace(",", "."))

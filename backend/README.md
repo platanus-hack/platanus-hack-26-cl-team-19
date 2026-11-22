@@ -31,6 +31,7 @@ backend/
 │   │   ├── mcp.py           #   /mcp: las tools para la CLI de IA del usuario (JAJ-54, JAJ-67)
 │   │   └── loop.py          #   el loop del chat del editor con Claude (JAJ-67)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
+│   │   └── deploy.py        # perfiles de despliegue: proveedor y plan de la DB, la API y el frontend (JAJ-143)
 │   ├── reports/             # reportes de simulación: armado, comparación y Markdown (JAJ-127)
 │   ├── costs/               # costo mensual por componente (JAJ-72)
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
@@ -128,6 +129,30 @@ Los tiempos de CPU del modelo (CPU de la API, hash de contraseña y consultas) s
 **Validación del ajuste** (`tests/engine/test_cloud_factor.py`):
 - **Cuentas a mano:** el uso de CPU sube exactamente en el factor, y el punto de saturación baja en el factor.
 - **Contra los `checks` de `build_model.py`, que ya aplican el factor y la base de créditos:** en los dos modelos de ejemplo, el motor da el mismo uso de CPU (±5 %) en los escenarios bajo saturación, y el mismo cuello de botella en CyberDay.
+
+### Dónde está desplegado cada componente (JAJ-143) y su tecnología (JAJ-87)
+
+Cada componente corre en un proveedor y un plan del catálogo. El perfil del plan (`app/catalog/deploy.py`) define a la vez lo que simula el motor y lo que cuesta, así que el rendimiento y el precio salen de la misma fuente:
+
+| Componente | Proveedores y planes | Qué cambia en la simulación |
+| -- | -- | -- |
+| DB | Supabase (micro a 4xl), Neon (0.25 a 4 CU), RDS (`db.t4g.*`, `db.m7g.*`), local | vCPU, `max_connections`, pooler, procesador (`cpu_core_factor`), créditos de CPU y `network_rtt_ms` |
+| API | Fargate y local (por vCPU y GB), Fly (`performance-1x/2x`), Render (free a `pro_ultra`) | vCPU y memoria del plan, procesador |
+| Frontend | Vercel (hobby, pro), CloudFront (planes de tarifa plana), local | Nada: solo suma su costo. El diagrama lo muestra antes de la API |
+
+- **Red hasta la DB (`deployment.db.network_rtt_ms`):** cada consulta espera la ida y vuelta con la conexión tomada, sin usar la CPU de la DB. Es 0 en local (ya está en la calibración de JAJ-8) y 1 ms en la nube, como `SUPUESTO` (AWS: menos de 1 ms dentro de una zona, un dígito de ms entre zonas).
+- **Precios:** los de Neon y CloudFront salen de `app/costs/prices/manual.json` (JAJ-11). Los de Fly, Render y Vercel están en el catálogo, con su fuente y fecha.
+- **Procesador:** Neon, Fly y Render no lo publican. Se usa `x86_cloud`, con el factor más lento del catálogo (el de Graviton2), como `SUPUESTO`.
+- **Lo que dice el repo** (`iac.py`):
+  - **DB:** el host de la URL de conexión de un `.env.example` (`*.neon.tech`, `*.supabase.co`, `*.rds.amazonaws.com`) da el proveedor. Un `.env` real nunca se lee.
+  - **API:** el plan de `render.yaml`, el `size` o `cpu_kind` de `fly.toml`, o el destino del despliegue.
+  - **Frontend:** `vercel.json`, `netlify.toml` o el workflow de despliegue.
+  - **Sin plan dicho:** si el repo da el proveedor pero no el plan, se usa el más chico como `SUPUESTO` por revisar, y el agente lo pregunta.
+- **Proveedor sin perfil** (Heroku, Netlify...): queda un aviso en `deployment.iac.warnings` y la API se simula como local.
+- **Tecnología (JAJ-87):** la DB, la API y cada servicio traen un bloque `technology` (`name`, `version`, `label`, `source`, `at`).
+  - **`OBSERVADO`:** la imagen de la IaC (`postgres:16`) o el manifiesto del repo (`express` en `package.json:3`).
+  - **`ESTIMADO`:** el framework que reconoció la IA, o el motor que implica el proveedor (Neon solo ofrece PostgreSQL).
+- **Agente:** `change_db_plan` acepta Neon. `change_api_host` mueve la API a otro proveedor o plan. `change_frontend_host` dice dónde se sirve el frontend. `set_deployment` con `db.plan` deduce el proveedor del plan, por ejemplo «Neon 1 CU» → `neon 1cu`.
 
 ### Quién causa el cuello de botella (JAJ-69)
 
@@ -406,9 +431,11 @@ Son el vocabulario con que el agente propone versiones (`app/agent/ops.py`, [ADR
 
 | Operación | Qué cambia | De dónde salen los números |
 | -- | -- | -- |
-| `scale_api(replicas, vcpu?, quote?)` | Réplicas y vCPU de la API; recalcula `usd_month` | Decisión de diseño: `SUPUESTO` "Propuesta del agente" con `needs_review`, o la frase del usuario si va `quote`. Precio de Fargate del catálogo |
-| `change_db_plan(plan, provider?)` | vCPU, conexiones, procesador, créditos de CPU, pooler y costo | Plan del catálogo (JAJ-11) |
-| `add_pooler()` | Agrega `deployment.db.pooler` en modo transacción | `pooler_connections` del plan. Solo Supabase en el MVP |
+| `scale_api(replicas, vcpu?, quote?)` | Réplicas y vCPU de la API; recalcula `usd_month` | Decisión de diseño: `SUPUESTO` "Propuesta del agente" con `needs_review`, o la frase del usuario si va `quote`. Precio del plan del catálogo. En Fly y Render los vCPU los fija el plan |
+| `change_db_plan(plan, provider?)` | vCPU, conexiones, procesador, créditos de CPU, pooler, red y costo | Plan del catálogo (JAJ-11, JAJ-143) |
+| `change_api_host(provider, plan?, vcpu?, quote?)` | Proveedor y plan de la API: vCPU, memoria, procesador y costo | Plan del catálogo (JAJ-143) |
+| `change_frontend_host(provider, plan, quote?)` | Dónde se sirve el frontend. No cambia la simulación | Plan del catálogo (JAJ-143) |
+| `add_pooler()` | Agrega `deployment.db.pooler` en modo transacción | `pooler_connections` del plan: Supavisor en Supabase, PgBouncer en Neon |
 | `add_cache(endpoint, at?, hit_ratio?, quote?)` | Las lecturas del endpoint GET pasan a `on_miss` de un paso de caché | Tiempo de Redis del catálogo. `hit_ratio` es un dato del usuario: solo con `quote`; sin él, 0 % de aciertos (el peor caso) |
 | `move_to_queue(endpoint, at, queue, workers, quote?)` | El paso de `at` pasa a `job_steps` de una cola nueva y la request solo encola | Tiempo de encolar del catálogo. `workers`: decisión de diseño, igual que `replicas` |
 | `remove_cache(endpoint)` | Inversa de `add_cache`: el paso de caché desaparece y sus lecturas de `on_miss` vuelven a su lugar | Ninguno nuevo. Una caché del repo sin `on_miss` se rechaza: no se sabe qué vuelve a la DB |
