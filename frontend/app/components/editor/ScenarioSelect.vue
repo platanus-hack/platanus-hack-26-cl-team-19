@@ -32,23 +32,26 @@ const active = computed(() =>
     <Label :for="id" :class="hideLabel ? 'sr-only' : undefined">{{
       label
     }}</Label>
-    <Select v-model="model" :disabled="disabled">
-      <SelectTrigger :id="id" class="w-full">
-        <SelectValue placeholder="Elige un escenario" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          <SelectItem
-            v-for="option in options"
-            :key="option.id"
-            :value="option.id"
-            :disabled="option.disabled"
-          >
-            {{ option.label }}
-          </SelectItem>
-        </SelectGroup>
-      </SelectContent>
-    </Select>
+    <div class="flex items-center gap-2">
+      <Select v-model="model" :disabled="disabled">
+        <SelectTrigger :id="id" class="min-w-0 flex-1">
+          <SelectValue placeholder="Elige un escenario" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem
+              v-for="option in options"
+              :key="option.id"
+              :value="option.id"
+              :disabled="option.disabled"
+            >
+              {{ option.label }}
+            </SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <slot name="actions" />
+    </div>
     <p v-if="active?.description" class="text-xs text-muted-foreground">
       {{ active.description }}
     </p>

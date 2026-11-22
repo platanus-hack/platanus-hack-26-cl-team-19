@@ -11,7 +11,8 @@ Flujo (el diseño está en ``spikes/jaj-53-acceso-github/README.md``):
    (``BRANCHPOINT_FRONTEND_URL/onboarding?github=ok`` o ``?github=error&message=...``).
 3. ``GET /github/repos`` y ``GET /github/repos/{owner}/{repo}/branches``: qué puede elegir.
 4. ``POST /github/ingestions``: analiza ese repo y rama en segundo plano. ``GET /github/ingestions/{id}``
-   da el progreso y, al terminar, el ``project_id`` con su v1.
+   da el progreso y, al terminar, el ``project_id`` con su v1. Con ``project_id`` en el body, los repos se
+   suman a ese proyecto como secundarios y el resultado es una versión nueva (``version``).
 
 Los tokens de GitHub nunca salen en respuestas ni logs: se piden por llamada y se descartan.
 """
@@ -28,10 +29,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.agent.loop import model_for
 from app.api.auth import User, current_user, owner_of
-from app.api.errors import NOT_FOUND, ApiError
+from app.api.errors import INVALID_PARAMETERS, NOT_FOUND, ApiError
 from app.api.routes.credentials import Provider, llm_key
 from app.github.client import GitHubApp, GitHubError, Repo
-from app.github.ingestion import Ingestion, IngestionJobs, run_ingestion, team_token_cap
+from app.github.ingestion import Ingestion, IngestionJobs, run_add_repos, run_ingestion, team_token_cap
 from app.github.state import InvalidState, sign_state, verify_state
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -89,16 +90,29 @@ class StartIngestion(BaseModel):
     name: str | None = Field(
         None, min_length=1, max_length=120, description="nombre del proyecto; por defecto, el repo"
     )
+    project_id: str | None = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        description="Suma los repos a este proyecto como secundarios, en una versión nueva, en vez de crear uno.",
+    )
+    parent: int | None = Field(
+        None, ge=1, description="Con project_id: la versión de la que parte la nueva. Por defecto, la última."
+    )
 
     @model_validator(mode="after")
     def _one_shape(self) -> StartIngestion:
         if (self.repo_full_name is None) == (self.repos is None):
             raise ValueError("manda repo_full_name o repos, no los dos")
+        if self.project_id is None and self.parent is not None:
+            raise ValueError("parent va solo con project_id")
+        if self.project_id is not None and self.primary is not None:
+            raise ValueError("con project_id, el principal es el del proyecto: no mandes primary")
         if self.repos is not None:
             names = [r.full_name.lower() for r in self.repos]
             if len(set(names)) != len(names):
                 raise ValueError("repos repetidos")
-            if len(self.repos) > 1:
+            if len(self.repos) > 1 and self.project_id is None:
                 if self.primary is None:
                     raise ValueError("con más de un repo, primary es obligatorio")
                 if self.primary.lower() not in names:
@@ -325,6 +339,46 @@ def get_jobs(request: Request) -> IngestionJobs:
     return request.app.state.ingestions
 
 
+def _target_project(
+    request: Request, owner: str | None, req: StartIngestion, choices: list[RepoChoice]
+) -> tuple[str, int, str]:
+    """El proyecto al que se suman los repos: ``(id, versión de partida, repo principal)``. 404 si no es de
+    quien llama; 422 si no salió de un repo, si un repo ya está o si se pasa de ``MAX_REPOS``."""
+    store = request.app.state.store
+    project = store.get(req.project_id or "", owner)
+    if project is None:
+        raise ApiError(404, NOT_FOUND, f"No existe el proyecto '{req.project_id}'.", resource="project")
+    repos = project.repos()
+    if not repos:
+        raise ApiError(
+            422,
+            INVALID_PARAMETERS,
+            "Este proyecto salió de un ejemplo: solo se suman repos a uno que salió de un repo.",
+        )
+    taken = {r.full_name.lower() for r in repos if r.full_name}
+    repeated = [c.full_name for c in choices if c.full_name.lower() in taken]
+    if repeated:
+        raise ApiError(422, INVALID_PARAMETERS, f"{', '.join(repeated)} ya es parte del proyecto.")
+    if len(repos) + len(choices) > MAX_REPOS:
+        free = MAX_REPOS - len(repos)
+        raise ApiError(
+            422,
+            INVALID_PARAMETERS,
+            f"Un proyecto tiene hasta {MAX_REPOS} repos y este ya tiene {len(repos)}: "
+            + (f"puedes sumar {free} más." if free > 0 else "no caben más."),
+        )
+    parent = req.parent if req.parent is not None else len(project.versions)
+    if not 1 <= parent <= len(project.versions):
+        raise ApiError(
+            404,
+            NOT_FOUND,
+            f"El proyecto no tiene la versión v{parent}. Tiene de v1 a v{len(project.versions)}.",
+            resource="version",
+        )
+    primary = next((r.full_name for r in repos if r.primary), repos[0].full_name)
+    return project.id, parent, primary or ""
+
+
 @router.post("/ingestions", response_model=IngestionOut, status_code=202)
 def start_ingestion(
     req: StartIngestion,
@@ -338,6 +392,7 @@ def start_ingestion(
 ) -> IngestionOut:
     owner = owner_of(user)
     choices = req.choices()
+    target = _target_project(request, owner, req, choices) if req.project_id is not None else None
     found = [_repo_or_404(request, github, owner, c.full_name) for c in choices]
     branches = [c.branch or r.default_branch for c, r in zip(choices, found, strict=True)]
     # La arquitectura la lee la IA (ADR 0002). La key sale como en el chat: la del header, la personal elegida
@@ -358,9 +413,26 @@ def start_ingestion(
     llms = [factory(key.key, model=model_for(req.provider, "extract")) for _ in found]  # uno por repo
     repo, llm = found[0], llms[0]
     others = [(r.full_name, b) for r, b in zip(found[1:], branches[1:], strict=True)]
+    cap = team_token_cap() if key.source == "team" else None  # el tope es solo para la key de Branchpoint
+    if target is not None:
+        project_id, parent, primary = target
+        job = jobs.start(owner, repo.full_name, branches[0], others or None, project_id=project_id)
+        tasks.add_task(
+            run_add_repos,
+            jobs,
+            job.id,
+            github,
+            request.app.state.store,
+            project_id,
+            parent,
+            primary,
+            list(zip(found, branches, llms, strict=True)),
+            provider=req.provider,
+            max_tokens_total=cap,
+        )
+        return _out(job)
     job = jobs.start(owner, repo.full_name, branches[0], others or None)
     name = req.name or repo.full_name.split("/", 1)[1]
-    cap = team_token_cap() if key.source == "team" else None  # el tope es solo para la key de Branchpoint
     secondaries = [(r, b, m) for r, b, m in zip(found[1:], branches[1:], llms[1:], strict=True)] or None
     tasks.add_task(
         run_ingestion,

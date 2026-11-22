@@ -42,6 +42,7 @@ from app.agent.logs import analyze_log
 from app.agent.ops import OpError, apply_ops, collect_assumptions, ops_json_schema
 from app.api.errors import ApiError
 from app.api.run_cache import cached_run
+from app.api.scenario_versions import version_scenario
 from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
 from app.catalog import load_catalog
@@ -375,6 +376,7 @@ def _version_label(v: Version) -> dict[str, Any]:
 # ---------- las tools ----------
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "propose_scenario": "Prepara un cambio de escenario para aprobar en el chat. Usa una fracción para la conversión.",
     "list_projects": "Lista los proyectos del usuario con sus versiones. Empieza por aquí para obtener project_id.",
     "get_model": "Resumen de una versión: despliegue, tráfico, escenarios, endpoints con archivo:línea, metas y "
     "cuántos SUPUESTO tiene. No incluye el JSON completo.",
@@ -503,6 +505,7 @@ class AgentTools:
         sc = scenarios.get(scenario)
         if sc is None:
             raise ToolError(f"El proyecto no tiene el escenario '{scenario}'. Hay: {', '.join(sorted(scenarios))}.")
+        sc = version_scenario(sc, model)
         try:
             rate = sc.rate_for(model)
         except ValueError as e:
@@ -515,7 +518,7 @@ class AgentTools:
                 f"El escenario '{scenario}' pide {rate:,.0f} req/s: es más de lo que el motor simula en una llamada "
                 f"({MAX_SIMULATED_REQUESTS:,} requests en {MIN_SIM_SECONDS:g} s). Revisa el tráfico declarado."
             )
-        return RunParams(scenario=scenario, seed=seed, duration_s=round(duration, 1), rps=rate)
+        return RunParams(scenario=scenario, seed=seed, duration_s=round(duration, 1), rps=rate, **sc.overrides())
 
     def _run(self, project: Project, version: Version, scenario: str, seed: int) -> Run:
         params = self._params(project, version.model, scenario, seed)
@@ -569,7 +572,7 @@ class AgentTools:
                 ],
             },
             "traffic": {"peak_rps": traffic.get("peak_rps"), "declared": traffic.get("declared")},
-            "scenarios": self._list_scenarios(ProjectRef(project_id=project.id))["scenarios"],
+            "scenarios": [asdict(version_scenario(s, m)) for s in self.store.list_scenarios(project.id)],
             "endpoints": [
                 {
                     "id": e.get("id"),
@@ -635,6 +638,7 @@ class AgentTools:
 
     def _compare(self, a: CompareArgs) -> dict[str, Any]:
         from app.api.routes.projects import compare_summary  # el mismo texto que ve el editor
+        from app.api.routes.runs import scenario_model
 
         project = self._project(a.project_id)
         va, vb = self._version(project, a.a), self._version(project, a.b)
@@ -642,7 +646,9 @@ class AgentTools:
         run_a, run_b = self._run(project, va, a.scenario, a.seed), self._run(project, vb, a.scenario, a.seed)
         cost_a, cost_b = estimate_cost(va.model), estimate_cost(vb.model)
         cdelta = cost_delta(cost_a, cost_b)
-        fa, fb = failure_cost(va.model, run_a), failure_cost(vb.model, run_b)
+        model_a, _ = scenario_model(va.model, self._params(project, va.model, a.scenario, a.seed))
+        model_b, _ = scenario_model(vb.model, self._params(project, vb.model, a.scenario, a.seed))
+        fa, fb = failure_cost(model_a, run_a), failure_cost(model_b, run_b)
         d = run_delta(run_a, run_b, va.model, vb.model)
         goals = self.store.get_goals(project.id)
         return {

@@ -11,17 +11,22 @@ withDefaults(
     repositoryName?: string;
     version?: string;
     title?: string;
+    sidebarDefaultOpen?: boolean;
   }>(),
   {
     repositoryName: undefined,
     version: undefined,
     title: "Editor",
+    sidebarDefaultOpen: undefined,
   },
 );
 </script>
 
 <template>
-  <SidebarProvider class="h-svh min-h-0 overflow-hidden">
+  <SidebarProvider
+    :default-open="sidebarDefaultOpen"
+    class="h-svh min-h-0 overflow-hidden"
+  >
     <slot name="sidebar" />
 
     <SidebarInset
@@ -46,11 +51,13 @@ withDefaults(
           }}</span>
         </h1>
         <div class="flex shrink-0 items-center gap-2">
-          <span
-            v-if="version"
-            class="font-mono text-sm text-muted-foreground tabular-nums"
-            >{{ version }}</span
-          >
+          <slot name="version">
+            <span
+              v-if="version"
+              class="font-mono text-sm text-muted-foreground tabular-nums"
+              >{{ version }}</span
+            >
+          </slot>
           <slot name="actions" />
           <slot name="nav" />
         </div>

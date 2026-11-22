@@ -62,6 +62,11 @@ _ATTACHMENT = (
 )
 
 
+def _chat_role(message: dict[str, Any]) -> str:
+    role = message.get("role")
+    return role if role in ("user", "tool") else "assistant"
+
+
 def _attachment(row: dict[str, Any]) -> Attachment:
     return Attachment(
         id=str(row["id"]),
@@ -336,10 +341,25 @@ class PostgresProjectStore:
         return out
 
     def add_version(
-        self, project_id: str, model: dict[str, Any], origin: Origin, parent: int | None, note: str | None
+        self,
+        project_id: str,
+        model: dict[str, Any],
+        origin: Origin,
+        parent: int | None,
+        note: str | None,
+        *,
+        proposal_id: uuid.UUID | None = None,
     ) -> Version:
         pid = _uuid(project_id)
         with self._conn() as conn:
+            if proposal_id is not None:
+                conn.execute("select id from projects where id = %s for update", (pid,))
+                prior = conn.execute(
+                    f"select {_SUMMARY}, model from model_versions where project_id = %s and proposal_id = %s",
+                    (pid, proposal_id),
+                ).fetchone()
+                if prior is not None:
+                    return _version(prior)
             # numerar sin carreras: el UPDATE bloquea la fila del proyecto hasta el commit
             counted = conn.execute(
                 "update projects set version_count = version_count + 1, updated_at = now()"
@@ -349,10 +369,96 @@ class PostgresProjectStore:
             if counted is None:
                 raise KeyError(project_id)
             row = conn.execute(
-                "insert into model_versions (project_id, number, parent_number, origin, note, model)"
-                f" values (%s, %s, %s, %s::version_origin, %s, %s) returning {_SUMMARY}, model",
-                (pid, counted["version_count"], parent, origin, note, Jsonb(model)),
+                "insert into model_versions (project_id, number, parent_number, origin, note, model, proposal_id)"
+                f" values (%s, %s, %s, %s::version_origin, %s, %s, %s) returning {_SUMMARY}, model",
+                (pid, counted["version_count"], parent, origin, note, Jsonb(model), proposal_id),
             ).fetchone()
+        return _version(row)
+
+    def get_chat(self, project_id: str) -> list[dict[str, Any]]:
+        pid = _uuid(project_id)
+        if pid is None:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "select m.content from chat_messages m join chat_sessions s on s.id = m.session_id"
+                " where s.project_id = %s order by m.created_at, m.id",
+                (pid,),
+            ).fetchall()
+        return [r["content"] for r in rows]
+
+    def save_chat(self, project_id: str, messages: list[dict[str, Any]]) -> None:
+        pid = _uuid(project_id)
+        with self._conn() as conn:
+            # una sesión por proyecto; el lock de la fila del proyecto evita dos sesiones en carrera
+            conn.execute("select id from projects where id = %s for update", (pid,))
+            session = conn.execute(
+                "select id from chat_sessions where project_id = %s order by created_at limit 1", (pid,)
+            ).fetchone()
+            if session is None:
+                session = conn.execute(
+                    "insert into chat_sessions (project_id) values (%s) returning id", (pid,)
+                ).fetchone()
+            conn.execute("delete from chat_messages where session_id = %s", (session["id"],))
+            with conn.cursor() as cur:
+                # el orden sale de created_at: cada fila un microsegundo después de la anterior
+                cur.executemany(
+                    "insert into chat_messages (session_id, role, content, created_at)"
+                    " values (%s, %s::chat_role, %s, now() + %s * interval '1 microsecond')",
+                    [(session["id"], _chat_role(m), Jsonb(m), i) for i, m in enumerate(messages)],
+                )
+
+    def add_repositories(
+        self, project_id: str, model: dict[str, Any], parent: int, note: str, sources: list[RepoSource]
+    ) -> Version:
+        pid = _uuid(project_id)
+        with self._conn() as conn:
+            # numerar sin carreras: el UPDATE bloquea la fila del proyecto hasta el commit
+            counted = conn.execute(
+                "update projects set version_count = version_count + 1, updated_at = now()"
+                " where id = %s returning version_count, repo_connection_id, branch",
+                (pid,),
+            ).fetchone()
+            if counted is None:
+                raise KeyError(project_id)
+            if counted["repo_connection_id"] is None:
+                raise ValueError("el proyecto no salió de un repo")
+            position = conn.execute(
+                "select count(*) as n, coalesce(max(position), -1) as last from project_repositories"
+                " where project_id = %s",
+                (pid,),
+            ).fetchone()
+            last = position["last"]
+            if position["n"] == 0:  # tenía un solo repo: se deriva de la v1 hasta hoy, ahora queda guardado
+                first = conn.execute(
+                    "select commit_sha from model_versions where project_id = %s and number = 1", (pid,)
+                ).fetchone()
+                conn.execute(
+                    "insert into project_repositories (project_id, repo_connection_id, branch, commit_sha,"
+                    " is_primary, position) values (%s, %s, %s, %s, true, 0)",
+                    (pid, counted["repo_connection_id"], counted["branch"], first["commit_sha"] if first else None),
+                )
+                last = 0
+            row = conn.execute(
+                "insert into model_versions (project_id, number, parent_number, origin, note, model)"
+                f" values (%s, %s, %s, 'repo', %s, %s) returning id, {_SUMMARY}, model",
+                (pid, counted["version_count"], parent, note, Jsonb(model)),
+            ).fetchone()
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "insert into project_repositories (project_id, repo_connection_id, branch, commit_sha,"
+                    " is_primary, position) values (%s, %s, %s, %s, false, %s)",
+                    [
+                        (pid, _uuid(s.connection_id), s.branch, s.commit_sha, last + 1 + i)
+                        for i, s in enumerate(sources)
+                    ],
+                )
+                cur.executemany(
+                    "insert into ingestions (project_id, repo_connection_id, branch, commit_sha, status, stage,"
+                    " stats, model_version_id, started_at, finished_at)"
+                    " values (%s, %s, %s, %s, 'done', 'preparacion', %s, %s, now(), now())",
+                    [(pid, _uuid(s.connection_id), s.branch, s.commit_sha, Jsonb(s.stats), row["id"]) for s in sources],
+                )
         return _version(row)
 
     def list_scenarios(self, project_id: str) -> list[ProjectScenario]:

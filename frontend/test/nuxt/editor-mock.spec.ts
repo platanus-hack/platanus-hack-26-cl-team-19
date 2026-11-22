@@ -54,11 +54,47 @@ describe("editor de demostración", () => {
     });
   });
 
+  it("conserva un escenario editado y lo usa en una versión derivada", async () => {
+    const entries = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem(key: string, value: string) {
+        entries.set(key, value);
+      },
+    };
+    const api = createMockEditorApi(storage);
+    const id = "fastapi-template";
+    await api.saveScenario(id, "campana", {
+      multiplier: 2,
+      rps: null,
+      description: null,
+    });
+    expect((await api.run(id, 1, "campana")).series[0]?.arrivals).toBe(26);
+    await api.saveScenario(id, "campana", {
+      multiplier: null,
+      rps: 50,
+      description: "Nueva tasa",
+    });
+    const { model } = await api.getVersion(id, 1);
+    await api.saveVersion(id, 1, model, "Copia");
+
+    const reopened = createMockEditorApi(storage);
+    expect(await reopened.listScenarios(id)).toContainEqual({
+      name: "campana",
+      multiplier: null,
+      rps: 50,
+      description: "Nueva tasa",
+    });
+    expect(
+      (await reopened.results(id, 2, "campana")).run.series[0]?.arrivals,
+    ).toBe(50);
+  });
+
   it("parte de cero si el sessionStorage está corrupto", async () => {
     const storage = {
       getItem: () => "{no es json",
       setItem: () => {},
-    } as unknown as Storage;
+    };
     const api = createMockEditorApi(storage);
 
     await expect(api.listProjects()).resolves.not.toHaveLength(0);

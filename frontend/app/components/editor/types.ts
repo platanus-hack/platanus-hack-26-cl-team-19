@@ -1,3 +1,5 @@
+import type { ChatProposal } from "@/services/chat-stream";
+import type { NodeTech } from "@/services/tech-stack";
 import type {
   MetricProvenance,
   MetricReading,
@@ -99,6 +101,14 @@ export type ChatMessage =
     }
   | {
       id: string;
+      role: "chat-proposal";
+      proposal: ChatProposal;
+      state: ProposalState;
+      version?: string;
+      error?: string;
+    }
+  | {
+      id: string;
       role: "proposal";
       proposal: AgentProposal;
       state: ProposalState;
@@ -136,6 +146,8 @@ export interface DiagramNode {
   repo?: string;
   /** false: viene de un repo secundario y el motor no lo simula. Sin el campo, se simula. */
   simulated?: boolean;
+  /** Logos de su tecnología y de dónde corre (tech-stack.ts). */
+  tech?: NodeTech;
 }
 
 export interface DiagramEdge {

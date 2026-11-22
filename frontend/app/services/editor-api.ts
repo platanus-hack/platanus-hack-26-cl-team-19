@@ -1,4 +1,11 @@
-import type { ChatKeySource, ChatProvider, ChatTurn } from "./chat-stream";
+import type {
+  ChatKeySource,
+  ChatProposal,
+  ChatProvider,
+  ChatTurn,
+} from "./chat-stream";
+import type { ChatMessage } from "@/components/editor/types";
+
 export interface ModelSummary {
   id: string;
   name: string;
@@ -14,12 +21,16 @@ export interface ModelNumber {
 }
 
 export interface ArchitectureModel {
+  version_scenarios?: Record<string, Partial<ProjectScenarioInput>>;
+  /** El peso de cada endpoint en el tráfico, en cualquier escala: el motor lo normaliza. */
+  endpoints?: { id: string; weight?: ModelNumber | number }[];
   checks?: unknown;
   assumptions?: unknown;
   deployment: {
     api: { replicas: ModelNumber; usd_month?: ModelNumber };
   };
   traffic: {
+    peak_rps?: ModelNumber;
     scenarios: Record<string, { rps: ModelNumber | number }>;
   };
 }
@@ -82,6 +93,16 @@ export interface ScenarioOverrides {
   endpoint_weights?: Record<string, number>;
   slowdowns?: Record<string, number>;
   business?: { conversion?: number; ticket_usd?: number };
+}
+
+export interface ProjectScenarioInput extends ScenarioOverrides {
+  multiplier: number | null;
+  rps: number | null;
+  description: string | null;
+}
+
+export interface ProjectScenario extends ProjectScenarioInput {
+  name: string;
 }
 
 export interface GraphEndpoint {
@@ -214,12 +235,18 @@ export function createEditorApi(
       provider: ChatProvider,
       signal: AbortSignal,
       expectedSource?: ChatKeySource,
+      context?: { version?: number; scenario?: string },
     ) {
       const response = await fetchApi.raw<ReadableStream<Uint8Array>>(
         `${projectPath(id)}/chat`,
         {
           method: "POST",
-          body: { messages, provider, expected_source: expectedSource },
+          body: {
+            messages,
+            provider,
+            expected_source: expectedSource,
+            ...context,
+          },
           responseType: "stream",
           ignoreResponseError: true,
           signal,
@@ -242,6 +269,26 @@ export function createEditorApi(
     listModels: () => fetchApi<ModelSummary[]>("/models"),
     createProject: (sample: string, name?: string) =>
       post<Project>("/projects", { sample, name }),
+    // La conversación del panel, una por proyecto: se guarda al terminar cada turno.
+    getChat: (id: string) =>
+      fetchApi<{ messages: ChatMessage[] }>(`${projectPath(id)}/chat`),
+    saveChat: (id: string, messages: ChatMessage[]) =>
+      fetchApi(`${projectPath(id)}/chat`, {
+        method: "PUT",
+        body: { messages },
+      }),
+    acceptChatProposal: (id: string, proposal: ChatProposal) =>
+      post<VersionDetail>(
+        `${projectPath(id)}/chat/proposals/${encodeURIComponent(proposal.id)}/accept`,
+        proposal.draft,
+      ),
+    listScenarios: (id: string) =>
+      fetchApi<ProjectScenario[]>(`${projectPath(id)}/scenarios`),
+    saveScenario: (id: string, name: string, input: ProjectScenarioInput) =>
+      fetchApi<ProjectScenario>(
+        `${projectPath(id)}/scenarios/${encodeURIComponent(name)}`,
+        { method: "PUT", body: input },
+      ),
     getVersion: (id: string, version: number) =>
       fetchApi<VersionDetail>(versionPath(id, version)),
     getGraph: (model: ArchitectureModel) => post<Graph>("/graph", { model }),

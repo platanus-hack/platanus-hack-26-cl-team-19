@@ -8,7 +8,20 @@ export type ChatTurn = {
   attachments?: string[];
 };
 
+export interface ChatProposal {
+  id: string;
+  draft: {
+    base: number;
+    note?: string;
+    scenario?: { name: string };
+    ops?: Record<string, unknown>[];
+  };
+  changes: string[];
+  warnings: string[];
+}
+
 type ToolResult = {
+  proposal?: ChatProposal;
   error?: unknown;
   p95_ms?: number;
   scenario?: string;
