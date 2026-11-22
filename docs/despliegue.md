@@ -49,6 +49,7 @@ Los dos servicios despliegan la rama `main` del espejo cada vez que cambia.
 | `BRANCHPOINT_TEAM_CHAT_LIMIT` | `30` | Mensajes de chat al día (UTC) por usuario con la key del equipo |
 | `BRANCHPOINT_TEAM_EXTRACT_LIMIT` | `5` | Repos analizados con IA al día (UTC) por usuario con la key del equipo |
 | `BRANCHPOINT_TEAM_EXTRACT_TOKENS` | `1500000` | Tokens máximos de un análisis con la key del equipo. Provisorio hasta medir con `spikes/ia-0-analizador` |
+| `BRANCHPOINT_ANTHROPIC_EXTRACT_SPEED` | `fast` | Fast mode del LLM que lee el repo: la primera importación tarda 2,5 veces menos y los tokens cuestan el doble (JAJ-146). Solo con Opus 5.5, el modelo por defecto: no definir `BRANCHPOINT_ANTHROPIC_EXTRACT_MODEL` en producción |
 
 Sin las variables `GITHUB_APP_*`, `/github/*` responde 503. No configurarlas mientras el backend corra sin login: cualquiera vería y podría analizar los repos de las instalaciones.
 
