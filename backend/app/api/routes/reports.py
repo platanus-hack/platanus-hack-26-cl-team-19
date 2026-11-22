@@ -87,9 +87,11 @@ def simulate_and_report(
 
     ``params`` ya trae las req/s resueltas (``_with_scenario_rate``). ``custom_rps``: la tasa la eligió quien
     pidió la corrida (no sale de un escenario del proyecto)."""
-    run, _ = cached_run(
+    run, hit = cached_run(
         store, project.id, version.number, version.model, params, None if custom_rps else params.scenario
     )
+    if hit and (saved := _same_run_report(store, project.id, version.number, params)) is not None:
+        return run, saved  # JAJ-165: la misma corrida (ej. el agente simulando otra vez) no repite el reporte
     report = build_report(
         project={"id": project.id, "name": project.name},
         version={"number": version.number, "origin": version.origin, "note": version.note},
@@ -106,6 +108,18 @@ def simulate_and_report(
     )
     store.save_report(project.id, report)
     return run, report
+
+
+def _same_run_report(store: ProjectStore, project_id: str, number: int, params: RunParams) -> dict[str, Any] | None:
+    """El reporte ya guardado de esta versión con los mismos parámetros (escenario, semilla, tasa…)."""
+    wanted = params.model_dump(mode="json")
+    for summary in store.list_reports(project_id):
+        if summary.kind != "run" or summary.version != number or summary.seed != params.seed:
+            continue
+        report = store.get_report(project_id, summary.id)
+        if report is not None and report.get("params") == wanted:
+            return report
+    return None
 
 
 def _report(store: ProjectStore, project_id: str, report_id: str) -> dict[str, Any]:

@@ -456,14 +456,20 @@ def describe_missing(missing: list[str]) -> str:
     return f"{names}, que no {'tienen' if len(missing) > 1 else 'tiene'} precio"
 
 
+def _provider_name(provider: str) -> str:
+    from app.catalog.deploy import PROVIDER_LABELS  # aquí y no arriba: deploy importa app.costs
+
+    return PROVIDER_LABELS.get(provider, provider)
+
+
 def _or_list(items: set[str]) -> str:
-    ordered = sorted(items)
+    ordered = sorted(_provider_name(item) for item in items)
     return ordered[0] if len(ordered) == 1 else ", ".join(ordered[:-1]) + f" o {ordered[-1]}"
 
 
 def _missing_warning(raw: dict[str, Any], missing: list[str]) -> str:
     dep = raw["deployment"]
-    parts = [f"{COMPONENT_NAMES[c]} ({dep[c].get('provider', 'local')})" for c in missing]
+    parts = [f"{COMPONENT_NAMES[c]} ({_provider_name(dep[c].get('provider', 'local'))})" for c in missing]
     them = "las" if len(missing) > 1 else "la"
     where = {"api": f"la API en {_or_list(PRICED_API)}", "db": f"la DB en {_or_list(PRICED_DB)}"}
     return (

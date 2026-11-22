@@ -118,6 +118,19 @@ def test_chat_simulate_also_saves_a_report(store):
     assert saved["kind"] == "run" and saved["scenario"]["name"] == "pico_normal"
 
 
+def test_same_run_does_not_repeat_the_report(store):
+    """JAJ-165: el agente simulando la misma versión, escenario y semilla reutiliza el reporte."""
+    project = store.create("tienda", __import__("app.samples", fromlist=["load_sample"]).load_sample(
+        "full-stack-fastapi-template"
+    ), None)  # fmt: skip
+    tools = AgentTools(store, None)
+    first = tools.call("simulate", {"project_id": project.id, "scenario": "pico_normal"})
+    again = tools.call("simulate", {"project_id": project.id, "scenario": "pico_normal"})
+    other = tools.call("simulate", {"project_id": project.id, "scenario": "pico_normal", "seed": 3})
+    assert first["report_id"] == again["report_id"] != other["report_id"]
+    assert len(store.list_reports(project.id)) == 2
+
+
 def test_report_keeps_the_scenario_adjustments(client, project):
     weights = {"POST /login/access-token": 5}
     r = report(client, project, endpoint_weights=weights, slowdowns={"db": 2})

@@ -178,3 +178,72 @@ describe("toRunDelta (JAJ-141)", () => {
     ).toEqual(["Cola máx."]);
   });
 });
+
+describe("pasos de solo lectura (JAJ-154, JAJ-165)", () => {
+  it.each([
+    "get_model",
+    "list_assumptions",
+    "estimate_cost",
+    "simulate",
+    "list_scenarios",
+  ])(
+    "%s trae la versión que leyó, pero no dice que la creó ni ofrece abrirla",
+    (name) => {
+      const result = toolResult({
+        type: "tool_result",
+        id: "1",
+        name,
+        result: { version: 1, p95_ms: name === "simulate" ? 120 : undefined },
+      });
+      expect(result.version).toBeUndefined();
+      expect(result.output ?? "").not.toContain("creada");
+    },
+  );
+
+  it("una respuesta que solo lee no abre ni simula versiones", async () => {
+    const conversation = { messages: [], history: [] } as Parameters<
+      typeof finishTurn
+    >[1];
+    const created = await finishTurn(
+      streamOf([
+        { type: "tool_call", id: "a", name: "get_model", input: {} },
+        {
+          type: "tool_result",
+          id: "a",
+          name: "get_model",
+          result: { version: 1 },
+        },
+        { type: "tool_call", id: "b", name: "simulate", input: {} },
+        {
+          type: "tool_result",
+          id: "b",
+          name: "simulate",
+          result: { version: 1, p95_ms: 80 },
+        },
+        { type: "done" },
+      ]),
+      conversation,
+      { role: "user", content: "¿cómo está la DB?" },
+      "t2",
+    );
+    expect(created).toEqual([]);
+  });
+
+  it("un paso fallido muestra el motivo en una línea", async () => {
+    const result = toolResult({
+      type: "tool_result",
+      id: "1",
+      name: "propose_scenario",
+      result: {
+        error: "El escenario no existe. Detalle: KeyError('x')\nTraceback…",
+      },
+    });
+    expect(result.output).toBe("El escenario no existe.");
+    const step = await mountSuspended(AgentToolCall, {
+      props: { name: "propose_scenario", input: "{}", ...result },
+    });
+    expect(step.get("summary").text()).toContain(
+      "No se pudo completar el paso: El escenario no existe.",
+    );
+  });
+});
