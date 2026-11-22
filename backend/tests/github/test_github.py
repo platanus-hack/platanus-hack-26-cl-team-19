@@ -7,7 +7,7 @@ import json
 import tarfile
 import time
 import urllib.parse
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -256,6 +256,25 @@ def test_github_routes_answer_503_without_config(store):
 
 
 # ---------- repos y ramas ----------
+
+
+@pytest.mark.parametrize("page_sizes", [(100, 30), (100, 0), (0,)])
+def test_list_branches_fetches_every_page(monkeypatch, page_sizes):
+    github = GitHubApp(GitHubAppConfig("1", "branchpoint-test", "Iv1.test", SECRET, "sin-key"))
+    installation_token = Mock(return_value=TOKEN)
+    pages = [
+        [{"name": f"branch-{page * 100 + index}"} for index in range(size)] for page, size in enumerate(page_sizes)
+    ]
+    request = Mock(side_effect=pages)
+    monkeypatch.setattr(github, "installation_token", installation_token)
+    monkeypatch.setattr(github, "_request", request)
+
+    assert github.list_branches(42, "acme/tienda") == [f"branch-{index}" for index in range(sum(page_sizes))]
+    installation_token.assert_called_once_with(42, "tienda")
+    assert request.call_args_list == [
+        call("GET", f"/repos/acme/tienda/branches?per_page=100&page={page}", TOKEN, what="branches")
+        for page in range(1, len(page_sizes) + 1)
+    ]
 
 
 def test_repos_and_branches(client):

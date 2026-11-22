@@ -80,6 +80,9 @@ const phaseLabel = {
   down: "Colapso",
 } as const;
 const isSecond = computed(() => props.timeUnit === "second");
+const targetRps = computed(() =>
+  props.frames.map((frame) => frame.targetRps ?? null),
+);
 const metrics = computed(() => {
   const current = frame.value;
   if (!current) return [];
@@ -108,7 +111,7 @@ const metrics = computed(() => {
   ];
 });
 const formatTime = (index: number) =>
-  `${isSecond.value ? "Segundo" : "Minuto"} ${index + 1}`;
+  isSecond.value ? `${index} s` : `Minuto ${index + 1}`;
 </script>
 
 <template>
@@ -152,7 +155,7 @@ const formatTime = (index: number) =>
             class="flex min-w-0 items-center overflow-hidden rounded-sm border px-1.5 text-[0.625rem]"
             :class="phaseTone[item.status]"
             :style="{ flexGrow: item.to - item.from + 1 }"
-            :title="`${phaseLabel[item.status]}: ${isSecond ? 'segundos' : 'minutos'} ${item.from + 1}–${item.to + 1}`"
+            :title="`${phaseLabel[item.status]}: ${isSecond ? `${item.from}–${item.to + 1} s` : `minutos ${item.from + 1}–${item.to + 1}`}`"
           >
             <span class="truncate">{{ phaseLabel[item.status] }}</span>
           </li>
@@ -186,7 +189,8 @@ const formatTime = (index: number) =>
     >
       <SaturationBadge :status="phase.status" plain />
       <span class="text-muted-foreground tabular-nums"
-        >{{ formatTime(minute) }} de {{ frames.length }}</span
+        >{{ formatTime(minute) }} de {{ frames.length
+        }}{{ isSecond ? " s" : "" }}</span
       >
     </div>
 
@@ -219,6 +223,17 @@ const formatTime = (index: number) =>
     </dl>
 
     <div class="grid gap-6 @2xl/canvas:grid-cols-2">
+      <SimulationChart
+        v-if="targetRps.some((value) => value !== null)"
+        title="Tráfico objetivo"
+        unit="req/s"
+        :series="[
+          { id: 'target', label: 'Objetivo', values: targetRps, stepped: true },
+        ]"
+        :cursor="minute"
+        :format-x="formatTime"
+        @seek="minute = $event"
+      />
       <SimulationChart
         title="Latencia p95"
         unit="ms"

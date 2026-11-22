@@ -39,6 +39,8 @@ export interface ProjectVersion {
   number: number;
   label: string;
   origin: "repo" | "manual" | "agente";
+  /** La versión de la que salió; null en la primera. */
+  parent?: number | null;
   note: string | null;
 }
 
@@ -101,7 +103,14 @@ export interface ScenarioOverrides {
   business?: { conversion?: number; ticket_usd?: number };
 }
 
+export interface ScenarioTrafficStep {
+  at_s: number;
+  multiplier: number;
+  duration_s: number;
+}
+
 export interface ProjectScenarioInput extends ScenarioOverrides {
+  traffic_step?: ScenarioTrafficStep | null;
   multiplier: number | null;
   rps: number | null;
   description: string | null;
@@ -128,9 +137,30 @@ export interface RunResource {
   label: string;
   utilization: number;
   by_line: { at: string }[];
+  max_queue?: number;
 }
 
+/** Lo que el backend entrega del ``Run`` (``branchpoint.run/v1``) y el editor usa; el resto se ignora. */
 export interface Run {
+  scenario?: string;
+  rps?: number;
+  seed?: number;
+  requests?: number;
+  ok?: number;
+  /** Errores por tipo: pool_timeout, client_timeout, queue_full, db_refused. */
+  errors?: Record<string, number>;
+  in_flight?: number;
+  error_rate?: number;
+  latency?: { p95_ms: number | null };
+  endpoints?: { id: string; requests: number }[];
+  queues?: { name: string; enqueued: number }[];
+  saturation?: {
+    saturated: boolean;
+    unanswered: number;
+    message: string | null;
+    label: string;
+    source: string | null;
+  } | null;
   overrides?: string[];
   resources: RunResource[];
   bottleneck: {
@@ -142,6 +172,7 @@ export interface Run {
   };
   series: {
     arrivals: number;
+    target_rps?: number | null;
     ok: number;
     errors: number;
     latency: { p95_ms: number | null };

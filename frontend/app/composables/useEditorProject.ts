@@ -53,6 +53,8 @@ export function useEditorProject() {
   const projectGroup = shallowRef<Project | null>(null);
   const version = shallowRef<VersionDetail | null>(null);
   const graph = shallowRef<Graph | null>(null);
+  // JAJ-141: el grafo de la versión padre, para marcar lo nuevo y lo que cambió
+  const parentGraph = shallowRef<Graph | null>(null);
   const results = shallowRef<VersionResults | null>(null);
   const run = computed(() => results.value?.run ?? null);
   const costs = shallowRef<CostEstimate | null>(null);
@@ -62,6 +64,14 @@ export function useEditorProject() {
   const savedScenarios = shallowRef<ProjectScenario[]>([]);
   const pending = ref("");
   const error = ref("");
+  // JAJ-129: la simulación tiene su propio error (se muestra en el panel con Reintentar) y recuerda
+  // qué versión y escenario se simularon
+  const simulationError = ref("");
+  const runContext = shallowRef<{
+    version: string;
+    scenario: string;
+    at: Date;
+  } | null>(null);
 
   const scenarios = computed(() =>
     version.value ? toScenarios(version.value.model, savedScenarios.value) : [],
@@ -87,6 +97,7 @@ export function useEditorProject() {
 
   function resetResults() {
     results.value = null;
+    simulationError.value = "";
     costs.value = null;
     costsError.value = "";
     comparison.value = null;
@@ -103,12 +114,39 @@ export function useEditorProject() {
         available[0]?.id ??
         "";
     }
+    parentGraph.value = null;
     // Los costos dependen solo de la versión: se estiman junto al diagrama.
     const [nextGraph] = await Promise.all([
       api.getGraph(detail.model),
       fetchCosts(detail),
     ]);
     graph.value = nextGraph;
+    void fetchParentGraph(detail);
+  }
+
+  async function fetchParentGraph(detail: VersionDetail) {
+    const id = project.value?.id;
+    const parent = detail.parent;
+    if (!id || !parent) return;
+    try {
+      const base = await api.getVersion(id, parent);
+      const baseGraph = await api.getGraph(base.model);
+      if (version.value === detail) parentGraph.value = baseGraph;
+    } catch {
+      // sin el padre el diagrama se ve igual, solo sin las marcas de Nuevo y Cambiado
+    }
+  }
+
+  /** Vuelve a leer las versiones del proyecto: el agente pudo crear una (JAJ-141). */
+  async function reloadVersions() {
+    const current = project.value;
+    if (!current) return;
+    try {
+      const fresh = await api.getProject(current.id);
+      if (project.value?.id === fresh.id) project.value = fresh;
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
   }
 
   async function fetchCosts(detail: VersionDetail) {
@@ -239,8 +277,22 @@ export function useEditorProject() {
   async function simulate(overrides?: ScenarioOverrides) {
     const id = project.value?.id;
     const number = version.value?.number;
-    if (!id || number === undefined || !scenario.value) return;
+    if (!id || number === undefined || !scenario.value || pending.value) return;
     const selectedScenario = scenario.value;
+    const label = version.value?.label ?? `v${number}`;
+    // la corrida anterior deja de verse: no se mezcla con la nueva
+    results.value = null;
+    runContext.value = null;
+    simulationError.value = "";
+    const show = (result: VersionResults) => {
+      if (scenario.value !== selectedScenario) return;
+      results.value = result;
+      runContext.value = {
+        version: label,
+        scenario: selectedScenario,
+        at: new Date(),
+      };
+    };
     await request("Simulando…", async () => {
       if (!reportsApi) {
         const result = await api.results(
@@ -249,7 +301,7 @@ export function useEditorProject() {
           selectedScenario,
           overrides,
         );
-        if (scenario.value === selectedScenario) results.value = result;
+        show(result);
         return;
       }
       // Cada corrida es una simulación nueva con su reporte guardado (JAJ-127), con los mismos ajustes
@@ -269,8 +321,12 @@ export function useEditorProject() {
         overrides,
         report.scenario.seed,
       );
-      if (scenario.value === selectedScenario) results.value = result;
+      show(result);
     });
+    if (error.value) {
+      simulationError.value = error.value;
+      error.value = "";
+    }
   }
 
   async function loadCosts() {
@@ -300,6 +356,7 @@ export function useEditorProject() {
     () => {
       results.value = null;
       comparison.value = null;
+      simulationError.value = "";
     },
     { flush: "sync" },
   );
@@ -311,6 +368,7 @@ export function useEditorProject() {
     projectGroup,
     version,
     graph,
+    parentGraph,
     run,
     results,
     costs,
@@ -322,10 +380,13 @@ export function useEditorProject() {
     versions,
     pending,
     error,
+    simulationError,
+    runContext,
     loadModels,
     openProject,
     openSample,
     openVersion,
+    reloadVersions,
     saveScenario,
     createVersion,
     acceptChatProposal,

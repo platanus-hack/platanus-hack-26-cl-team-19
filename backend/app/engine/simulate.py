@@ -11,6 +11,11 @@ Recursos que se arman desde el ``deployment`` del modelo:
 * ``db_cpu``: vCPU de la DB. Cada consulta ocupa un núcleo durante su tiempo. Si la DB está en otra
   máquina (``network_rtt_ms``, JAJ-143), cada consulta además espera la ida y vuelta de red con la
   conexión tomada.
+* ``replica_cpu:<i>`` y ``replica_pool:<i>`` (JAJ-140): vCPU y conexiones de cada réplica de lectura
+  (``deployment.db.read_replicas``). Cada request elige una réplica en ronda; sus lecturas (formas de
+  ``READ_SHAPES``) toman una conexión de esa réplica en la primera lectura, la retienen hasta el final
+  y ocupan su CPU. Las escrituras siguen en la primaria. Los trabajos de las colas leen de la primaria.
+  Que la app separe así lecturas y escrituras es un supuesto, y no se simula el retraso de replicación.
 * ``queue:<nombre>``: workers de cada cola (``deployment.queues``). Encolar es casi instantáneo
   para la request; el trabajo espera un worker libre y usa la CPU de la DB si hace consultas
   (con su propia conexión, no la del pool de la API). Si la cola está en su largo máximo, encolar
@@ -60,6 +65,7 @@ from app.engine.metrics import (
     latency_stats,
 )
 from app.models.architecture import (
+    READ_SHAPES,
     RESOURCE_API_CPU,
     RESOURCE_BACKGROUND,
     RESOURCE_CACHE,
@@ -130,6 +136,12 @@ BOTTLENECK_MIN = 0.5  # bajo esto no se habla de cuello de botella
 ARRIVALS = ("poisson", "uniform")
 CPU_CREDITS = ("sustained", "burst")
 QUEUE_PREFIX = "queue:"
+REPLICA_CPU_PREFIX = "replica_cpu:"
+REPLICA_POOL_PREFIX = "replica_pool:"
+REPLICA_WARNING = (
+    "Réplicas de lectura: las lecturas van a las réplicas y las escrituras a la primaria. Es un SUPUESTO: "
+    "requiere que la app envíe las lecturas a la réplica. No se simula el retraso de replicación."
+)
 # Presupuesto de eventos por corrida (JAJ-99). La simulación legítima más pesada que se permite (el
 # tope de 300.000 requests de la API con fastapi-realworld-example-app en pico_normal, 48 eventos
 # por request por sus N+1) usa unos 14,4 millones y tarda ~11 s. El presupuesto le deja margen y
@@ -141,6 +153,10 @@ MAX_EVENTS = 20_000_000
 def resource_label(name: str) -> str:
     if name.startswith(QUEUE_PREFIX):
         return f"workers de la cola {name[len(QUEUE_PREFIX) :]}"
+    if name.startswith(REPLICA_CPU_PREFIX):
+        return f"CPU de la réplica {name[len(REPLICA_CPU_PREFIX) :]}"
+    if name.startswith(REPLICA_POOL_PREFIX):
+        return f"conexiones de la réplica {name[len(REPLICA_POOL_PREFIX) :]}"
     return RESOURCE_LABELS.get(name, name)
 
 
@@ -204,7 +220,32 @@ def simulate(
     queues = {
         name: _QueueCounters(q, Resource(sim, QUEUE_PREFIX + name, q.workers)) for name, q in model.queues.items()
     }
-    resources = [api_cpu, threads, pool, db_cpu, *(q.resource for q in queues.values())]
+    # JAJ-140: (CPU, factor de tiempo, pool) de cada réplica de lectura
+    replicas: list[tuple[Resource, float, Resource]] = []
+    if model.db.read_replicas:
+        app_conns, replica_max = model.app_connections, model.db.replica_max_connections
+        replica_pool = min(app_conns, replica_max) if replica_max else app_conns
+        r_vcpu = model.db.replica_vcpu or model.db.vcpu
+        if model.db.replica_sustained_vcpu is not None and cpu_credits == "sustained":
+            r_vcpu = model.db.replica_sustained_vcpu  # créditos de CPU: lo que aguanta con carga sostenida
+        for i in range(1, model.db.read_replicas + 1):
+            r_cpu, r_scale = _cores(sim, f"{REPLICA_CPU_PREFIX}{i}", r_vcpu)
+            replicas.append(
+                (
+                    r_cpu,
+                    r_scale * model.db.replica_core_factor,
+                    Resource(sim, f"{REPLICA_POOL_PREFIX}{i}", replica_pool),
+                )
+            )
+        warnings.append(REPLICA_WARNING)
+    resources = [
+        api_cpu,
+        threads,
+        pool,
+        db_cpu,
+        *(res for r_cpu, _, r_pool in replicas for res in (r_cpu, r_pool)),
+        *(q.resource for q in queues.values()),
+    ]
     if cache_hit_ratio is not None and not any(
         s.on_miss is not None for e in model.endpoints for s in walk_steps(e.steps)
     ):
@@ -241,18 +282,29 @@ def simulate(
 
     def run_steps(steps: tuple[Step, ...], conn: list[Any] | None, owner: str) -> Generator[Any, Any, str | None]:
         """Recorre los pasos y devuelve el error, si hubo. ``conn``: ``[tiene conexión, clave en
-        held]`` de la request; ``None`` en un trabajo de una cola (usa su propia conexión y su propia
-        CPU). ``owner``: a nombre de quién se anota el uso de cada recurso."""
+        held, réplica de la request, clave de su conexión a la réplica]`` de la request; ``None`` en un
+        trabajo de una cola (usa su propia conexión y su propia CPU). ``owner``: a nombre de quién se
+        anota el uso de cada recurso."""
         for step in steps:
             res, ms = step.resource, step.time_ms
             for _ in range(step.repeat):
-                if res == RESOURCE_DB_CONNECTION:
+                if res == RESOURCE_DB_CONNECTION and replicas and conn is not None and step.shape in READ_SHAPES:
+                    r_cpu, r_scale, r_pool = replicas[conn[2]]
+                    if conn[3] is None:
+                        if not (yield r_pool.acquire(pool_timeout_s)):
+                            return ERROR_POOL_TIMEOUT
+                        conn[3] = take(r_pool, owner, step.at)
+                    if ms > 0:
+                        yield from hold(r_cpu, r_scale, ms, owner, step.at)
+                    if db_rtt_s:
+                        yield db_rtt_s  # la réplica también está al otro lado de la red (JAJ-143)
+                elif res == RESOURCE_DB_CONNECTION:
                     if conn is not None and not conn[0]:
                         if refuse_at is not None and pool.busy + pool.waiting >= refuse_at:
                             return ERROR_DB_REFUSED
                         if not (yield pool.acquire(pool_timeout_s)):
                             return ERROR_POOL_TIMEOUT
-                        conn[:] = [True, take(pool, owner, step.at)]
+                        conn[0], conn[1] = True, take(pool, owner, step.at)
                     if ms > 0:
                         yield from hold(db_cpu, db_scale, ms, owner, step.at)
                     if db_rtt_s:
@@ -309,11 +361,14 @@ def simulate(
             thread = take(threads, ep.id, None)
         if ep.base_cpu_ms > 0:
             yield from hold(api_cpu, api_scale, ep.base_cpu_ms, ep.id, None)
-        conn: list[Any] = [False, None]
+        conn: list[Any] = [False, None, rid % len(replicas) if replicas else 0, None]
         error = yield from run_steps(ep.steps, conn, ep.id)
         if conn[0]:
             pool.release()
             give_back(conn[1])
+        if conn[3] is not None:
+            replicas[conn[2]][2].release()
+            give_back(conn[3])
         if not ep.is_async:
             threads.release()
             give_back(thread)

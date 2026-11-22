@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { MAX_ATTACHMENTS } from "@/composables/useChatAttachments";
 import type { EvidenceRequest } from "@/services/chat-stream";
-import { Ellipsis, Loader2, Pause, Play } from "@lucide/vue";
+import { Ellipsis, GitCompare, Loader2, Pause, Play } from "@lucide/vue";
+import { until } from "@vueuse/core";
 import AddRepositoryDialog from "@/components/editor/AddRepositoryDialog.vue";
 import ArchitectureDiagram from "@/components/editor/ArchitectureDiagram.vue";
 import ComponentList from "@/components/editor/ComponentList.vue";
@@ -19,6 +20,8 @@ import RepositorySidebar from "@/components/editor/RepositorySidebar.vue";
 import ScenarioOverrideControls from "@/components/editor/ScenarioOverrideControls.vue";
 import ScenarioHeader from "@/components/editor/ScenarioHeader.vue";
 import SimulationPanel from "@/components/editor/SimulationPanel.vue";
+import SimulationRunStatus from "@/components/editor/SimulationRunStatus.vue";
+import SimulationRunSummary from "@/components/editor/SimulationRunSummary.vue";
 import VersionCompare from "@/components/editor/VersionCompare.vue";
 import VersionTimeline from "@/components/editor/VersionTimeline.vue";
 import type { EditorSection } from "@/components/editor/types";
@@ -64,8 +67,11 @@ import {
   toBottleneck,
   toComparisonRows,
   toEdges,
+  toFlows,
   toHostedNode,
   toInspectedNode,
+  toRunDelta,
+  toRunSummary,
   toUnsimulatedNode,
   toNodes,
   toPlayback,
@@ -91,6 +97,7 @@ const {
   projectGroup,
   version,
   graph,
+  parentGraph,
   scenario,
   run,
   results,
@@ -102,10 +109,13 @@ const {
   versions,
   pending,
   error,
+  simulationError,
+  runContext,
   loadModels,
   openSample,
   openProject,
   openVersion,
+  reloadVersions,
   saveScenario,
   createVersion,
   acceptChatProposal,
@@ -149,11 +159,32 @@ const provenance = isMock
   ? { origin: "assumed" as const, source: "Datos de demostración" }
   : simulationProvenance;
 
+// El repo principal, para abrir en GitHub el archivo:línea del resultado (JAJ-129).
+const primaryRepository = computed(() => {
+  if (isMock) return undefined;
+  const group = projectGroup.value;
+  if (!group) return undefined;
+  const repos = group.repositories ?? [{ id: group.id, fullName: group.name }];
+  return repos.find((repo) => repo.primary) ?? repos[0];
+});
+// El diagrama sigue el segundo que se reproduce (JAJ-129).
 const nodes = computed(() =>
-  graph.value ? toNodes(graph.value, run.value, version.value?.model) : [],
+  graph.value
+    ? toNodes(graph.value, run.value, version.value?.model, {
+        second: run.value ? cursor.value : undefined,
+        parent: parentGraph.value,
+      })
+    : [],
 );
 const edges = computed(() => (graph.value ? toEdges(graph.value) : []));
-const bottleneck = computed(() => (run.value ? toBottleneck(run.value) : null));
+const flows = computed(() =>
+  graph.value && run.value ? toFlows(graph.value, run.value, cursor.value) : [],
+);
+const bottleneck = computed(() =>
+  run.value
+    ? toBottleneck(run.value, graph.value, primaryRepository.value)
+    : null,
+);
 const inspected = computed(() => {
   const node = graph.value?.nodes.find(
     (node) => node.id === selectedNode.value,
@@ -165,7 +196,7 @@ const inspected = computed(() => {
   return (
     toUnsimulatedNode(node, primary) ??
     toHostedNode(node) ??
-    toInspectedNode(node, run.value, provenance)
+    toInspectedNode(node, run.value, provenance, primaryRepository.value)
   );
 });
 // Los campos muestran los valores que el escenario tiene en la versión abierta (con lo aceptado en el chat).
@@ -205,6 +236,56 @@ const canResume = computed(
     !!playback.value &&
     cursor.value < playback.value.frames.length - 1 &&
     lastRunOverrides.value === JSON.stringify(runOverrides.value),
+);
+const simulationState = computed(() => {
+  if (simulating.value) return "running";
+  if (simulationError.value) return "error";
+  return run.value ? "done" : "idle";
+});
+const simulatedContext = computed(() =>
+  runContext.value && run.value
+    ? {
+        ...runContext.value,
+        scenario:
+          scenarios.value.find((item) => item.id === runContext.value?.scenario)
+            ?.label ?? runContext.value.scenario,
+        rps: run.value.rps,
+        seed: run.value.seed,
+      }
+    : null,
+);
+const staleRun = computed(
+  () =>
+    !!run.value &&
+    lastRunOverrides.value !== JSON.stringify(runOverrides.value),
+);
+const runSummary = computed(() =>
+  run.value ? toRunSummary(run.value, provenance) : [],
+);
+const runSaturation = computed(() => {
+  const saturation = run.value?.saturation;
+  if (!saturation?.saturated || !saturation.message) return null;
+  return {
+    message: saturation.message,
+    provenance: {
+      origin: "assumed" as const,
+      source:
+        saturation.source ??
+        "Umbrales de saturación elegidos por el equipo de Branchpoint",
+    },
+  };
+});
+// JAJ-141: la corrida que estaba en pantalla antes de abrir una versión del agente
+const baseline = shallowRef<{
+  version: number;
+  label: string;
+  run: NonNullable<typeof run.value>;
+} | null>(null);
+const parentNumber = computed(() => version.value?.parent ?? null);
+const runDelta = computed(() =>
+  baseline.value && run.value && baseline.value.version === parentNumber.value
+    ? toRunDelta(baseline.value.run, run.value)
+    : [],
 );
 const simulationLabel = computed(() => {
   if (simulating.value) return "Simulando…";
@@ -315,6 +396,53 @@ function showCompare(baseId?: string) {
   view.value = "compare";
 }
 
+/** Lo que estaba en pantalla antes de abrir una versión del chat: la corrida y los ajustes. */
+function snapshotRun() {
+  return {
+    before:
+      version.value && run.value
+        ? {
+            version: version.value.number,
+            label: version.value.label,
+            run: run.value,
+          }
+        : null,
+    draft: structuredClone(toRaw(overrideDraft.value)),
+  };
+}
+
+/**
+ * JAJ-141: con la versión nueva ya abierta, se simula con los mismos ajustes (abrir una versión los
+ * limpia) y se recuerda la corrida anterior para el antes y después.
+ */
+async function simulateOpened(
+  snapshot: ReturnType<typeof snapshotRun>,
+  keepOverrides = true,
+) {
+  if (keepOverrides) overrideDraft.value = snapshot.draft;
+  baseline.value = snapshot.before;
+  view.value = "editor";
+  panel.value = "simulation";
+  if (runOverrides.value) await simulate(runOverrides.value);
+}
+
+/**
+ * El agente creó una versión (JAJ-141): se abre y se simula con el mismo escenario y ajustes, para
+ * ver el efecto en el diagrama. También lo usa el botón «Abrir y simular» de cada versión del chat.
+ */
+async function openAndSimulate(number: number) {
+  const snapshot = snapshotRun();
+  await until(busy).toBe(false);
+  await reloadVersions();
+  await openVersion(number);
+  if (version.value?.number !== number) return;
+  await simulateOpened(snapshot);
+}
+
+function retrySimulation() {
+  if (runOverrides.value && !busy.value) void simulate(runOverrides.value);
+}
+
 function toggleSimulation() {
   if (playing.value) {
     playing.value = false;
@@ -356,7 +484,13 @@ const {
   reset,
   persist: persistChat,
   dismissEvidence,
-} = useEditorChat(computed(() => project.value?.id));
+} = useEditorChat(
+  computed(() => project.value?.id),
+  {
+    // JAJ-141: una herramienta que guarda una versión (ej. apply_log_traffic) la abre y la simula
+    onVersion: (number) => void openAndSimulate(number),
+  },
+);
 // adjuntos del chat (IA-9): imágenes y logs que el agente usa como evidencia
 const chatAttachments = useChatAttachments(computed(() => project.value?.id));
 const attachNotice = ref("");
@@ -417,12 +551,17 @@ async function applyChatProposal(id: string) {
   }
   message.error = undefined;
   message.state = "pending";
+  const snapshot = snapshotRun();
   const accepted = await acceptChatProposal(message.proposal);
   message.state = accepted ? "applied" : "idle";
   message.version = accepted?.label;
   if (!accepted)
     message.error = error.value || "No se pudo aplicar la propuesta.";
   await persistChat();
+  // JAJ-141: la versión aceptada se simula sola; si la propuesta cambió el escenario, sin los ajustes
+  // anteriores, que eran del escenario de antes
+  if (accepted)
+    await simulateOpened(snapshot, !message.proposal.draft.scenario);
 }
 
 function discardChatProposal(id: string) {
@@ -859,6 +998,8 @@ function openVersionDraft() {
         :nodes="nodes"
         :edges="edges"
         :bottleneck="bottleneck"
+        :flows="flows"
+        :animating="playing"
         :selected-id="selectedNode"
         @select="selectedNode = $event"
       />
@@ -979,6 +1120,7 @@ function openVersionDraft() {
           @send="sendChat"
           @apply="applyChatProposal"
           @discard="discardChatProposal"
+          @open-version="openAndSimulate"
           @reset="reset"
         >
           <template #intro>
@@ -1000,6 +1142,44 @@ function openVersionDraft() {
         </TabsList>
         <TabsContent value="simulation" class="min-h-0 overflow-y-auto p-4">
           <div class="flex flex-col gap-3">
+            <SimulationRunStatus
+              :state="simulationState"
+              :context="simulatedContext"
+              :stale="staleRun"
+              :error="simulationError"
+              @retry="retrySimulation"
+            />
+            <section
+              v-if="
+                simulationState === 'done' && (runDelta.length || parentNumber)
+              "
+              aria-label="Frente a la versión anterior"
+              class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+            >
+              <template v-if="runDelta.length">
+                <span class="text-muted-foreground"
+                  >Frente a {{ baseline?.label }}:</span
+                >
+                <span
+                  v-for="row in runDelta"
+                  :key="row.label"
+                  class="font-mono tabular-nums"
+                  >{{ row.label }} {{ row.before }} →
+                  <span class="font-semibold">{{ row.after }}</span></span
+                >
+              </template>
+              <Button
+                v-if="parentNumber && versions.length > 1"
+                type="button"
+                size="xs"
+                variant="outline"
+                :disabled="busy"
+                @click="showCompare(String(parentNumber))"
+              >
+                <GitCompare data-icon="inline-start" aria-hidden="true" />
+                Ver comparación con v{{ parentNumber }}
+              </Button>
+            </section>
             <SimulationPanel
               v-if="playback"
               v-model:minute="cursor"
@@ -1009,9 +1189,17 @@ function openVersionDraft() {
               :provenance="provenance"
               time-unit="second"
             />
-            <p v-else class="text-sm text-muted-foreground">
+            <p
+              v-else-if="simulationState === 'idle'"
+              class="text-sm text-muted-foreground"
+            >
               Elige un escenario y pulsa Simular para reproducir el resultado.
             </p>
+            <SimulationRunSummary
+              v-if="run"
+              :items="runSummary"
+              :saturation="runSaturation"
+            />
             <NuxtLink
               v-if="lastReport && project"
               :to="reportPath(project.id, lastReport.id)"

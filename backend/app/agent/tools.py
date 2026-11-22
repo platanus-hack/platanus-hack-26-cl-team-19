@@ -43,7 +43,7 @@ from app.agent.ops import OpError, apply_ops, collect_assumptions, ops_json_sche
 from app.api.errors import ApiError
 from app.api.run_cache import cached_run
 from app.api.scenario_versions import version_scenario
-from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams
+from app.api.schemas import MAX_SIMULATED_REQUESTS, RunParams, ScenarioTrafficStep
 from app.api.store import Project, ProjectGoals, ProjectScenario, ProjectStore, Version
 from app.catalog import deploy, load_catalog
 from app.costs import cost_delta, estimate_cost, failure_cost
@@ -518,6 +518,16 @@ class AgentTools:
             rate = sc.rate_for(model)
         except ValueError as e:
             raise ToolError(str(e)) from None
+        if sc.traffic_step is not None:
+            step = ScenarioTrafficStep.model_validate(sc.traffic_step)
+            return RunParams(
+                scenario=scenario,
+                seed=seed,
+                rps=rate,
+                duration_s=step.duration_s,
+                traffic_profile=step.profile(),
+                **sc.overrides(),
+            )
         # Con mucho tráfico, 60 s superan el tope de requests por llamada: el servidor acorta la duración
         # (con un piso de 5 s). La procedencia del resultado dice cuántos segundos se simularon.
         duration = max(MIN_SIM_SECONDS, min(SIM_SECONDS, 0.95 * MAX_SIMULATED_REQUESTS / rate))

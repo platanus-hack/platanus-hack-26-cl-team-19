@@ -143,6 +143,24 @@ class ScaleWorkers(_Op):
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió los workers.")
 
 
+class AddReadReplica(_Op):
+    """Agrega réplicas de lectura de la DB: las lecturas van a las réplicas y las escrituras a la primaria.
+
+    Supone que la app separa lecturas y escrituras (SUPUESTO). No simula el retraso de replicación.
+    """
+
+    op: Literal["add_read_replica"]
+    count: int = Field(ge=1, le=5, description="Réplicas de lectura. Si ya hay, se reemplaza el número.")
+    plan: str | None = Field(None, description="Plan de cada réplica, del catálogo. Sin valor, el de la primaria.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él pidió estos números.")
+
+
+class RemoveReadReplica(_Op):
+    """Quita las réplicas de lectura: todas las consultas vuelven a la primaria."""
+
+    op: Literal["remove_read_replica"]
+
+
 Op = Annotated[
     ScaleApi
     | ChangeDbPlan
@@ -154,7 +172,9 @@ Op = Annotated[
     | RemoveCache
     | RemovePooler
     | MoveToSync
-    | ScaleWorkers,
+    | ScaleWorkers
+    | AddReadReplica
+    | RemoveReadReplica,
     Field(discriminator="op"),
 ]
 _OPS = TypeAdapter(list[Op])
@@ -544,8 +564,64 @@ def _scale_workers(m: dict[str, Any], op: ScaleWorkers, catalog: dict[str, Any],
     return f"Cola '{op.queue}': {before} → {op.workers} workers"
 
 
+# ---------- réplicas de lectura (JAJ-140) ----------
+def _add_read_replica(m: dict[str, Any], op: AddReadReplica, catalog: dict[str, Any], warnings: list[str]) -> str:
+    db = m["deployment"]["db"]
+    provider = db.get("provider", "local")
+    name = op.plan or db.get("plan")
+    if not name:
+        raise OpError(f"Falta el plan de la réplica. Hay: {', '.join(deploy.db_providers(catalog).get(provider, []))}.")
+    # el mismo perfil que la primaria (JAJ-143): vCPU, conexiones, procesador y créditos del catálogo
+    profile = _profile(deploy.db_profile, provider, name, f"réplica de lectura de {provider} {name}", catalog)
+    if provider == "supabase":  # la réplica paga su compute, sin la base del plan Pro ni el crédito
+        per = catalog["db_plans"]["supabase"][name]["compute_usd_month"]
+        formula = "Supabase: compute del plan por réplica"
+    else:
+        per = value(profile["usd_month"])
+        formula = "costo del plan por réplica"
+    before = (db.get("read_replicas") or {}).get("count")
+    db["read_replicas"] = {
+        "count": _design(op.count, "réplicas", f"{op.count} réplica(s) de lectura", op.quote),
+        "plan": name,
+        "vcpu": profile["vcpu"],
+        "max_connections": profile["max_connections"],
+        "cpu_core_factor": profile["cpu_core_factor"],
+        "usd_month": _num(
+            round(per * op.count, 2),
+            "US$/mes",
+            "ESTIMADO",
+            f"{profile['usd_month']['source']}. {formula} × réplicas",
+        ),
+        "routing": _num(
+            "reads_to_replicas",
+            "",
+            "SUPUESTO",
+            "Propuesta del agente: la app envía las lecturas a la réplica y las escrituras a la primaria",
+            needs_review=True,
+        ),
+    }
+    if "cpu_credits" in profile:  # créditos de CPU, como la primaria en change_db_plan
+        db["read_replicas"]["cpu_credits"] = profile["cpu_credits"]
+    warnings.append(
+        "Las réplicas suponen que la app envía las lecturas a la réplica (hoy el código usa una sola DB). "
+        "No se simula el retraso de replicación."
+    )
+    was = f"{value(before)} → " if before else ""
+    return f"DB: réplicas de lectura {was}{op.count} × {provider} {name} (US${per * op.count:,.2f}/mes)"
+
+
+def _remove_read_replica(m: dict[str, Any], op: RemoveReadReplica, catalog: dict[str, Any], warnings: list[str]) -> str:
+    db = m["deployment"]["db"]
+    replicas = db.pop("read_replicas", None)
+    if replicas is None:
+        raise OpError("La DB no tiene réplicas de lectura.")
+    return f"DB: sin réplicas de lectura ({value(replicas.get('count'))} menos); todo vuelve a la primaria"
+
+
 _APPLY = {
     ScaleApi: _scale_api,
+    AddReadReplica: _add_read_replica,
+    RemoveReadReplica: _remove_read_replica,
     ChangeDbPlan: _change_db_plan,
     ChangeApiHost: _change_api_host,
     ChangeFrontendHost: _change_frontend_host,

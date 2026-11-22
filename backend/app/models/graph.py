@@ -14,7 +14,8 @@ repo secundario es un nodo ``service:<repo>`` (con sus componentes) que no se si
 solo repo, ``repo`` es ``None`` y todo queda ``simulated: true``, como antes.
 
 Los ids de nodo coinciden con los recursos del ``Run`` cuando existen (``db_cpu`` y ``db_pool``
-son de ``db``; ``api_cpu`` y ``api_threads`` de ``api``; ``queue:<nombre>`` de su cola).
+son de ``db``; ``api_cpu`` y ``api_threads`` de ``api``; ``queue:<nombre>`` de su cola; ``replica_cpu:<i>`` y
+``replica_pool:<i>`` del nodo ``db_replica``, que junta las réplicas de lectura, JAJ-140).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.models.architecture import (
+    READ_SHAPES,
     RESOURCE_BACKGROUND,
     RESOURCE_CACHE,
     RESOURCE_DB_CONNECTION,
@@ -224,9 +226,31 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
             return node_id
         return None  # CPU de la API u otra espera: no sale del nodo
 
-    def add_steps(source: str, who: str, steps: Iterable[Step]) -> None:
+    def replica_node() -> str:
+        """JAJ-140: las réplicas de lectura, un solo nodo con los recursos de todas."""
+        n = model.db.read_replicas
+        if "db_replica" not in nodes:
+            replica_raw = db_raw.get("read_replicas") or {}
+            nodes["db_replica"] = GraphNode(
+                "db_replica",
+                "db",
+                f"Réplica de lectura ×{n}",
+                [f"{prefix}{i}" for i in range(1, n + 1) for prefix in ("replica_cpu:", "replica_pool:")],
+                {
+                    "provider": db_raw.get("provider"),
+                    "plan": replica_raw.get("plan", db_raw.get("plan")),
+                    "vcpu": model.db.replica_vcpu,
+                    "replicas": n,
+                },
+            )
+        return "db_replica"
+
+    def add_steps(source: str, who: str, steps: Iterable[Step], replica_reads: bool = False) -> None:
         for step in steps:
-            target = node_for(step.resource, step.queue, step.at)
+            if replica_reads and step.resource == RESOURCE_DB_CONNECTION and step.shape in READ_SHAPES:
+                target: str | None = replica_node()
+            else:
+                target = node_for(step.resource, step.queue, step.at)
             if target is None:
                 continue
             edges.setdefault((source, target), _EdgeAcc(source, target)).add(who, step)
@@ -234,7 +258,8 @@ def build_graph(model: ArchitectureModel, raw: dict[str, Any]) -> Graph:
     raw_by_id = {e.get("id"): e for e in raw.get("endpoints", [])}
     graph_endpoints = []
     for ep in model.endpoints:
-        add_steps("api", ep.id, walk_steps(ep.steps))
+        # las requests leen de las réplicas; los trabajos de las colas, de la primaria (como el motor)
+        add_steps("api", ep.id, walk_steps(ep.steps), replica_reads=model.db.read_replicas > 0)
         r = raw_by_id.get(ep.id, {})
         graph_endpoints.append(GraphEndpoint(ep.id, r.get("method"), r.get("path"), r.get("at"), ep.weight))
 

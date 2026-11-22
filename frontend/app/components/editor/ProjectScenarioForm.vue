@@ -22,7 +22,35 @@ const emit = defineEmits<{
 
 const id = useId();
 const name = ref(props.existing?.name ?? "");
-const mode = ref(props.existing?.multiplier != null ? "multiplier" : "rps");
+const mode = ref<"rps" | "multiplier" | "elastic">(
+  props.existing?.traffic_step
+    ? "elastic"
+    : props.existing?.multiplier != null
+      ? "multiplier"
+      : "rps",
+);
+const elastic = computed(() => mode.value === "elastic");
+const jumpAt = ref<string | number>(props.existing?.traffic_step?.at_s ?? 30);
+const jumpMultiplier = ref<string | number>(
+  props.existing?.traffic_step?.multiplier ?? 10,
+);
+const duration = ref<string | number>(
+  props.existing?.traffic_step?.duration_s ?? 60,
+);
+const validStep = computed(() => {
+  const at = Number(jumpAt.value);
+  const seconds = Number(duration.value);
+  const multiplier = Number(jumpMultiplier.value);
+  return (
+    Number.isInteger(at) &&
+    at > 0 &&
+    Number.isInteger(seconds) &&
+    at < seconds &&
+    seconds <= 3600 &&
+    multiplier > 1 &&
+    multiplier <= 100
+  );
+});
 const rate = ref<string | number>(
   props.existing?.multiplier ?? props.existing?.rps ?? "",
 );
@@ -36,13 +64,22 @@ const valid = computed(
     !duplicate.value &&
     Number.isFinite(Number(rate.value)) &&
     Number(rate.value) > 0 &&
-    (mode.value === "rps" || (props.hasPeak && Number(rate.value) <= 1000)),
+    (mode.value !== "multiplier" ||
+      (props.hasPeak && Number(rate.value) <= 1000)) &&
+    (!elastic.value || validStep.value),
 );
 
 function submit() {
   if (!valid.value || props.busy) return;
   emit("save", name.value.trim(), {
-    rps: mode.value === "rps" ? Number(rate.value) : null,
+    rps: mode.value === "multiplier" ? null : Number(rate.value),
+    traffic_step: elastic.value
+      ? {
+          at_s: Number(jumpAt.value),
+          multiplier: Number(jumpMultiplier.value),
+          duration_s: Number(duration.value),
+        }
+      : null,
     multiplier: mode.value === "multiplier" ? Number(rate.value) : null,
     description: description.value.trim() || null,
     endpoint_weights: props.existing?.endpoint_weights,
@@ -80,6 +117,7 @@ function submit() {
         class="h-9 rounded-md border border-input bg-background px-2 text-sm"
       >
         <option value="rps">Solicitudes por segundo</option>
+        <option value="elastic">Elástico · salto instantáneo</option>
         <option value="multiplier" :disabled="!hasPeak">
           Multiplicador del pico
         </option>
@@ -87,7 +125,11 @@ function submit() {
     </div>
     <div class="flex flex-col gap-1.5">
       <Label :for="`${id}-rate`">{{
-        mode === "rps" ? "Tráfico (req/s)" : "Multiplicador (×)"
+        mode === "multiplier"
+          ? "Multiplicador (×)"
+          : elastic
+            ? "Tráfico base (req/s)"
+            : "Tráfico (req/s)"
       }}</Label>
       <Input
         :id="`${id}-rate`"
@@ -99,6 +141,50 @@ function submit() {
         required
       />
     </div>
+    <fieldset v-if="elastic" class="flex flex-col gap-3" :disabled="busy">
+      <legend class="sr-only">Configurar salto de tráfico</legend>
+      <div class="flex flex-col gap-1.5">
+        <Label :for="`${id}-jump-at`">Segundo del salto</Label>
+        <Input
+          :id="`${id}-jump-at`"
+          v-model="jumpAt"
+          type="number"
+          min="1"
+          :max="Number(duration) - 1"
+          step="1"
+          required
+        />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <Label :for="`${id}-jump-multiplier`"
+          >Multiplicador del salto (×)</Label
+        >
+        <Input
+          :id="`${id}-jump-multiplier`"
+          v-model="jumpMultiplier"
+          type="number"
+          max="100"
+          step="any"
+          required
+        />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <Label :for="`${id}-duration`">Duración total (s)</Label>
+        <Input
+          :id="`${id}-duration`"
+          v-model="duration"
+          type="number"
+          :min="Number(jumpAt) + 1"
+          max="3600"
+          step="1"
+          required
+        />
+      </div>
+      <p v-if="!validStep" role="alert" class="text-xs text-destructive">
+        El salto debe ocurrir antes del final. Usa un multiplicador mayor que 1
+        y hasta 100.
+      </p>
+    </fieldset>
     <div class="flex flex-col gap-1.5">
       <Label :for="`${id}-description`">Descripción</Label>
       <Textarea

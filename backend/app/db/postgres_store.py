@@ -117,6 +117,7 @@ def _scenario(row: dict[str, Any]) -> ProjectScenario:
         multiplier=float(row["multiplier"]) if row["multiplier"] is not None else None,
         rps=float(row["rps"]) if row["rps"] is not None else None,
         description=row["description"],
+        traffic_step=row["traffic_step"],
         **(row.get("overrides") or {}),  # JAJ-131
     )
 
@@ -469,29 +470,33 @@ class PostgresProjectStore:
             return []
         with self._conn() as conn:
             rows = conn.execute(
-                "select name, multiplier, rps, description, overrides from scenarios where project_id = %s order by name",
+                "select name, multiplier, rps, description, overrides, traffic_step"
+                " from scenarios where project_id = %s order by name",
                 (pid,),
             ).fetchall()
         return [_scenario(r) for r in rows]
 
     def upsert_scenario(self, project_id: str, scenario: ProjectScenario) -> ProjectScenario:
+        overrides = scenario.overrides()
         pid = _uuid(project_id)
         with self._conn() as conn:
             if pid is None or conn.execute("select 1 from projects where id = %s", (pid,)).fetchone() is None:
                 raise KeyError(project_id)
             row = conn.execute(
-                "insert into scenarios (project_id, name, multiplier, rps, description, overrides)"
-                " values (%s, %s, %s, %s, %s, %s)"
+                "insert into scenarios (project_id, name, multiplier, rps, description, overrides, traffic_step)"
+                " values (%s, %s, %s, %s, %s, %s, %s)"
                 " on conflict (project_id, name) do update set multiplier = excluded.multiplier,"
-                " rps = excluded.rps, description = excluded.description, overrides = excluded.overrides"
-                " returning name, multiplier, rps, description, overrides",
+                " rps = excluded.rps, description = excluded.description, overrides = excluded.overrides,"
+                " traffic_step = excluded.traffic_step"
+                " returning name, multiplier, rps, description, overrides, traffic_step",
                 (
                     pid,
                     scenario.name,
                     scenario.multiplier,
                     scenario.rps,
                     scenario.description,
-                    Jsonb(scenario.overrides()) if scenario.overrides() else None,
+                    Jsonb(overrides) if overrides else None,
+                    Jsonb(scenario.traffic_step) if scenario.traffic_step is not None else None,
                 ),
             ).fetchone()
         return _scenario(row)
