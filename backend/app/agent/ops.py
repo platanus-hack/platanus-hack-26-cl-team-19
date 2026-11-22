@@ -101,6 +101,17 @@ class ChangeFrontendHost(_Op):
     quote: str | None = Field(None, max_length=500, description="La frase del usuario, si él lo dijo.")
 
 
+class SetTrafficBase(_Op):
+    """Solo desde el editor: el pico de req/s global que escribió el usuario (JAJ-170).
+
+    Queda SUPUESTO declarado por el usuario y los escenarios se recalculan como pico × multiplicador. El
+    reparto entre endpoints se ajusta por escenario, en la mezcla de endpoints."""
+
+    op: Literal["set_traffic_base"]
+    peak_rps: float = Field(gt=0, le=1_000_000, description="Requests por segundo en la hora pico.")
+    quote: str | None = Field(None, max_length=500, description="La frase del usuario, si la dijo en el chat.")
+
+
 class AddPooler(_Op):
     """Pone un pooler en modo transacción (Supavisor en Supabase, PgBouncer en Neon) entre la app y la DB."""
 
@@ -185,6 +196,7 @@ Op = Annotated[
     | ChangeDbPlan
     | ChangeApiHost
     | ChangeFrontendHost
+    | SetTrafficBase
     | AddPooler
     | AddCache
     | MoveToQueue
@@ -219,11 +231,18 @@ def parse_ops(raw: list[Any]) -> list[Op]:
         raise OpError(f"Operaciones inválidas: {problems}") from None
 
 
-def apply_ops(model: dict[str, Any], ops: list[Any]) -> OpsResult:
-    """Aplica las operaciones en orden sobre una copia del modelo. No modifica ``model``."""
+def apply_ops(model: dict[str, Any], ops: list[Any], *, by_user: bool = False) -> OpsResult:
+    """Aplica las operaciones en orden sobre una copia del modelo. No modifica ``model``.
+
+    ``by_user``: las pidió el usuario en el editor (``origin: manual``). Solo así vale ``set_traffic_base``:
+    el agente declara tráfico con ``set_traffic``, que exige la frase del usuario (ADR 0001)."""
     parsed = parse_ops(list(ops))
     if not parsed:
         raise OpError("No hay operaciones que aplicar.")
+    if not by_user and any(isinstance(op, SetTrafficBase) for op in parsed):
+        raise OpError(
+            "set_traffic_base es solo para el editor. Para el tráfico que dijo el usuario, usa set_traffic con su frase."
+        )
     m = copy.deepcopy(model)
     # ``steps`` es opcional en el modelo (un endpoint sin pasos no consulta nada); las operaciones lo
     # recorren, así que se completa con [] en la copia (antes, add_cache respondía 500, JAJ-101)
@@ -378,6 +397,24 @@ def _change_frontend_host(
     warnings.append("El frontend no cambia la simulación: solo su costo.")
     was = f"{before['provider']} {before['plan']}" if before else "sin frontend"
     return f"Frontend: {was} → {op.provider} {op.plan} (US${value(dep['frontend']['usd_month']):,.2f}/mes)"
+
+
+# ---------- set_traffic_base (JAJ-170) ----------
+def _declared_by_user(quote: str | None) -> str:
+    return f"Declarado por el usuario: «{quote}»" if quote else "Declarado por el usuario en el editor"
+
+
+def _set_traffic_base(m: dict[str, Any], op: SetTrafficBase, catalog: dict[str, Any], warnings: list[str]) -> str:
+    traffic = m.setdefault("traffic", {})
+    before = value(traffic.get("peak_rps"), None)
+    traffic["peak_rps"] = _num(op.peak_rps, "req/s", "SUPUESTO", _declared_by_user(op.quote))
+    # todos los escenarios: pico × multiplicador, como set_traffic (JAJ-103)
+    for sc in (traffic.get("scenarios") or {}).values():
+        mult = sc.get("multiplier")
+        mult = mult.get("value") if isinstance(mult, dict) else mult
+        if mult:
+            sc["rps"] = _num(round(op.peak_rps * mult, 2), "req/s", "SUPUESTO", "pico × multiplicador", derived=True)
+    return f"Tráfico declarado: pico {before if before is not None else '—'} → {op.peak_rps:g} req/s"
 
 
 # ---------- add_pooler ----------
@@ -681,6 +718,7 @@ _APPLY = {
     ChangeDbPlan: _change_db_plan,
     ChangeApiHost: _change_api_host,
     ChangeFrontendHost: _change_frontend_host,
+    SetTrafficBase: _set_traffic_base,
     AddPooler: _add_pooler,
     AddCache: _add_cache,
     MoveToQueue: _move_to_queue,
