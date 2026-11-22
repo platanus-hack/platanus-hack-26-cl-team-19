@@ -161,6 +161,10 @@ def apply_ops(model: dict[str, Any], ops: list[Any]) -> OpsResult:
     if not parsed:
         raise OpError("No hay operaciones que aplicar.")
     m = copy.deepcopy(model)
+    # ``steps`` es opcional en el modelo (un endpoint sin pasos no consulta nada); las operaciones lo
+    # recorren, así que se completa con [] en la copia (antes, add_cache respondía 500, JAJ-101)
+    for e in m.get("endpoints", []):
+        e.setdefault("steps", [])
     catalog = load_catalog()
     changes: list[str] = []
     warnings: list[str] = []

@@ -25,8 +25,10 @@ from app.api.store import (
     ProjectGoals,
     ProjectRepo,
     ProjectScenario,
+    ReportSummary,
     RepoSource,
     Version,
+    report_summary,
     scenarios_from_model,
 )
 
@@ -632,6 +634,56 @@ class PostgresProjectStore:
         return str(row["id"])
 
     # ---------- Adjuntos del chat (IA-6) ----------
+
+    def save_report(self, project_id: str, report: dict[str, Any]) -> None:
+        pid = _uuid(project_id)
+        summary = report_summary(report)
+        with self._conn() as conn:
+            conn.execute(
+                """insert into reports (id, project_id, kind, version_number, scenario, rps, seed, p95_ms,
+                   error_rate, usd_month, body, created_at)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    report["id"],
+                    pid,
+                    summary.kind,
+                    summary.version,
+                    summary.scenario,
+                    summary.rps,
+                    summary.seed,
+                    summary.p95_ms,
+                    summary.error_rate,
+                    summary.usd_month,
+                    Jsonb(report),
+                    report["created_at"],
+                ),
+            )
+
+    def list_reports(self, project_id: str) -> list[ReportSummary]:
+        pid = _uuid(project_id)
+        if pid is None:
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                "select body from reports where project_id = %s order by created_at desc, id", (pid,)
+            ).fetchall()
+        return [report_summary(r["body"]) for r in rows]
+
+    def get_report(self, project_id: str, report_id: str) -> dict[str, Any] | None:
+        pid, rid = _uuid(project_id), _uuid(report_id)
+        if pid is None or rid is None:
+            return None
+        with self._conn() as conn:
+            row = conn.execute("select body from reports where id = %s and project_id = %s", (rid, pid)).fetchone()
+        return row["body"] if row else None
+
+    def delete_report(self, project_id: str, report_id: str) -> bool:
+        pid, rid = _uuid(project_id), _uuid(report_id)
+        if pid is None or rid is None:
+            return False
+        with self._conn() as conn:
+            cur = conn.execute("delete from reports where id = %s and project_id = %s", (rid, pid))
+        return cur.rowcount > 0
 
     def create_attachment(self, attachment: Attachment) -> Attachment:
         with self._conn() as conn:

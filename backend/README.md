@@ -31,6 +31,7 @@ backend/
 │   │   ├── mcp.py           #   /mcp: las tools para la CLI de IA del usuario (JAJ-54, JAJ-67)
 │   │   └── loop.py          #   el loop del chat del editor con Claude (JAJ-67)
 │   ├── catalog/             # catálogo de números con procedencia (copia de spikes/jaj-45-numeros/catalog.json)
+│   ├── reports/             # reportes de simulación: armado, comparación y Markdown (JAJ-127)
 │   ├── costs/               # costo mensual por componente (JAJ-72)
 │   │   ├── prices.py        #   precios fechados: prices/aws.json y prices/manual.json (copias de JAJ-11)
 │   │   ├── estimate.py      #   estimate_cost(modelo) y cost_delta(a, b)
@@ -65,6 +66,13 @@ Los recursos se arman desde el `deployment` del modelo:
 | Pool de conexiones (`db_pool`) | pool por worker × workers × réplicas (tope: conexiones de la DB) | desde la primera consulta hasta el final de la request |
 | CPU de la DB (`db_cpu`) | vCPU de la DB | cada consulta, durante su tiempo (también las de los workers de las colas) |
 | Workers de una cola (`queue:<nombre>`) | `workers` de la cola | cada trabajo encolado, durante sus `job_steps` |
+
+En el `Run`, cada recurso trae su uso, la cola máxima y final, los timeouts y `mean_wait_ms`. Ese campo es la espera media de **todos** los que pidieron el recurso (JAJ-135):
+- quienes lo obtuvieron, hasta obtenerlo;
+- quienes vencieron, hasta vencer;
+- quienes seguían en la cola al terminar, hasta el final.
+
+Antes solo contaba a quienes lo obtuvieron. En saturación quedaba muy por debajo de la espera real: en un pool donde vence el 82 %, daba 18,7 ms cuando la espera real es 44,4 ms.
 
 - Cada request recorre los `steps` de su endpoint en orden. Respeta `repeat` (N+1).
 - Esperar una conexión más que el timeout del pool es un error (`pool_timeout`).
@@ -368,12 +376,20 @@ Los errores responden 422 (o 404 si algo no existe) con `{"error": {"code", "mes
 
 | `code` | Cuándo |
 | -- | -- |
-| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, o pasa un límite del servicio (ver "Límites de trabajo" abajo). |
+| `invalid_model` | El modelo no es `branchpoint.model/v1`, le falta un campo, un valor tiene la forma o el rango equivocado (ver "Validación del modelo" abajo), o pasa un límite del servicio (ver "Límites de trabajo"). |
 | `unknown_scenario` | El escenario no está en el modelo. Trae `available` con los que hay. |
 | `invalid_parameters` | Un parámetro está fuera de rango, falta o sobra. Trae `fields` con cada campo. |
 | `run_too_large` | Tasa × duración pasa las 300.000 requests (unos pocos segundos de cálculo), o la simulación pasó el presupuesto de eventos (trae `max_events`). |
 | `invalid_operations` | Una operación de `/ops` no se puede aplicar. El `message` dice cuál y qué valores sí existen. No guarda nada. |
 | `not_found` | 404: el modelo de ejemplo, proyecto o versión no existe. Trae `resource` (`model`, `project` o `version`). |
+| `internal_error` | 500: un error inesperado del backend. El `message` no trae el detalle; el traceback queda en el log (JAJ-101). |
+
+- **Validación del modelo (JAJ-101).** `load_model` es el único lugar donde se valida un modelo, y todas las rutas que reciben uno pasan por ahí (`POST /projects`, `POST /runs`, `POST /projects/{id}/versions`, `POST /costs`, `POST /graph`, las `/ops`). Un modelo que pasa ya no hace fallar al motor, al costo ni a los escenarios con un 500.
+  - **Forma:** `deployment`, `deployment.api`, `deployment.db`, `traffic`, cada escenario, cada endpoint y cada paso son objetos; `endpoints` y `steps` son listas; el `id` de un endpoint es un texto.
+  - **Números:** con procedencia (`{"value": 2, …}`) o solos (`2`), en todos lados; quien lea el JSON original usa `value()`. Un texto (`"2"`) o `true` no son números.
+  - **Rangos:** réplicas, workers e hilos, enteros ≥ 1; vCPU > 0; tiempos, pesos, `api_cpu_ms` y `latency_ms` ≥ 0; `max_connections` y `max_length` ≥ 1, o `null` para "sin límite" (0 ya no significa "sin límite" ni "rechaza todo"); `pool_size + max_overflow` ≥ 1; las req/s y el multiplicador de un escenario > 0; `business.conversion` entre 0 y 1.
+  - **`schema`:** exactamente `branchpoint.model/v1`. Antes pasaba con un sufijo (`v1.1`) y Postgres lo rechazaba con un 500.
+  - El mensaje nombra el campo con su ruta: `deployment.api.replicas debe ser al menos 1 (es 0)`, `endpoints[0].steps[2].time no puede ser negativo (es -5)`.
 
 - **CORS:** por defecto acepta llamadas desde el Nuxt de desarrollo (`http://localhost:3000`). Para otros orígenes, usen `BRANCHPOINT_CORS_ORIGINS`, separados por coma.
 - **La simulación ocupa CPU:** por eso la ruta es `def` y no `async def`. FastAPI la corre en su pool de hilos y no bloquea las demás requests mientras simula.
@@ -476,6 +492,12 @@ CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingesti
 
 - **La IA clasifica; los números salen del catálogo.** Cada paso es `db` (con `op` y una forma del catálogo: `pk`, `lookup`, `range`...), `cache` (con `on_miss`), `external` (con el nombre del servicio), `background` (con `task` y `queue`) o `cpu`. El schema no acepta tiempos, filas ni costos.
 - **La configuración se cita, no se inventa.** Los workers de la API y el pool de conexiones van en `observations`, con el `archivo:línea` donde está escrito el número. En la ingesta, el servidor revisa que el número esté en esa línea: si está, queda `OBSERVADO`, y si no, se descarta con un aviso. Desde la CLI no puede revisarlo, así que queda `ESTIMADO` y por revisar.
+- **Valores que el motor no modela (JAJ-108).** Un número citado bajo su mínimo se descarta con un aviso y queda el valor por defecto, por revisar:
+  - `api.workers` < 1, porque con 0 procesos la API no atiende requests;
+  - `db.pool_size` < 1, porque en SQLAlchemy 0 es un pool sin límite;
+  - `db.pool_timeout_s` < 1.
+  
+  Lo mismo pasa con un `--workers 0` en un comando de despliegue (Dockerfile, compose, Procfile…). Antes, ese 0 armaba un modelo que la API rechaza o, sin consultas a la DB, rompía `checks()`. La IA tampoco puede mandar dos métodos en un endpoint (`GET,POST`), un WebSocket ni endpoints repetidos: `ArchitectureSubmission` los rechaza.
 - **Evidencia y procedencia.** Cada endpoint, paso y componente trae `archivo:línea` y `why`, y queda con `origin` (`kind: "ia"`, `via: "cli"` o `"ingesta"`). Los tiempos de sus pasos son `ESTIMADO` como máximo. La CPU base queda `SUPUESTO` si el framework no es en el que la midió el catálogo.
 - **La IaC manda.** Si un archivo de despliegue declara un servicio con el mismo nombre que un componente de la IA, se queda el de la IaC. Los workers de la IaC ganan sobre los que cita la IA.
 - **Volver a mandar.** Con `project_id`, `submit_architecture` guarda una versión nueva (origen `agente`) con la arquitectura nueva, y conserva el despliegue, el tráfico y lo que dijo la IaC.
@@ -484,6 +506,8 @@ CLI del usuario (MCP)                    ingesta de GitHub (POST /github/ingesti
 - **Varios repos (IA-5).** `POST /github/ingestions` acepta `repos` (entre 1 y 4, sin repetidos) y `primary` (obligatorio con más de uno), además del cuerpo de un solo repo. Cada repo descuenta 1 de la cuota de extracción, todos o ninguno. Se analizan en paralelo, cada uno con su LLM; si falla el principal la ingesta falla, y si falla un secundario sigue con un aviso. El motor simula el principal; cada secundario entra en `deployment.services` con `role: "service"` y `simulated: false`, con sus componentes (sin duplicar los del principal). Un paso externo que nombra a un secundario queda enlazado a su servicio (`app/ingest/multirepo.py`). `repo.sources` lista todos los repos; `POST /graph` pasa `repo` y `simulated` a cada nodo, y `GET /projects` lista todos los repos en `repositories`, con `primary`.
 - **Evidencia verificada (IA-4).** Cada entrega del analizador pasa por `check_evidence` (`app/ingest/ai_graph.py`): el archivo existe dentro del repo (sin salir por symlink), la línea está en rango y, en los endpoints, el segmento fijo más largo de la ruta aparece a ±30 líneas. Los problemas vuelven al modelo; tras 3 entregas así, se acepta sin esos elementos y quedan en `analysis.dropped` y en `warnings`. Sin ningún endpoint válido, falla.
 - **Tope y progreso.** Con la key de Branchpoint, el análisis se corta al pasar `BRANCHPOINT_TEAM_EXTRACT_TOKENS` (1.500.000 por defecto, provisorio hasta medir con IA-0). `GET /github/ingestions/{id}` trae `llm_steps` en vivo y `cost` al terminar. Un error del proveedor (key inválida, sin crédito) deja la ingesta `failed` con el mensaje del proveedor, sin la key. `AnthropicLLM` marca el último bloque con `cache_control`: el historial que se reenvía en cada vuelta se cobra como lectura de caché.
+- **Precio de los tokens (`cost_usd`).** Los cuatro precios salen de `llm_tokens.usd_per_million` en `app/costs/prices/manual.json`: entrada, salida, lectura de caché y escritura de caché (`cache_write`, la de 5 minutos, 1,25 × entrada). La escritura antes era un ×1,25 escrito en el código, sin fuente (JAJ-109). Si a un modelo le falta alguno, `cost` es `null`; un test revisa que todos los modelos de la tabla traigan los cuatro.
+- **Fecha de los números ingeridos.** Cada número que arma la ingesta lleva la fecha del día en que se armó (`build_model.today()`), igual que `repo.extracted_at`. Antes era una constante del módulo, así que un servidor con días arriba fechaba todo con el día en que arrancó (JAJ-109).
 
 El chat del editor no ofrece `submit_architecture`, porque no ve el repo.
 
@@ -564,6 +588,33 @@ curl -s -H "Content-Type: application/json" -d '{"a": 1, "b": 2, "duration_s": 1
 - **Proveedores con precio:** lo que falta se detecta de las mismas funciones que calculan el precio. `PRICED_API` y `PRICED_DB` solo arman el aviso, y un test comprueba que coinciden.
 - **En `compare`,** `summary` lo dice: "v2 cuesta +US$0.00/mes respecto de v1 sin contar la API ni la DB, que no tienen precio (despliegue local o proveedor sin precios)".
 - **El agente** recibe `delta.usd_month_missing` en `compare`. Con componentes sin precio, la meta de presupuesto queda en `"ok": null` con su motivo (`basis`), y `meets_all` en `null` si nada más falla. Si lo que tiene precio ya supera el presupuesto, queda en `false`, porque lo que falta solo puede sumar. Así no dice que "cumple el presupuesto" contando, por ejemplo, solo la caché.
+
+### Reportes de simulación (JAJ-127)
+
+Cada simulación guarda su reporte (`branchpoint.report/v1`, tabla `reports`): una foto congelada de la corrida. El PDF (que imprime el navegador desde la página del reporte) y el Markdown salen de esa foto, así que no hace falta volver a simular, y el reporte no cambia aunque después se edite la versión o cambien los precios.
+
+| Ruta | Qué hace |
+| -- | -- |
+| `POST /projects/{id}/versions/{n}/reports` | Simula con una semilla nueva (o la que venga) y guarda el reporte. Con `rps`, el escenario queda "personalizado" |
+| `GET /projects/{id}/reports` | La lista, del más nuevo al más viejo |
+| `GET /projects/{id}/reports/{rid}` | El reporte completo |
+| `GET /projects/{id}/reports/{rid}/markdown` | El mismo reporte en Markdown |
+| `POST /projects/{id}/reports/compare` | Compara dos reportes guardados, sin simular, y guarda la comparación |
+| `DELETE /projects/{id}/reports/{rid}` | Lo borra |
+
+- **Contenido:**
+  - **Identificación:** proyecto, versión, escenario (o req/s), semilla y motor.
+  - **Resultados:** latencias, throughput, errores, requests sin respuesta y saturación, con su procedencia.
+  - **Cuello de botella:** el recurso, su `archivo:línea` y el endpoint que más lo ocupa.
+  - **Costos y supuestos:** el costo por línea, el costo de fallar y los supuestos principales.
+  - **Conclusión:** escrita con una plantilla, sin LLM.
+- **Diagnóstico por componente** (API, DB, colas): uso promedio y pico del recurso más ocupado, costo mensual y estado.
+  - **Estados:** `overloaded` (uso promedio de 80 % o más, o el cuello de botella con requests sin atender), `idle` (bajo 30 % incluso en el pico y con costo) u `ok`. Los umbrales van en `thresholds`, con etiqueta `SUPUESTO`.
+  - **Margen hasta saturar:** req/s ÷ uso promedio. Es una aproximación lineal (`ESTIMADO`) y se omite si el recurso ya está saturado.
+  - **Propósito:** son datos estructurados, pensados para decidir más adelante cambios de arquitectura por costo o por riesgo de caída.
+- **Comparación:** métricas, costo y estado de cada componente en A y B, más los cambios del modelo entre las dos versiones. Si los escenarios son distintos, lo avisa.
+- **El chat:** la tool `simulate` también guarda su reporte y devuelve `report_id`.
+- **El editor:** cada vez que pulsas Simular, se crea el reporte. Luego se pide el `Run` con la misma semilla, que ya está guardado (`X-Branchpoint-Run-Cache: hit`). La sección "Reportes" lista los reportes y compara dos. La página `/reports/{proyecto}/{reporte}` tiene "Descargar PDF" y "Copiar Markdown". En el modo demo, sin backend, no hay reportes.
 
 ### Costo de fallar (JAJ-74)
 

@@ -6,6 +6,7 @@ listo para mostrarle al usuario.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -20,6 +21,9 @@ NOT_FOUND = "not_found"  # el modelo de ejemplo, proyecto o versión no existe (
 INVALID_OPERATIONS = "invalid_operations"  # una operación de propose_version no se puede aplicar (JAJ-68)
 UNAUTHORIZED = "unauthorized"  # falta el token de sesión, venció o no es válido (401, JAJ-78)
 AUTH_UNAVAILABLE = "auth_unavailable"  # no se pudieron bajar las claves de Supabase Auth (503, JAJ-78)
+INTERNAL_ERROR = "internal_error"  # un error inesperado del backend (500, JAJ-101); el detalle va al log
+
+log = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
@@ -36,6 +40,16 @@ def error_body(code: str, message: str, **extra: Any) -> dict[str, Any]:
 
 
 def install_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(Exception)
+    async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
+        """Lo que nadie atrapó: 500 con el formato de errores, no ``Internal Server Error`` en texto
+        plano (JAJ-101). El traceback queda en el log; al usuario no se le muestra el detalle."""
+        log.exception("Error no manejado en %s %s", request.method, request.url.path, exc_info=exc)
+        return JSONResponse(
+            error_body(INTERNAL_ERROR, "Algo falló de nuestro lado. Inténtalo de nuevo en un rato."),
+            status_code=500,
+        )
+
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
         return JSONResponse(error_body(exc.code, exc.message, **exc.extra), status_code=exc.status)

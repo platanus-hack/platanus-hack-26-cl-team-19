@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from app.models.architecture import value
+
 Origin = Literal["repo", "manual", "agente"]
 
 
@@ -92,7 +94,7 @@ class ProjectScenario:
         multiplicador y el modelo no trae ``traffic.peak_rps``."""
         if self.rps is not None:
             return self.rps
-        peak = ((model.get("traffic") or {}).get("peak_rps") or {}).get("value")
+        peak = value((model.get("traffic") or {}).get("peak_rps"))  # con procedencia o escalar (JAJ-101)
         if not peak or peak <= 0:
             raise ValueError(
                 f"El escenario '{self.name}' es ×{self.multiplier:g} el pico, pero el modelo no tiene "
@@ -163,13 +165,42 @@ def scenarios_from_model(model: dict[str, Any]) -> list[ProjectScenario]:
     """
     scenarios = []
     for name, sc in ((model.get("traffic") or {}).get("scenarios") or {}).items():
-        multiplier = (sc.get("multiplier") or {}).get("value")
-        rps = (sc.get("rps") or {}).get("value")
+        multiplier, rps = value(sc.get("multiplier")), value(sc.get("rps"))  # con procedencia o escalar
         if multiplier is not None and multiplier > 0:
             scenarios.append(ProjectScenario(name, float(multiplier), None))
         elif rps is not None and rps > 0:
             scenarios.append(ProjectScenario(name, None, float(rps)))
     return scenarios
+
+
+@dataclass(frozen=True)
+class ReportSummary:
+    """Lo que muestra la lista de reportes (JAJ-127). En una comparación, los valores son los de B."""
+
+    id: str
+    kind: str  # run | comparison
+    created_at: str
+    version: int | None
+    scenario: str | None
+    rps: float | None
+    seed: int | None
+    p95_ms: float | None
+    error_rate: float | None
+    usd_month: float | None
+
+
+def report_summary(report: dict[str, Any]) -> ReportSummary:
+    if report["kind"] == "comparison":
+        b = report["b"]
+        return ReportSummary(
+            report["id"], "comparison", report["created_at"], b["version"], b["scenario"]["label"],
+            b["scenario"]["rps"], b["scenario"]["seed"], b["p95_ms"], b["error_rate"], b["usd_month"],
+        )  # fmt: skip
+    res, sc = report["results"], report["scenario"]
+    return ReportSummary(
+        report["id"], "run", report["created_at"], report["version"]["number"], sc["label"], sc["rps"],
+        sc["seed"], res["latency"]["p95_ms"], res["error_rate"], (report["costs"]["total"] or {}).get("value"),
+    )  # fmt: skip
 
 
 class ProjectStore(Protocol):
@@ -269,6 +300,22 @@ class ProjectStore(Protocol):
         engine_version: str,
     ) -> None:
         """Guarda el ``Run`` de la versión ``number``. Si la clave ya existe, no hace nada (JAJ-75)."""
+        ...
+
+    def save_report(self, project_id: str, report: dict[str, Any]) -> None:
+        """Guarda un reporte ``branchpoint.report/v1`` (JAJ-127). Su ``id`` lo trae el reporte."""
+        ...
+
+    def list_reports(self, project_id: str) -> list[ReportSummary]:
+        """Los reportes del proyecto, del más nuevo al más viejo."""
+        ...
+
+    def get_report(self, project_id: str, report_id: str) -> dict[str, Any] | None:
+        """Un reporte completo, si es de ese proyecto."""
+        ...
+
+    def delete_report(self, project_id: str, report_id: str) -> bool:
+        """Borra el reporte. ``False`` si no existía en ese proyecto."""
         ...
 
     # ---------- GitHub App (JAJ-57) ----------
@@ -371,6 +418,7 @@ class InMemoryProjectStore:
         self.sources: dict[str, RepoSource] = {}  # proyecto → origen de su v1 (lo leen los tests)
         self._attachments: dict[str, Attachment] = {}  # adjuntos del chat (IA-6)
         self._chats: dict[str, list[dict[str, Any]]] = {}  # proyecto → mensajes del chat
+        self._reports: dict[str, tuple[str, dict[str, Any]]] = {}  # id → (proyecto, reporte) (JAJ-127)
 
     def create(
         self,
@@ -496,6 +544,30 @@ class InMemoryProjectStore:
             raise KeyError(f"{project_id} v{number}")
         with self._lock:
             self._runs.setdefault(cache_key, (project_id, number, copy.deepcopy(run)))
+
+    def save_report(self, project_id: str, report: dict[str, Any]) -> None:
+        if project_id not in self._projects:
+            raise KeyError(project_id)
+        with self._lock:
+            self._reports[report["id"]] = (project_id, copy.deepcopy(report))
+
+    def list_reports(self, project_id: str) -> list[ReportSummary]:
+        with self._lock:
+            mine = [r for pid, r in self._reports.values() if pid == project_id]
+        # del más nuevo al más viejo; con la misma fecha, el último guardado primero
+        return [report_summary(r) for r in sorted(reversed(mine), key=lambda r: r["created_at"], reverse=True)]
+
+    def get_report(self, project_id: str, report_id: str) -> dict[str, Any] | None:
+        saved = self._reports.get(report_id)
+        return copy.deepcopy(saved[1]) if saved is not None and saved[0] == project_id else None
+
+    def delete_report(self, project_id: str, report_id: str) -> bool:
+        with self._lock:
+            saved = self._reports.get(report_id)
+            if saved is None or saved[0] != project_id:
+                return False
+            del self._reports[report_id]
+            return True
 
     def save_installation(self, installation_id: int, owner: str | None, account_login: str) -> None:
         with self._lock:

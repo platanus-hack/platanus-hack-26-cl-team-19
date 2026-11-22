@@ -153,4 +153,19 @@ class Resource:
             waiter[1] = False
             self.waiting -= 1
             self.timeouts += 1
+            self.wait_total += self.sim.now - waiter[2]  # esperó hasta vencer (JAJ-135)
             self.sim._resume((waiter[0], False))
+
+    def mean_wait(self) -> float:
+        """Espera media en segundos de todos los que pidieron un lugar hasta ``sim.now`` (JAJ-135):
+
+        * quienes lo obtuvieron, hasta obtenerlo (0 si había lugar libre);
+        * quienes vencieron, hasta vencer;
+        * quienes siguen en la cola, hasta ahora.
+
+        Antes solo contaba a quienes lo obtuvieron: en saturación, con timeouts o cola al final, quedaba
+        muy por debajo de la espera real."""
+        now = self.sim.now
+        queued = [now - w[2] for w in self._queue if w[1]]
+        total = self.grants + self.timeouts + len(queued)
+        return (self.wait_total + sum(queued)) / total if total else 0.0

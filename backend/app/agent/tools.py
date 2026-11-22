@@ -628,10 +628,14 @@ class AgentTools:
         project = self._project(a.project_id)
         version = self._version(project, a.version)
         self.limiter.simulations(self.owner or "anon", 1)
-        run = self._run(project, version, a.scenario, a.seed)
+        from app.api.routes.reports import simulate_and_report  # cada simulación deja su reporte (JAJ-127)
+
+        params = self._params(project, version.model, a.scenario, a.seed)
+        run, report = simulate_and_report(self.store, project, version, params, custom_rps=False)
         cost = estimate_cost(version.model)
         return {
             "version": version.number,
+            "report_id": report["id"],
             **_run_summary(run, version.model),
             "goals": _goal_check(self.store.get_goals(project.id), run, cost.total["value"], cost.missing),
         }

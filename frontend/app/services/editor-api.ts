@@ -192,10 +192,11 @@ export interface Comparison {
 export function editorRunParams(
   scenario: string,
   overrides: ScenarioOverrides = {},
+  seed = 0,
 ) {
   return {
     scenario,
-    seed: 0,
+    seed,
     duration_s: 60,
     traffic_profile: scenario === "cyberday" ? "pico" : null,
     ...overrides,
@@ -306,15 +307,17 @@ export function createEditorApi(
       }),
     run: (id: string, version: number, scenario: string) =>
       post<Run>(`${versionPath(id, version)}/runs`, editorRunParams(scenario)),
+    // seed: la del reporte de la corrida (JAJ-127), así el Run sale del guardado y no se simula de nuevo
     results: (
       id: string,
       version: number,
       scenario: string,
       overrides?: ScenarioOverrides,
+      seed = 0,
     ) =>
       post<VersionResults>(
         `${versionPath(id, version)}/results`,
-        editorRunParams(scenario, overrides),
+        editorRunParams(scenario, overrides, seed),
       ),
     getCosts: (id: string, version: number) =>
       fetchApi<CostEstimate>(`${versionPath(id, version)}/costs`),

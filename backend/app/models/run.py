@@ -52,6 +52,8 @@ class ResourceStats:
     max_queue: int
     final_queue: int
     timeouts: int
+    # espera media de todos los que pidieron el recurso (JAJ-135): quienes lo obtuvieron, hasta
+    # obtenerlo; quienes vencieron, hasta vencer; y quienes seguían en la cola, hasta el final
     mean_wait_ms: float
     # quién ocupa el recurso, de más a menos (JAJ-69); vacío si nadie lo usó
     by_endpoint: list[EndpointUsage] = field(default_factory=list)
