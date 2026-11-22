@@ -314,6 +314,21 @@ def estimate_cost(raw: dict[str, Any], region: str = DEFAULT_REGION) -> CostEsti
     else:
         unpriced.append("Balanceador y transferencia: el modelo no trae usuarios mensuales ni perfil de uso.")
 
+    # JAJ-140: las réplicas de lectura traen su costo de add_read_replica (catálogo × réplicas)
+    replicas = raw["deployment"]["db"].get("read_replicas")
+    if replicas and isinstance(replicas.get("usd_month"), dict):
+        n = value(replicas.get("count"))
+        lines.append(
+            CostLine(
+                "db_replica",
+                f"Réplicas de lectura ({n} × {replicas.get('plan')})",
+                "db_replica",
+                replicas["usd_month"],
+                "costo del plan por réplica × réplicas",
+                {"count": n, "plan": replicas.get("plan")},
+            )
+        )
+
     has_cache = any(s.get("resource") == "cache" for e in raw["endpoints"] for s in e.get("steps", []))
     if has_cache:
         if requests_month and mau:

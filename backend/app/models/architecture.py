@@ -39,6 +39,9 @@ RESOURCE_DB_CONNECTION = "db_connection"
 RESOURCE_API_CPU = "api_cpu"
 RESOURCE_CACHE = "cache"
 RESOURCE_BACKGROUND = "background"
+# JAJ-140: formas de consulta que son lecturas. Con réplicas de lectura, estas van a una réplica; las
+# escrituras (commit, stage) y las desconocidas (unknown) se quedan en la primaria.
+READ_SHAPES = frozenset({"pk", "lookup", "range", "count", "count_all", "scan"})
 
 
 def value(x: Any, default: Any = None) -> Any:
@@ -132,6 +135,13 @@ class DbDeployment:
     sustained_vcpu: float | None = None
     # con pooler (``deployment.db.pooler``), conexiones de clientes que acepta; None = sin pooler
     pooler_connections: int | None = None
+    # JAJ-140: réplicas de lectura (``deployment.db.read_replicas``). Cada una tiene sus vCPU y un pool
+    # de conexiones del mismo tamaño que el de la primaria (tope: sus conexiones máximas)
+    read_replicas: int = 0
+    replica_vcpu: float | None = None
+    replica_core_factor: float = 1.0
+    replica_max_connections: int | None = None
+    replica_sustained_vcpu: float | None = None  # réplicas con créditos de CPU, como ``sustained_vcpu``
 
 
 @dataclass(frozen=True)
@@ -212,6 +222,9 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         raise ValueError(f"{w}.pool_per_worker: pool_size + max_overflow debe ser al menos 1 (es 0)")
     credits = _obj(db_raw.get("cpu_credits", {}), f"{w}.cpu_credits")
     pooler = _obj(db_raw["pooler"], f"{w}.pooler") if "pooler" in db_raw else None
+    replicas = _obj(db_raw["read_replicas"], f"{w}.read_replicas") if "read_replicas" in db_raw else None
+    if replicas is not None:
+        _need(replicas, "count", f"{w}.read_replicas.")
     db = DbDeployment(
         vcpu=float(_number(db_raw["vcpu"], f"{w}.vcpu", default=1, gt=0)),
         # 0 conexiones no es "sin límite": sin límite es no declararlo (o null)
@@ -225,6 +238,25 @@ def load_model(source: str | Path | dict[str, Any]) -> ArchitectureModel:
         pooler_connections=None
         if pooler is None
         else _number(pooler.get("client_connections"), f"{w}.pooler.client_connections", integer=True, minimum=1),
+        read_replicas=0
+        if replicas is None
+        else _number(replicas["count"], f"{w}.read_replicas.count", integer=True, minimum=1),
+        replica_vcpu=None
+        if replicas is None
+        else float(_number(replicas.get("vcpu"), f"{w}.read_replicas.vcpu", default=value(db_raw["vcpu"]), gt=0)),
+        replica_core_factor=1.0 if replicas is None else _core_factor(replicas, f"{w}.read_replicas"),
+        replica_max_connections=None
+        if replicas is None
+        else _number(replicas.get("max_connections"), f"{w}.read_replicas.max_connections", integer=True, minimum=1),
+        replica_sustained_vcpu=None
+        if replicas is None
+        else _opt_float(
+            _number(
+                _obj(replicas.get("cpu_credits", {}), f"{w}.read_replicas.cpu_credits").get("sustained_vcpu"),
+                f"{w}.read_replicas.cpu_credits.sustained_vcpu",
+                gt=0,
+            )
+        ),
     )
     if db.sustained_vcpu is not None and not 0 < db.sustained_vcpu <= db.vcpu:
         raise ValueError(

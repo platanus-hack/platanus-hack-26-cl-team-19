@@ -408,8 +408,10 @@ Son el vocabulario con que el agente propone versiones (`app/agent/ops.py`, [ADR
 | `remove_pooler()` | Inversa de `add_pooler`: la app vuelve al límite de conexiones del plan | `max_connections` del plan actual |
 | `move_to_sync(endpoint, step)` | Inversa de `move_to_queue`: el trabajo de la cola vuelve a la request (y su CPU a `api_cpu_ms`). Si la cola queda sin uso, se quita | Ninguno nuevo. Una cola sin `job_steps` se rechaza |
 | `scale_workers(queue, workers, quote?)` | Workers de una cola existente | Decisión de diseño, igual que `replicas` |
+| `add_read_replica(count, plan?, quote?)` | Agrega `deployment.db.read_replicas` (JAJ-140): las lecturas (`pk`, `lookup`, `range`, `count`, `count_all`, `scan`) de las requests van a las réplicas, repartidas en ronda; las escrituras y los trabajos de las colas siguen en la primaria | `count`: decisión de diseño, igual que `replicas`. vCPU, conexiones, créditos de CPU y costo del plan del catálogo (el de la primaria por defecto). Que la app separe lecturas y escrituras es `SUPUESTO` (`routing`). No se simula el retraso de replicación |
+| `remove_read_replica()` | Inversa de `add_read_replica`: todas las consultas vuelven a la primaria | Ninguno nuevo |
 
-Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`. Una operación existe solo si el motor puede simular su efecto: para lo que no está (réplica de lectura, CDN, cambiar de base de datos), el agente tiene que decir que Branchpoint todavía no lo simula.
+Después de aplicar, se borran las `checks` (las cotas de `build_model.py` eran de la versión original) y se recalculan los `assumptions`. El costo de los workers de las colas todavía no está en el modelo: las operaciones lo advierten en `warnings`. Una operación existe solo si el motor puede simular su efecto: para lo que no está (CDN, sharding, cambiar de base de datos), el agente tiene que decir que Branchpoint todavía no lo simula.
 
 ```bash
 # v2 propuesta: 3 réplicas + pooler, y compararla con v1 en CyberDay
